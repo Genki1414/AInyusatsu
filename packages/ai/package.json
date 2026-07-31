@@ -1,0 +1,8 @@
+{
+  "name": "@ai-nyusatsu-bu/ai",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Claude APIのアダプタ・プロンプト・出力スキーマ。外部呼び出しはこのパッケージ経由のみ。",
+  "type": "module",
+  "main": "./src/index.ts"
+}

@@ -1,0 +1,11 @@
+{
+  "name": "@ai-nyusatsu-bu/domain",
+  "version": "0.0.0",
+  "private": true,
+  "description": "純ロジック（適合判定・原価集計・進め方ガイド・推薦・重複排除）。副作用を持たせない。",
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "test": "echo \"(未実装) 1-4で dedupe.ts の単体テストを追加\""
+  }
+}
