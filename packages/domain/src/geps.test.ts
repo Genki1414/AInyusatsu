@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { classifyDocumentKind, isSearchTruncated, normalizeGepsTender, type GepsDetail } from "./geps";
+import {
+  classifyDocumentKind,
+  isSearchTruncated,
+  normalizeGepsNoticeDate,
+  normalizeGepsTender,
+  type GepsDetail,
+} from "./geps";
 
 // docs/調達ポータルコネクタ設計.md §2-5 に記載された実例
 // （国土交通省 高田管内消融雪設備点検整備業務、取得できた10ファイル）
@@ -40,6 +46,26 @@ describe("isSearchTruncated", () => {
 
   it("実測値123件は打ち切りではない", () => {
     expect(isSearchTruncated(123)).toBe(false);
+  });
+});
+
+describe("normalizeGepsNoticeDate", () => {
+  it("実データ確認済み（2026-08-01）：和暦・ゼロ埋め表記（末尾空白あり）をISO日付に変換する", () => {
+    expect(normalizeGepsNoticeDate("令和08年07月31日 ")).toBe("2026-07-31");
+  });
+
+  it("令和元年はReiwaYear=1として扱う", () => {
+    expect(normalizeGepsNoticeDate("令和元年04月01日")).toBe("2019-04-01");
+  });
+
+  it("すでにISO日付ならそのまま返す", () => {
+    expect(normalizeGepsNoticeDate("2026-07-01")).toBe("2026-07-01");
+  });
+
+  it("null・空文字・変換できない表記はnull（推測しない）", () => {
+    expect(normalizeGepsNoticeDate(null)).toBeNull();
+    expect(normalizeGepsNoticeDate("")).toBeNull();
+    expect(normalizeGepsNoticeDate("不明")).toBeNull();
   });
 });
 

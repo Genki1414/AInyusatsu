@@ -44,12 +44,43 @@ export type GepsDetail = {
   procurementNo: string; // 調達案件番号（19桁）
   category: GepsCategory; // 分類
   name: string; // 調達案件名称
-  publicFrom: string | null; // 公開開始日 YYYY-MM-DD
+  /**
+   * 公開開始日。詳細画面に表示されている文字列そのまま（生の表記）を渡す。
+   * 実データ確認済み（2026-08-01）：「令和08年07月31日」のような和暦表記。
+   * ISO日付への変換はnormalizeGepsTender側（normalizeNoticeDate）で行う。
+   */
+  publicFrom: string | null;
   agencyName: string; // 調達機関
   place: string | null; // 所在地
   /** 「公告内容」が外部サイトへのリンクの場合のURL。ポータル内で完結する場合はnull。 */
   announcementUrl: string | null;
 };
+
+// 令和1年 = 2019年。dedupe.tsのREIWA_OFFSETと同じ考え方（GEPSは案件名ではなく日付表示に使う）。
+const REIWA_OFFSET = 2018;
+
+/**
+ * GEPS詳細画面の「公開開始日」表記をISO日付(YYYY-MM-DD)に正規化する。
+ * 実データ確認済み（2026-08-01）：「令和08年07月31日」のような和暦・ゼロ埋め表記で、
+ * 末尾に空白が付くことがある。変換できない表記は推測せずnullにする。
+ */
+export function normalizeGepsNoticeDate(raw: string | null): string | null {
+  if (raw == null) return null;
+  const s = raw.trim();
+  if (s === "") return null;
+
+  const reiwa = /^令和(元|\d+)年(\d{1,2})月(\d{1,2})日$/.exec(s);
+  if (reiwa) {
+    const reiwaYear = reiwa[1] === "元" ? 1 : Number(reiwa[1]);
+    const year = reiwaYear + REIWA_OFFSET;
+    return `${year}-${reiwa[2].padStart(2, "0")}-${reiwa[3].padStart(2, "0")}`;
+  }
+
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (iso) return s;
+
+  return null;
+}
 
 export type NormalizedGepsTender = {
   procurementNo: string;
@@ -94,7 +125,7 @@ export function normalizeGepsTender(detail: GepsDetail, portalDetailUrl: string)
     procurement: detail.category,
     qualCategory: "未判定",
     place: detail.place,
-    noticeDate: detail.publicFrom,
+    noticeDate: normalizeGepsNoticeDate(detail.publicFrom),
     sourceUrl: detail.announcementUrl ?? portalDetailUrl,
     dedupeKey: key,
   };
