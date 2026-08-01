@@ -152,9 +152,14 @@ async function extractDetailFromCurrentPage(
     }
   }
 
-  const docLink = page.getByRole("link", { name: "調達資料 ダウンロードURL" });
+  // 実データ確認済み（2026-08-01）：実際のリンク文言は「調達資料１ダウンロードURL」
+  // （間に空白が無く、全角数字。資料は1〜5まで番号ごとに個別のリンクになりうる）で、
+  // 想定していた「調達資料 ダウンロードURL」（半角スペース区切り・単一）とは異なっていた。
+  // 【現状の制約】1件目（番号が最小のもの）だけを取得する。複数資料（調達資料1〜5）を
+  // すべて取得する対応は未実装（docs/reference/調達ポータル_巡回_確認事項.md参照）。
+  const docLink = page.getByRole("link", { name: /^調達資料\d+ダウンロードURL/ }).first();
   const documentDownloadUrl = (await docLink.count())
-    ? new URL((await docLink.first().getAttribute("href")) ?? "", page.url()).toString()
+    ? new URL((await docLink.getAttribute("href")) ?? "", page.url()).toString()
     : null;
 
   const detail: GepsDetail = {
@@ -179,10 +184,11 @@ async function extractDetailFromCurrentPage(
 export async function downloadDocuments(page: Page, documentDownloadUrl: string): Promise<GepsDocument[]> {
   await page.goto(documentDownloadUrl);
 
-  // 連絡先情報入力方法選択：「連絡先情報をはじめから入力する」（ICカード不要の経路）
-  await page.getByRole("link", { name: "連絡先情報をはじめから入力する" })
-    .or(page.getByRole("button", { name: "連絡先情報をはじめから入力する" }))
-    .click();
+  // 連絡先情報入力方法選択：実データ確認済み（2026-08-01）、リンクやボタンではなくradio
+  // （「電子調達システムに登録している連絡先情報を利用する」と「連絡先情報をはじめから
+  // 入力する」の2択。既定では前者が選択されている）。後者を選んでから「次へ」で進む。
+  await page.getByRole("radio", { name: "連絡先情報をはじめから入力する" }).check();
+  await page.getByRole("button", { name: "次へ", exact: true }).click();
 
   // 利用者情報入力（4項目・すべて必須）
   const contact = contactInfo();
