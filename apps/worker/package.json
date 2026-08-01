@@ -12,7 +12,8 @@
     "@ai-nyusatsu-bu/db": "workspace:*",
     "@ai-nyusatsu-bu/domain": "workspace:*",
     "adm-zip": "^0.5.16",
-    "fast-xml-parser": "^4.5.1"
+    "fast-xml-parser": "^4.5.1",
+    "playwright": "^1.49.1"
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.7",
