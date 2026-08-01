@@ -71,21 +71,21 @@ export async function searchByDate(
 ): Promise<GepsSearchResult> {
   await page.goto(SEARCH_URL);
 
-  // 分類（物品・役務）。select/checkbox/radioのどれかは実データで要確認。
-  const categoryControl = page.getByLabel("分類");
-  if (await categoryControl.count()) {
-    await categoryControl.selectOption({ label: category }).catch(async () => {
-      await page.getByRole("checkbox", { name: category }).check();
-    });
-  }
+  // 実データ確認済み（2026-08-01）：「分類」はradioで「全て／物品・役務／簡易な公共事業」の
+  // 3択のみ。物品だけ・役務だけを絞り込む手段は検索フォーム側には無い。そのため検索段階では
+  // 絞り込まず（既定の「全て」のまま）、案件ごとの分類はfetchDetail()が詳細画面の「分類」欄から
+  // 判定する（既存の実装のまま）。category引数は呼び出し元の記録用（documentsByProcurementNo等）
+  // 以外では使わない。
 
   // 公開開始日（開始・終了とも同じ日を指定して1日ぶんに絞る）。
   // 実データ確認済み（2026-08-01）：ラベルは「公開開始日の自」「公開開始日の至」
   // （<label for="start-date-from">公開開始日の自</label> 等）。
+  // 日付の入力フォーマットは YYYY/MM/DD（スラッシュ区切り）。dateIso（YYYY-MM-DD）から変換する。
+  const slashDate = dateIso.replaceAll("-", "/");
   const dateFrom = page.getByLabel("公開開始日の自");
   const dateTo = page.getByLabel("公開開始日の至");
-  await dateFrom.fill(dateIso);
-  await dateTo.fill(dateIso);
+  await dateFrom.fill(slashDate);
+  await dateTo.fill(slashDate);
 
   // 実データ確認済み（2026-08-01）：ページ上部のグローバルナビに「調達情報検索」「事業者検索」
   // という別ボタンがあり、name:"検索"の部分一致だと3件ヒットして曖昧になる（strict mode違反）。
