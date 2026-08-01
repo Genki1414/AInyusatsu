@@ -87,7 +87,11 @@ export async function searchByDate(
   await dateFrom.fill(dateIso);
   await dateTo.fill(dateIso);
 
-  await page.getByRole("button", { name: "検索" }).click();
+  // 実データ確認済み（2026-08-01）：ページ上部のグローバルナビに「調達情報検索」「事業者検索」
+  // という別ボタンがあり、name:"検索"の部分一致だと3件ヒットして曖昧になる（strict mode違反）。
+  // 実際の検索実行ボタンは <input type="submit" value="検索 " id="OAA0102"> で、
+  // 前後の空白を除けばアクセシブルネームが厳密に"検索"のみなので、exact:trueで一意にする。
+  await page.getByRole("button", { name: "検索", exact: true }).click();
   await page.waitForLoadState("networkidle");
 
   const rows = await scrapeListRows(page);
