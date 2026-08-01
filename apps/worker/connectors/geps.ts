@@ -117,9 +117,14 @@ export async function openDetailByIndex(
 async function extractDetailFromCurrentPage(
   page: Page,
 ): Promise<{ detail: GepsDetail; documentDownloadUrl: string | null }> {
+  // 実データ確認済み（2026-08-01）：各項目は <tr><th>ラベル</th><td>値</td></tr> という
+  // 表構造。以前の実装（getByText(ラベル)の次の兄弟要素を値とみなす）は、getByTextが
+  // 部分一致でラベル以外の要素にもマッチしうるため、隣の項目のラベル文字列を値として
+  // 誤って取得することがあった（実機で確認：「調達案件番号」の値が次の項目のラベル
+  // 「調達機関」になっていた）。th要素との完全一致＋直後のtd兄弟要素に絞ることで防ぐ。
   const text = async (label: string): Promise<string | null> => {
-    const el = page.getByText(label).locator("xpath=following-sibling::*[1]");
-    if (await el.count()) return (await el.first().innerText()).trim();
+    const cell = page.locator(`th:text-is("${label}") + td`).first();
+    if (await cell.count()) return (await cell.innerText()).trim();
     return null;
   };
 
@@ -133,9 +138,9 @@ async function extractDetailFromCurrentPage(
 
   // 「公告内容」が外部サイトへのリンクの場合がある（実例：高田河川国道事務所）
   let announcementUrl: string | null = null;
-  const announcementLink = page.getByText("公告内容").locator("xpath=following::a[1]");
+  const announcementLink = page.locator('th:text-is("公告内容") + td a').first();
   if (await announcementLink.count()) {
-    const href = await announcementLink.first().getAttribute("href");
+    const href = await announcementLink.getAttribute("href");
     if (href && !href.includes("p-portal.go.jp")) {
       announcementUrl = new URL(href, page.url()).toString();
     }
