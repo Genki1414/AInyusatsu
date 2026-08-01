@@ -1,8 +1,8 @@
 // 調達ポータル（GEPS）のレスポンス正規化。副作用を持たない純関数のみを置く。
 // 参照：docs/調達ポータルコネクタ設計.md §0, §2-5
 
-import { createHash } from "node:crypto";
-import { dedupeKey, normalize } from "./dedupe";
+import { agencyIdFromName } from "./agency";
+import { dedupeKey } from "./dedupe";
 
 export type DocKind = "公告" | "入札説明書" | "仕様書" | "数量表" | "様式" | "その他";
 
@@ -36,18 +36,6 @@ export function classifyDocumentKind(portalCategory: string, filename: string): 
  */
 export function isSearchTruncated(count: number): boolean {
   return count >= 500;
-}
-
-/**
- * 調達機関名からagenciesテーブルの安定したidを導出する（決定的なハッシュ）。
- * GEPSは実在する発注機関名（例:「北陸地方整備局」）を返すため、機関マスタに無い機関は
- * このidで自動的にagenciesへ登録する。KKJの都道府県/市区町村コードとは異なり、
- * GEPSの調達機関名はそのままagenciesの1行として扱える粒度であるため、この2つは
- * 意図的に異なる扱いにしている（docs/reference/KKJ_API_確認事項.md §1参照）。
- */
-export function agencyIdFromName(agencyName: string): string {
-  const hash = createHash("sha1").update(normalize(agencyName), "utf8").digest("hex").slice(0, 12);
-  return `geps-${hash}`;
 }
 
 export type GepsCategory = "物品" | "役務";

@@ -1,11 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  agencyIdFromName,
-  classifyDocumentKind,
-  isSearchTruncated,
-  normalizeGepsTender,
-  type GepsDetail,
-} from "./geps";
+import { classifyDocumentKind, isSearchTruncated, normalizeGepsTender, type GepsDetail } from "./geps";
 
 // docs/調達ポータルコネクタ設計.md §2-5 に記載された実例
 // （国土交通省 高田管内消融雪設備点検整備業務、取得できた10ファイル）
@@ -49,24 +43,6 @@ describe("isSearchTruncated", () => {
   });
 });
 
-describe("agencyIdFromName", () => {
-  it("同じ機関名は常に同じidになる（決定的）", () => {
-    expect(agencyIdFromName("北陸地方整備局")).toBe(agencyIdFromName("北陸地方整備局"));
-  });
-
-  it("表記ゆれ（空白）があっても同じidになる（normalize経由）", () => {
-    expect(agencyIdFromName("北陸地方整備局")).toBe(agencyIdFromName("北陸 地方整備局"));
-  });
-
-  it("異なる機関名は異なるidになる", () => {
-    expect(agencyIdFromName("北陸地方整備局")).not.toBe(agencyIdFromName("関東地方整備局"));
-  });
-
-  it("geps-プレフィックス付きの12文字hexになる", () => {
-    expect(agencyIdFromName("北陸地方整備局")).toMatch(/^geps-[0-9a-f]{12}$/);
-  });
-});
-
 describe("normalizeGepsTender", () => {
   const detail: GepsDetail = {
     procurementNo: "0000000000000565084",
@@ -84,7 +60,7 @@ describe("normalizeGepsTender", () => {
     expect(t.code).toBe("0000000000000565084");
     expect(t.qualCategory).toBe("未判定"); // 推測しない
     expect(t.procurement).toBe("役務");
-    expect(t.agencyId).toMatch(/^geps-[0-9a-f]{12}$/);
+    expect(t.agencyId).toMatch(/^auto-[0-9a-f]{12}$/);
   });
 
   it("公告内容が外部サイトへのリンクの場合はそのURLをsourceUrlにする（実例：高田河川国道事務所）", () => {

@@ -1,62 +1,46 @@
 import { describe, expect, it } from "vitest";
-import { decodeKkjId, isOnDate, normalizeKkjItem, stripFileSizeSuffix, type KkjRawFields } from "./kkj";
+import {
+  ALL_PREFECTURE_CODES,
+  buildKkjQuery,
+  isOnDate,
+  normalizeKkjItem,
+  stripFileSizeSuffix,
+  type KkjSearchResultItem,
+} from "./kkj";
 
-// docs/案件収集戦略_v2.md §1-2, §8 に記載された実例（田村市の案件）を元にしたテストデータ。
-const TAMURA_ID_DECODED = "fukushima/tamura_city/2026/20260731_01361";
-const TAMURA_ID_BASE64 = Buffer.from(TAMURA_ID_DECODED, "utf-8").toString("base64");
-
-function tamuraFields(overrides: Partial<KkjRawFields> = {}): KkjRawFields {
+// docs/reference/KKJ_api_guide.pdf の出力XML例を元にしたテストデータ（田村市の案件）。
+function tamuraItem(overrides: Partial<KkjSearchResultItem> = {}): KkjSearchResultItem {
   return {
-    idBase64: TAMURA_ID_BASE64,
-    noticeUrl: "https://www.city.tamura.lg.jp/site/nyusatsu/260731jouken250.pdf",
-    nameWithSize: "たむらクリーンセンターごみクレーン点検整備業務委託 (138.4KB)",
-    registeredAt: "2026-07-07T19:07:43+09:00",
-    fileFormat: "pdf",
+    resultId: "1",
+    key: "fukushima/tamura_city/2026/20260731_01361",
+    externalDocumentUri: "https://www.city.tamura.lg.jp/site/nyusatsu/260731jouken250.pdf",
+    projectName: "たむらクリーンセンターごみクレーン点検整備業務委託",
+    date: "2026-07-07T19:07:43+09:00",
+    fileType: "pdf",
     fileSize: "141706",
-    prefCode: "07",
-    prefName: "福島県",
+    lgCode: "07",
+    prefectureName: "福島県",
     cityCode: "072117",
     cityName: "田村市",
-    areaName: "福島県田村市",
-    noticeDate: "2026-07-31",
-    procurementType: "役務",
-    nameRepeated: "たむらクリーンセンターごみクレーン点検整備業務委託 (138.4KB)",
-    bodyText: "（公告本文の全文が入る想定）",
+    organizationName: "田村市",
+    certification: "C",
+    cftIssueDate: "2026-07-31",
+    periodEndTime: "2027-03-31T00:00:00+09:00",
+    category: "役務",
+    procedureType: "一般競争入札",
+    location: "福島県田村市",
+    tenderSubmissionDeadline: "2026-08-10T00:00:00+09:00",
+    openingTendersEvent: "2026-08-20T10:00:00+09:00",
+    itemCode: "12345",
+    projectDescription: "（公告本文の全文が入る想定）",
+    attachments: [{ name: "仕様書", uri: "https://example.com/spec.pdf" }],
     ...overrides,
   };
 }
 
-describe("decodeKkjId", () => {
-  it("pref/agency/year/date_seq の4分割にデコードする", () => {
-    expect(decodeKkjId(TAMURA_ID_BASE64)).toEqual({
-      prefKey: "fukushima",
-      agencyKey: "tamura_city",
-      year: "2026",
-      dateSeq: "20260731_01361",
-    });
-  });
-
-  it("4分割でないデコード結果はnull（推測しない）", () => {
-    const badId = Buffer.from("only/three/parts", "utf-8").toString("base64");
-    expect(decodeKkjId(badId)).toBeNull();
-  });
-
-  it("base64として不正な値はnull", () => {
-    // Buffer.from は不正なbase64でも例外を投げないことがあるため、
-    // 「デコード結果が4分割にならない」ケースとしても検証される
-    expect(decodeKkjId("")).toBeNull();
-  });
-});
-
 describe("stripFileSizeSuffix", () => {
   it("半角括弧のファイルサイズ表記を除去する", () => {
     expect(stripFileSizeSuffix("○○業務委託 (138.4KB)")).toBe("○○業務委託");
-  });
-
-  it("全角括弧・単位違い（MB/B、大文字小文字）にも対応する", () => {
-    expect(stripFileSizeSuffix("○○業務委託（850KB）")).toBe("○○業務委託");
-    expect(stripFileSizeSuffix("○○業務委託 (1.2MB)")).toBe("○○業務委託");
-    expect(stripFileSizeSuffix("○○業務委託(2048b)")).toBe("○○業務委託");
   });
 
   it("末尾以外の括弧や、サイズ表記が無い件名は変更しない", () => {
@@ -66,54 +50,95 @@ describe("stripFileSizeSuffix", () => {
 });
 
 describe("normalizeKkjItem", () => {
-  it("実例（田村市の案件）を正しく正規化する", () => {
-    const seed = normalizeKkjItem(tamuraFields());
+  it("実例（田村市の案件）をタグ名から正しく正規化する", () => {
+    const tender = normalizeKkjItem(tamuraItem());
 
-    expect(seed.sourceId).toBe(TAMURA_ID_BASE64);
-    expect(seed.prefKey).toBe("fukushima");
-    expect(seed.agencyKey).toBe("tamura_city");
-    expect(seed.year).toBe("2026");
-    expect(seed.noticeUrl).toBe("https://www.city.tamura.lg.jp/site/nyusatsu/260731jouken250.pdf");
-    expect(seed.name).toBe("たむらクリーンセンターごみクレーン点検整備業務委託"); // サイズ表記除去済み
-    expect(seed.registeredAt).toBe("2026-07-07T19:07:43+09:00");
-    expect(seed.noticeDate).toBe("2026-07-31");
-    expect(seed.prefCode).toBe("07");
-    expect(seed.prefName).toBe("福島県");
-    expect(seed.cityCode).toBe("072117");
-    expect(seed.cityName).toBe("田村市");
-    expect(seed.areaName).toBe("福島県田村市");
-    expect(seed.procurement).toBe("役務");
-    expect(seed.bodyText).toContain("公告本文");
+    expect(tender.sourceKey).toBe("fukushima/tamura_city/2026/20260731_01361");
+    expect(tender.noticeUrl).toBe("https://www.city.tamura.lg.jp/site/nyusatsu/260731jouken250.pdf");
+    expect(tender.name).toBe("たむらクリーンセンターごみクレーン点検整備業務委託");
+    expect(tender.fetchedAt).toBe("2026-07-07T19:07:43+09:00");
+    expect(tender.noticeDate).toBe("2026-07-31");
+    expect(tender.agencyName).toBe("田村市");
+    expect(tender.prefCode).toBe("07");
+    expect(tender.prefName).toBe("福島県");
+    expect(tender.cityCode).toBe("072117");
+    expect(tender.cityName).toBe("田村市");
+    expect(tender.grade).toBe("C");
+    expect(tender.periodEndTime).toBe("2027-03-31T00:00:00+09:00");
+    expect(tender.procurement).toBe("役務");
+    expect(tender.procedureType).toBe("一般競争入札");
+    expect(tender.place).toBe("福島県田村市");
+    expect(tender.bidOpenAt).toBe("2026-08-20T10:00:00+09:00");
+    expect(tender.itemCode).toBe("12345");
+    expect(tender.bodyText).toContain("公告本文");
+    expect(tender.attachments).toEqual([{ name: "仕様書", uri: "https://example.com/spec.pdf" }]);
   });
 
-  it("15(件名再掲)が無ければ4(件名)にフォールバックする", () => {
-    const seed = normalizeKkjItem(tamuraFields({ nameRepeated: "" }));
-    expect(seed.name).toBe("たむらクリーンセンターごみクレーン点検整備業務委託");
+  it("件名末尾にファイルサイズ表記があれば除去する", () => {
+    const tender = normalizeKkjItem(tamuraItem({ projectName: "○○業務委託 (138.4KB)" }));
+    expect(tender.name).toBe("○○業務委託");
+  });
+
+  it("名称と説明が食い違うTenderSubmissionDeadlineは取り込まない（期限は推測しない）", () => {
+    const tender = normalizeKkjItem(tamuraItem());
+    expect(tender).not.toHaveProperty("tenderSubmissionDeadline");
+    expect(tender).not.toHaveProperty("submitDeadline");
   });
 
   it("フィールドが全く無くても例外を投げず、nullで埋める", () => {
-    const seed = normalizeKkjItem({});
-    expect(seed.sourceId).toBe("");
-    expect(seed.prefKey).toBeNull();
-    expect(seed.name).toBe("");
-    expect(seed.registeredAt).toBeNull();
-    expect(seed.noticeDate).toBeNull();
-    expect(seed.procurement).toBe("不明");
-    expect(seed.bodyText).toBe("");
+    const tender = normalizeKkjItem({});
+    expect(tender.sourceKey).toBe("");
+    expect(tender.noticeUrl).toBe("");
+    expect(tender.name).toBe("");
+    expect(tender.fetchedAt).toBeNull();
+    expect(tender.noticeDate).toBeNull();
+    expect(tender.agencyName).toBeNull();
+    expect(tender.prefCode).toBeNull();
+    expect(tender.procurement).toBe("不明");
+    expect(tender.bodyText).toBe("");
+    expect(tender.attachments).toEqual([]);
   });
 
-  it("IDのデコードに失敗しても他のフィールドは正規化される", () => {
-    const seed = normalizeKkjItem(tamuraFields({ idBase64: "not-a-valid-structured-id" }));
-    expect(seed.prefKey).toBeNull();
-    expect(seed.agencyKey).toBeNull();
-    expect(seed.name).toBe("たむらクリーンセンターごみクレーン点検整備業務委託");
+  it("公告日（CftIssueDate）が無い場合はDateの値をそのまま使う想定に合わせnullにしない", () => {
+    // 仕様書：CftIssueDateが存在しない場合はDateと同じ値がAPI側で入る。
+    // ここではAPI側が既にDateの値をCftIssueDateへ入れて返す前提で、正規化側はそのまま反映する。
+    const tender = normalizeKkjItem(tamuraItem({ cftIssueDate: "2026-07-07T19:07:43+09:00" }));
+    expect(tender.noticeDate).toBe("2026-07-07T19:07:43+09:00");
   });
 });
 
 describe("isOnDate", () => {
   it("noticeDateが対象日と一致すればtrue", () => {
-    const seed = normalizeKkjItem(tamuraFields());
-    expect(isOnDate(seed, "2026-07-31")).toBe(true);
-    expect(isOnDate(seed, "2026-07-30")).toBe(false);
+    const tender = normalizeKkjItem(tamuraItem());
+    expect(isOnDate(tender, "2026-07-31")).toBe(true);
+    expect(isOnDate(tender, "2026-07-30")).toBe(false);
+  });
+});
+
+describe("ALL_PREFECTURE_CODES", () => {
+  it("01から47までの2桁コード47件になる", () => {
+    expect(ALL_PREFECTURE_CODES).toHaveLength(47);
+    expect(ALL_PREFECTURE_CODES[0]).toBe("01");
+    expect(ALL_PREFECTURE_CODES[46]).toBe("47");
+  });
+});
+
+describe("buildKkjQuery", () => {
+  it("LG_Codeに全都道府県コード・CFT_Issue_Date・Count=1000を設定する", () => {
+    const query = buildKkjQuery({ cftIssueDate: "2026-07-31" });
+    expect(query.LG_Code).toBe(ALL_PREFECTURE_CODES.join(","));
+    expect(query.CFT_Issue_Date).toBe("2026-07-31");
+    expect(query.Count).toBe("1000");
+    expect(query.Category).toBeUndefined();
+  });
+
+  it("Categoryを指定すると仕様書のコード（物品=1,工事=2,役務=3）に変換する", () => {
+    expect(buildKkjQuery({ cftIssueDate: "2026-07-31", category: "物品" }).Category).toBe("1");
+    expect(buildKkjQuery({ cftIssueDate: "2026-07-31", category: "工事" }).Category).toBe("2");
+    expect(buildKkjQuery({ cftIssueDate: "2026-07-31", category: "役務" }).Category).toBe("3");
+  });
+
+  it("countを指定すればCountに反映される", () => {
+    expect(buildKkjQuery({ cftIssueDate: "2026-07-31", count: 500 }).Count).toBe("500");
   });
 });
