@@ -7,5 +7,15 @@
   "main": "./src/index.ts",
   "scripts": {
     "start": "echo \"(未実装) pg-bossの起動はタスク1-5以降で実装\" && exit 0"
+  },
+  "dependencies": {
+    "@ai-nyusatsu-bu/db": "workspace:*",
+    "@ai-nyusatsu-bu/domain": "workspace:*",
+    "adm-zip": "^0.5.16"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.7",
+    "@types/node": "^20",
+    "typescript": "^5"
   }
 }
