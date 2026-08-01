@@ -7,6 +7,7 @@
 // 参照：docs/reference/ローカル実行手順.md
 
 import { runDiffImport, runFullImport } from "../jobs/import_awards";
+import { cliArgs } from "./_args";
 import { yesterdayJst } from "./_date";
 
 function currentYearJst(): number {
@@ -15,7 +16,7 @@ function currentYearJst(): number {
 }
 
 async function main() {
-  const mode = process.argv[2];
+  const [mode, arg] = cliArgs();
   if (mode !== "full" && mode !== "diff") {
     console.error("使い方: run-import-awards.ts <full|diff> [年 または YYYY-MM-DD]");
     process.exitCode = 1;
@@ -23,7 +24,7 @@ async function main() {
   }
 
   if (mode === "full") {
-    const year = process.argv[3] ? Number(process.argv[3]) : currentYearJst();
+    const year = arg ? Number(arg) : currentYearJst();
     console.log(`落札実績オープンデータ（全件・${year}年）を取り込みます`);
     const outcome = await runFullImport(year);
     console.log(JSON.stringify(outcome, null, 2));
@@ -31,7 +32,7 @@ async function main() {
     return;
   }
 
-  const dateIso = process.argv[3] || yesterdayJst();
+  const dateIso = arg || yesterdayJst();
   console.log(`落札実績オープンデータ（差分・${dateIso}）を取り込みます`);
   const outcome = await runDiffImport(new Date(`${dateIso}T00:00:00Z`));
   console.log(JSON.stringify(outcome, null, 2));

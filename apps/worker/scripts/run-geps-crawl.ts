@@ -5,10 +5,11 @@
 // 参照：docs/reference/ローカル実行手順.md
 
 import { runDailyGepsCrawl } from "../jobs/crawl_geps";
+import { cliArgs } from "./_args";
 import { yesterdayJst } from "./_date";
 
 async function main() {
-  const dateIso = process.argv[2] || yesterdayJst();
+  const dateIso = cliArgs()[0] || yesterdayJst();
   console.log(`調達ポータルの巡回を実行します（公開開始日=${dateIso}）`);
   const summaries = await runDailyGepsCrawl(dateIso);
   console.log(JSON.stringify(summaries, null, 2));
