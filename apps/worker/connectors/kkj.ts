@@ -79,7 +79,14 @@ export type FetchItemsResult = {
  * エラーレスポンス（<Results><Error>...）の場合は例外を投げる（§5参照）。
  */
 export function parseKkjResponse(xml: string): FetchItemsResult {
-  const parser = new XMLParser({ ignoreAttributes: true, trimValues: true });
+  // 全国横断・最大1000件の検索結果には、案件名や添付URL中の"&"（&amp;）等のエンティティが
+  // fast-xml-parserの既定上限（1000件）を超えて出現しうる（実データで確認：1018件で例外）。
+  // 信頼できる固定の政府APIエンドポイントのレスポンスであるため、上限を引き上げて対応する。
+  const parser = new XMLParser({
+    ignoreAttributes: true,
+    trimValues: true,
+    processEntities: { maxTotalExpansions: 50_000 },
+  });
   const doc = parser.parse(xml) as { Results?: { Error?: unknown; SearchResults?: unknown } };
   const results = doc.Results;
   if (!results) {
