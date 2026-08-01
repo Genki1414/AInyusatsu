@@ -102,6 +102,16 @@ function toNumber(raw: string | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * 円単位のintegerにする（CLAUDE.mdの方針：金額は円単位のinteger、小数を使わない）。
+ * 実データには "37.2" のように小数を含む金額が存在する（awards.amountはbigintで小数を
+ * 受け付けないため、四捨五入で丸める）。
+ */
+function toYenAmount(raw: string | undefined): number | null {
+  const n = toNumber(raw);
+  return n == null ? null : Math.round(n);
+}
+
 /** "2026年7月31日" "2026/07/31" "20260731" などをISO日付(YYYY-MM-DD)に正規化する。変換できなければnull。 */
 export function normalizeDate(raw: string | undefined): string | null {
   if (raw == null) return null;
@@ -171,7 +181,7 @@ export type NormalizeContext = {
 export function normalizeAwardRow(row: Record<string, string>, ctx: NormalizeContext): NormalizeResult {
   const procurementNo = row.procurementNo?.trim() || null;
   const name = row.name?.trim() || null;
-  const amount = toNumber(row.amountRaw);
+  const amount = toYenAmount(row.amountRaw);
   const openedAt = normalizeDate(row.openedAtRaw);
   const winnerName = row.winnerName?.trim() || null;
   const corporateNumber = row.corporateNumber?.trim() || null;
