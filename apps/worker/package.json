@@ -6,7 +6,11 @@
   "type": "module",
   "main": "./src/index.ts",
   "scripts": {
-    "start": "echo \"(未実装) pg-bossの起動はタスク1-5以降で実装\" && exit 0"
+    "start": "echo \"(未実装) pg-bossの起動はタスク1-5以降で実装\" && exit 0",
+    "kkj:sync": "tsx --env-file=.env.local scripts/run-kkj-sync.ts",
+    "geps:crawl": "tsx --env-file=.env.local scripts/run-geps-crawl.ts",
+    "awards:import": "tsx --env-file=.env.local scripts/run-import-awards.ts",
+    "market-rates:refresh": "tsx --env-file=.env.local scripts/run-refresh-market-rates.ts"
   },
   "dependencies": {
     "@ai-nyusatsu-bu/db": "workspace:*",
@@ -18,6 +22,7 @@
   "devDependencies": {
     "@types/adm-zip": "^0.5.7",
     "@types/node": "^20",
+    "tsx": "^4.19.2",
     "typescript": "^5"
   }
 }
