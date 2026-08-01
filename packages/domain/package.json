@@ -8,6 +8,9 @@
   "scripts": {
     "test": "vitest run"
   },
+  "dependencies": {
+    "csv-parse": "^5.6.0"
+  },
   "devDependencies": {
     "@types/node": "^20",
     "typescript": "^5"

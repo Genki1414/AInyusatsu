@@ -4,5 +4,12 @@
   "private": true,
   "description": "Supabase生成の型付きクエリ。サーバー側のみで使用。",
   "type": "module",
-  "main": "./src/index.ts"
+  "main": "./src/index.ts",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5"
+  }
 }
