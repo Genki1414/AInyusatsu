@@ -1,8 +1,12 @@
 // 落札実績オープンデータの正規化・集計。副作用を持たない純関数のみを置く。
 // 参照：docs/落札実績オープンデータ_取り込み設計.md、docs/reference/落札実績オープンデータ_列定義（推定）.md
 //
-// 【重要】列名マッピング（COLUMN_MAP）は、仕様書PDF未取得のため推定です。
-// 実データで検証したら docs/reference/落札実績オープンデータ_列定義（推定）.md とあわせて更新してください。
+// 【実データで確認済み・2026-08-01】このCSVには見出し行が無く、1行目から全件データ。
+// 列は次の8列の並びで固定（ユーザーが実際にダウンロードして確認）：
+//   調達案件番号, 案件名称, 落札日, 落札金額, 不明な2文字コード, 機関コード, 落札者名称, 法人番号
+// このうち「予定価格」「品目分類」に相当する列は存在しないため、落札率・相場（market_rates）の
+// 算出は現状のこのデータソースだけでは不可能。取得できる項目のみ取り込む方針にした
+// （docs/reference/落札実績オープンデータ_列定義（推定）.md 参照）。
 
 import { parse } from "csv-parse/sync";
 
@@ -17,12 +21,26 @@ export function stripBom(text: string): string {
   return text.charCodeAt(0) === 0xfeff || text.startsWith(BOM) ? text.slice(1) : text;
 }
 
-/** BOM除去込みでCSVテキストをパースし、ヘッダ行をキーとする行オブジェクトの配列を返す。 */
+// 実データ確認済みの列順（見出し行が無いため、位置で名前を割り当てる）。
+// taxCode・agencyCode は意味が確定できない／機関マスタとの対応表が無いため、
+// 現状はparseAwardsCsvの出力には含めるが、normalizeAwardRowでは取り込まない。
+const CSV_COLUMNS = [
+  "procurementNo",
+  "name",
+  "openedAtRaw",
+  "amountRaw",
+  "taxCode",
+  "agencyCode",
+  "winnerName",
+  "corporateNumber",
+] as const;
+
+/** BOM除去込みでCSVテキストをパースし、列位置ベースのキーを持つ行オブジェクトの配列を返す。 */
 export function parseAwardsCsv(text: string): Record<string, string>[] {
   const body = stripBom(text);
   if (body.trim().length === 0) return [];
   return parse(body, {
-    columns: true,
+    columns: [...CSV_COLUMNS],
     skip_empty_lines: true,
     trim: true,
     bom: false, // 上でstripBom済み
@@ -30,32 +48,19 @@ export function parseAwardsCsv(text: string): Record<string, string>[] {
 }
 
 // ---------------------------------------------------------------------------
-// 列名マッピング（推定・要検証）
+// 構造チェック（列順が変わっていないかの検知）
 // ---------------------------------------------------------------------------
 
+const CORPORATE_NUMBER_RE = /^\d{13}$/;
+
 /**
- * CSVヘッダ名 → 内部フィールド名。
- * 実データ未取得のため、政府調達オープンデータで一般的な項目名から推定した値。
- * 実データ取得後、ここと docs/reference/ を必ず更新すること。
+ * 実データの列構造が想定と食い違っていないかを検知する。
+ * 法人番号（13桁の数字。国税庁の仕様で固定）を手がかりにする。ヘッダが無いCSVのため、
+ * 列がずれていても構文的にはパースが通ってしまう点に注意（ここで弾かないと誤った列に
+ * 別の意味のデータを取り込んでしまう）。
  */
-export const COLUMN_MAP = {
-  procurementNo: "調達案件番号",
-  agencyName: "調達機関名称",
-  itemName: "品目分類名称",
-  budget: "予定価格",
-  budgetTaxIncluded: "予定価格税区分", // "税込" | "税抜" 等を想定
-  amount: "落札金額",
-  amountTaxIncluded: "落札金額税区分",
-  contractType: "契約方式",
-  bidders: "入札者数",
-  openedAt: "落札日",
-} as const;
-
-export type ColumnMap = typeof COLUMN_MAP;
-
-/** rowに COLUMN_MAP の列がひとつも見つからない場合に真を返す（ヘッダ構造の食い違い検知用）。 */
-export function hasNoMappedColumns(row: Record<string, string>): boolean {
-  return Object.values(COLUMN_MAP).every((header) => !(header in row));
+export function hasUnexpectedShape(row: Record<string, string>): boolean {
+  return !CORPORATE_NUMBER_RE.test(row.corporateNumber?.trim() ?? "");
 }
 
 // ---------------------------------------------------------------------------
@@ -64,18 +69,21 @@ export function hasNoMappedColumns(row: Record<string, string>): boolean {
 
 export type NormalizedAward = {
   procurementNo: string | null;
-  item: string | null; // 自社の営業品目辞書に分類できた場合のみ入る
-  agencyClass: string | null; // 本省 / 地方支分部局 / 独立行政法人等
-  contractType: string | null; // 総額 / 単価 / 複数年度
-  budget: number | null;
+  name: string | null; // 案件名称
+  item: string | null; // 自社の営業品目辞書に分類できた場合のみ入る。このCSVには品目列が無いため常にnull
+  agencyClass: string | null; // 本省 / 地方支分部局 / 独立行政法人等。このCSVには機関名列が無いため常にnull
+  contractType: string | null; // 総額 / 単価 / 複数年度。このCSVには列が無いため常にnull
+  budget: number | null; // 予定価格。このCSVには列が無いため常にnull
   amount: number | null;
-  bidders: number | null;
+  bidders: number | null; // 入札者数。このCSVには列が無いため常にnull
   openedAt: string | null; // ISO日付 (YYYY-MM-DD)
-  rate: number | null; // amount / budget。計算不能なら null
-  disclosed: boolean; // 予定価格が公表されているか
-  taxIncluded: boolean | null; // 税込ならtrue、税抜ならfalse、不明ならnull
-  taxUnknown: boolean; // 税区分が判別できないか（taxIncluded===nullと等価）
-  outlier: boolean; // rate が 0.5未満 または 1.0超
+  rate: number | null; // amount / budget。budgetが取れないため常にnull
+  disclosed: boolean; // 予定価格が公表されているか。常にfalse
+  taxIncluded: boolean | null; // 税込ならtrue、税抜ならfalse、不明ならnull。常にnull
+  taxUnknown: boolean; // 税区分が判別できないか。常にtrue
+  outlier: boolean; // rate が 0.5未満 または 1.0超。rateが常にnullのため常にfalse
+  winnerName: string | null; // 落札者名称
+  corporateNumber: string | null; // 法人番号（13桁）
 };
 
 export type NormalizeResult = {
@@ -92,14 +100,6 @@ function toNumber(raw: string | undefined): number | null {
   if (cleaned === "" || cleaned === "-" || cleaned === "非公表") return null;
   const n = Number(cleaned);
   return Number.isFinite(n) ? n : null;
-}
-
-function normalizeTaxFlag(raw: string | undefined): { included: boolean | null; unknown: boolean } {
-  if (raw == null || raw.trim() === "") return { included: null, unknown: true };
-  const v = raw.trim();
-  if (v.includes("税込")) return { included: true, unknown: false };
-  if (v.includes("税抜")) return { included: false, unknown: false };
-  return { included: null, unknown: true };
 }
 
 /** "2026年7月31日" "2026/07/31" "20260731" などをISO日付(YYYY-MM-DD)に正規化する。変換できなければnull。 */
@@ -123,6 +123,10 @@ export function normalizeDate(raw: string | undefined): string | null {
 function isoFrom(y: string, m: string, d: string): string {
   return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
 }
+
+// 【現在未使用】このCSVには品目分類名称・調達機関名称の列が無いため、normalizeAwardRowからは
+// 呼んでいない。品目・機関名を取得できる別のデータソースと突き合わせる設計ができたら再度使う想定
+// のため、辞書自体は残してある（docs/reference/落札実績オープンデータ_列定義（推定）.md 参照）。
 
 /** 品目分類名称 → 自社の営業品目辞書。当てはまらなければnull（要ではなく可能な限り抽出する方針）。 */
 export function classifyItem(rawItemName: string | undefined): string | null {
@@ -156,36 +160,39 @@ export type NormalizeContext = {
   sourceBatch: string; // 取り込んだファイル名
 };
 
-/** 1行を正規化する。落札金額（amount）が取れない行は skipped:true とする。 */
+/**
+ * 1行を正規化する。落札金額（amount）が取れない行は skipped:true とする。
+ *
+ * 【取得できない項目】このCSVには予定価格・品目分類・調達機関名称・契約方式・入札者数の列が
+ * 無いため、item/agencyClass/contractType/budget/bidders/rate/taxIncluded は常にnullになる
+ * （推測しない。CLAUDE.mdの方針どおり）。落札率（相場・market_rates）はこのデータソースだけでは
+ * 算出できないため、当面は保留する（docs/reference/落札実績オープンデータ_列定義（推定）.md 参照）。
+ */
 export function normalizeAwardRow(row: Record<string, string>, ctx: NormalizeContext): NormalizeResult {
-  const procurementNo = row[COLUMN_MAP.procurementNo]?.trim() || null;
-  const amount = toNumber(row[COLUMN_MAP.amount]);
-  const budget = toNumber(row[COLUMN_MAP.budget]);
-  const bidders = toNumber(row[COLUMN_MAP.bidders]);
-  const openedAt = normalizeDate(row[COLUMN_MAP.openedAt]);
-  const item = classifyItem(row[COLUMN_MAP.itemName]);
-  const agencyClass = classifyAgencyClass(row[COLUMN_MAP.agencyName]);
-  const contractType = row[COLUMN_MAP.contractType]?.trim() || null;
-
-  const tax = normalizeTaxFlag(row[COLUMN_MAP.amountTaxIncluded] ?? row[COLUMN_MAP.budgetTaxIncluded]);
-  const disclosed = budget != null;
-  const rate = disclosed && amount != null && budget! > 0 ? round4(amount / budget!) : null;
-  const outlier = rate != null && (rate < 0.5 || rate > 1.0);
+  const procurementNo = row.procurementNo?.trim() || null;
+  const name = row.name?.trim() || null;
+  const amount = toNumber(row.amountRaw);
+  const openedAt = normalizeDate(row.openedAtRaw);
+  const winnerName = row.winnerName?.trim() || null;
+  const corporateNumber = row.corporateNumber?.trim() || null;
 
   const award: NormalizedAward = {
     procurementNo,
-    item,
-    agencyClass,
-    contractType,
-    budget,
+    name,
+    item: null,
+    agencyClass: null,
+    contractType: null,
+    budget: null,
     amount,
-    bidders,
+    bidders: null,
     openedAt,
-    rate,
-    disclosed,
-    taxIncluded: tax.included,
-    taxUnknown: tax.unknown,
-    outlier,
+    rate: null,
+    disclosed: false,
+    taxIncluded: null,
+    taxUnknown: true,
+    outlier: false,
+    winnerName,
+    corporateNumber,
   };
 
   if (amount == null) {

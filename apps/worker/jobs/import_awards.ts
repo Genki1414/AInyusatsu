@@ -8,7 +8,7 @@
 // 同じファイルを2回流しても件数は変わらない（supabase/migrations/20260802000001_awards_open_data.sql）。
 
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
-import { hasNoMappedColumns, normalizeAwardRow, parseAwardsCsv, type NormalizedAward } from "@ai-nyusatsu-bu/domain";
+import { hasUnexpectedShape, normalizeAwardRow, parseAwardsCsv, type NormalizedAward } from "@ai-nyusatsu-bu/domain";
 import { fetchDiffData, fetchFullData, type FetchResult } from "../connectors/p-portal-awards";
 
 const UPSERT_BATCH_SIZE = 500;
@@ -47,6 +47,7 @@ async function upsertAwards(rows: NormalizedAward[], sourceBatch: string): Promi
   for (let i = 0; i < rows.length; i += UPSERT_BATCH_SIZE) {
     const chunk = rows.slice(i, i + UPSERT_BATCH_SIZE).map((a) => ({
       procurement_no: a.procurementNo,
+      name: a.name,
       item: a.item,
       agency_class: a.agencyClass,
       contract_type: a.contractType,
@@ -57,6 +58,8 @@ async function upsertAwards(rows: NormalizedAward[], sourceBatch: string): Promi
       rate: a.rate,
       tax_included: a.taxIncluded,
       outlier: a.outlier,
+      winner_name: a.winnerName,
+      corporate_number: a.corporateNumber,
       source: "crawler",
       source_batch: sourceBatch,
     }));
@@ -73,15 +76,15 @@ async function processCsvText(text: string, sourceBatch: string): Promise<Import
     return { status: "no_data", rowsTotal: 0, rowsUpserted: 0, rowsSkipped: 0 };
   }
 
-  if (hasNoMappedColumns(rows[0])) {
-    // COLUMN_MAP（推定）が実データのヘッダと食い違っている。1行も取り込まず中断し、
-    // 原因が分かるようヘッダ一覧を残す（黙って誤変換しない）。
+  if (hasUnexpectedShape(rows[0])) {
+    // 実データの列順（法人番号が8列目に来る想定）と食い違っている。1行も取り込まず中断し、
+    // 原因が分かるよう1行目の内容を残す（黙って誤った列にマッピングしない）。
     return {
       status: "failed",
       rowsTotal: rows.length,
       rowsUpserted: 0,
       rowsSkipped: rows.length,
-      detail: { reason: "column_map_mismatch", foundHeaders: Object.keys(rows[0]) },
+      detail: { reason: "unexpected_row_shape", firstRow: rows[0] },
     };
   }
 
