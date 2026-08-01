@@ -36,15 +36,9 @@ export type GepsDocument = {
   buffer: Buffer;
 };
 
-export type GepsListRow = {
-  procurementNo: string;
-  detailUrl: string;
-};
-
 export type GepsSearchResult = {
   count: number;
   truncated: boolean;
-  rows: GepsListRow[];
 };
 
 function contactInfo(): { company: string; name: string; tel: string; email: string } {
@@ -91,39 +85,37 @@ export async function searchByDate(
   // という別ボタンがあり、name:"検索"の部分一致だと3件ヒットして曖昧になる（strict mode違反）。
   // 実際の検索実行ボタンは <input type="submit" value="検索 " id="OAA0102"> で、
   // 前後の空白を除けばアクセシブルネームが厳密に"検索"のみなので、exact:trueで一意にする。
-  await page.getByRole("button", { name: "検索", exact: true }).click();
-  await page.waitForLoadState("networkidle");
+  // 実データ確認済み（2026-08-01）：「公示本文」のリンクはhrefを持つ<a>ではなく、
+  // javascript:doSubmitParams(...)でページ内フォーム送信するリンクだった。そのため
+  // hrefを事前に取得してpage.goto()する方式（旧実装）は net::ERR_ABORTED になる。
+  // 実際にクリックして遷移させる必要がある（openDetailByIndex参照）。
+  const count = await page.getByRole("link", { name: "公示本文" }).count();
 
-  const rows = await scrapeListRows(page);
-  const count = rows.length;
-
-  return { count, truncated: isSearchTruncated(count), rows };
-}
-
-/** 検索結果一覧（調達実施案件公示）から、調達案件番号と詳細リンクを抜き出す。 */
-async function scrapeListRows(page: Page): Promise<GepsListRow[]> {
-  const rows: GepsListRow[] = [];
-  const links = await page.getByRole("link", { name: "公示本文" }).all();
-  for (const link of links) {
-    const href = await link.getAttribute("href");
-    if (!href) continue;
-    const row = link.locator("xpath=ancestor::tr[1]");
-    const procurementNo = (await row.locator("td").first().innerText().catch(() => "")).trim();
-    if (!procurementNo) continue;
-    rows.push({ procurementNo, detailUrl: new URL(href, page.url()).toString() });
-  }
-  return rows;
+  return { count, truncated: isSearchTruncated(count) };
 }
 
 // --- 手順4：「公示本文」→ 調達情報の詳細 -----------------------------------
 
-/** 詳細ページから、案件情報と「調達資料 ダウンロードURL」を取得する。 */
-export async function fetchDetail(
+/**
+ * 検索結果一覧のindex番目（0始まり）の「公示本文」をクリックして詳細画面へ遷移し、
+ * 案件情報と「調達資料 ダウンロードURL」を取得する。呼び出し後、pageは詳細画面にいる
+ * （一覧へは戻さない。javascript:doSubmitParams(...)によるページ内遷移のため、
+ * hrefからのpage.goto()は使えない。呼び出し元は次の案件へ進む前に検索をやり直すこと）。
+ */
+export async function openDetailByIndex(
   page: Page,
-  detailUrl: string,
-): Promise<{ detail: GepsDetail; documentDownloadUrl: string | null }> {
-  await page.goto(detailUrl);
+  index: number,
+): Promise<{ detail: GepsDetail; documentDownloadUrl: string | null; detailPageUrl: string }> {
+  const link = page.getByRole("link", { name: "公示本文" }).nth(index);
+  await Promise.all([page.waitForLoadState("networkidle"), link.click()]);
+  const { detail, documentDownloadUrl } = await extractDetailFromCurrentPage(page);
+  return { detail, documentDownloadUrl, detailPageUrl: page.url() };
+}
 
+/** 現在開いている詳細ページから、案件情報と「調達資料 ダウンロードURL」を取得する。 */
+async function extractDetailFromCurrentPage(
+  page: Page,
+): Promise<{ detail: GepsDetail; documentDownloadUrl: string | null }> {
   const text = async (label: string): Promise<string | null> => {
     const el = page.getByText(label).locator("xpath=following-sibling::*[1]");
     if (await el.count()) return (await el.first().innerText()).trim();
@@ -247,9 +239,16 @@ export async function crawlDate(dateIso: string, category: GepsCategory): Promis
     const tenders: NormalizedGepsTender[] = [];
     const documentsByProcurementNo = new Map<string, GepsDocument[]>();
 
-    for (const row of search.rows) {
-      const { detail, documentDownloadUrl } = await fetchDetail(page, row.detailUrl);
-      const normalized = normalizeGepsTender(detail, row.detailUrl);
+    for (let i = 0; i < search.count; i++) {
+      // 詳細画面・資料DL画面への遷移で一覧のページ状態が失われるため、2件目以降は
+      // 案件ごとに検索をやり直してから i 番目の「公示本文」をクリックする
+      // （javascript:doSubmitParams(...)によるページ内遷移のため、ブラウザバックでの
+      // 復元が確実とは限らない。実データ確認済み・2026-08-01）。
+      if (i > 0) {
+        await searchByDate(page, dateIso, category);
+      }
+      const { detail, documentDownloadUrl, detailPageUrl } = await openDetailByIndex(page, i);
+      const normalized = normalizeGepsTender(detail, detailPageUrl);
       tenders.push(normalized);
 
       if (documentDownloadUrl) {
