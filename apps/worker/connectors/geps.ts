@@ -25,6 +25,14 @@ import {
   type NormalizedGepsTender,
 } from "@ai-nyusatsu-bu/domain";
 
+// 実データ確認済み（2026-08-01）：GEPSの検索フォームは物品だけ・役務だけを絞り込む手段が
+// 無い（「分類」はradioで全て／物品・役務／簡易な公共事業の3択のみ）。そのため検索は
+// 分類を指定せず1日1回だけ行い、案件ごとの分類はextractDetailFromCurrentPage()が
+// 詳細画面から判定する。以前は物品・役務で2回検索していたが、実際には同じ結果を2回
+// 取得するだけで、かつ2回の独立したブラウザセッション間で機関名抽出にわずかな差異が
+// 出ると同じcodeで異なるdedupe_keyになりtenders_code_key制約違反を起こすことが実機で
+// 判明したため、1日1回の巡回に修正した（jobs/crawl_geps.ts側もあわせて修正）。
+
 // 実データ確認済み（2026-08-01、ユーザーがブラウザのソース表示で確認）。
 // 設計時の想定（UZA01/OZA0101）ではなく、実際の検索画面はUAA01/OAA0101だった。
 const SEARCH_URL = "https://www.p-portal.go.jp/pps-web-biz/UAA01/OAA0101";
@@ -57,19 +65,9 @@ function contactInfo(): { company: string; name: string; tel: string; email: str
 
 // --- 手順1・2：調達情報の検索（ログイン不要） -----------------------------
 
-/** 公開開始日=dateIso（1日分）・分類=categoryで検索し、結果件数と各案件の詳細リンクを返す。 */
-export async function searchByDate(
-  page: Page,
-  dateIso: string,
-  category: GepsCategory,
-): Promise<GepsSearchResult> {
+/** 公開開始日=dateIso（1日分）で検索し、結果件数を返す（分類での絞り込みはできない。上記コメント参照）。 */
+export async function searchByDate(page: Page, dateIso: string): Promise<GepsSearchResult> {
   await page.goto(SEARCH_URL);
-
-  // 実データ確認済み（2026-08-01）：「分類」はradioで「全て／物品・役務／簡易な公共事業」の
-  // 3択のみ。物品だけ・役務だけを絞り込む手段は検索フォーム側には無い。そのため検索段階では
-  // 絞り込まず（既定の「全て」のまま）、案件ごとの分類はextractDetailFromCurrentPage()が
-  // 詳細画面の「分類」欄から判定する。category引数は呼び出し元の記録用
-  // （documentsByProcurementNo等）以外では使わない。
 
   // 公開開始日（開始・終了とも同じ日を指定して1日ぶんに絞る）。
   // 実データ確認済み（2026-08-01）：ラベルは「公開開始日の自」「公開開始日の至」
@@ -231,14 +229,14 @@ export type GepsCrawlResult = {
   count: number;
 };
 
-/** 1日分・1分類ぶんの巡回：検索→各案件の詳細取得→資料ダウンロードまでを行う。 */
-export async function crawlDate(dateIso: string, category: GepsCategory): Promise<GepsCrawlResult> {
+/** 1日分の巡回：検索→各案件の詳細取得→資料ダウンロードまでを行う（分類での絞り込みはできないため1日1回）。 */
+export async function crawlDate(dateIso: string): Promise<GepsCrawlResult> {
   const browser = await chromium.launch({ headless: true });
   try {
     const context = await browser.newContext({ acceptDownloads: true });
     const page = await context.newPage();
 
-    const search = await searchByDate(page, dateIso, category);
+    const search = await searchByDate(page, dateIso);
     const tenders: NormalizedGepsTender[] = [];
     const documentsByProcurementNo = new Map<string, GepsDocument[]>();
 
@@ -248,7 +246,7 @@ export async function crawlDate(dateIso: string, category: GepsCategory): Promis
       // （javascript:doSubmitParams(...)によるページ内遷移のため、ブラウザバックでの
       // 復元が確実とは限らない。実データ確認済み・2026-08-01）。
       if (i > 0) {
-        await searchByDate(page, dateIso, category);
+        await searchByDate(page, dateIso);
       }
       const { detail, documentDownloadUrl, detailPageUrl } = await openDetailByIndex(page, i);
       const normalized = normalizeGepsTender(detail, detailPageUrl);

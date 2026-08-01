@@ -1,15 +1,19 @@
 // 調達ポータル（GEPS）の巡回ジョブ（タスク1-7）。
 // 参照：docs/調達ポータルコネクタ設計.md §2, §2-5
 //
-// 1日・1分類（物品/役務）ずつ検索し、tendersへupsert、資料をStorageへ保存する。
+// 1日ぶんを検索し、tendersへupsert、資料をStorageへ保存する。
 // 収集端末（IC）は使わない（ユーザー指示）。全工程をクラウドのワーカーで完結させる。
+//
+// 実データ確認済み（2026-08-01）：検索フォームは物品だけ・役務だけを絞り込む手段が無いため、
+// 以前の「物品・役務で2回巡回する」設計は同じ結果を2回取得するだけでなく、2回の独立した
+// ブラウザセッション間で機関名抽出にわずかな差異が出ると同じcodeで異なるdedupe_keyになり
+// tenders_code_key制約違反を起こすことが実機で判明した。1日1回の巡回に修正済み。
 
 import { createHash } from "node:crypto";
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
-import type { GepsCategory, NormalizedGepsTender } from "@ai-nyusatsu-bu/domain";
+import type { NormalizedGepsTender } from "@ai-nyusatsu-bu/domain";
 import { crawlDate, type GepsDocument } from "../connectors/geps";
 
-const CATEGORIES: GepsCategory[] = ["物品", "役務"];
 const BUCKET = process.env.TENDER_DOCUMENTS_BUCKET || "tender-documents";
 
 export type CrawlDateSummary = {
@@ -120,11 +124,8 @@ async function saveDocuments(
   return { saved, failed };
 }
 
-/** 1日・1分類ぶんを巡回し、tenders/tender_documentsへ反映する。crawl_runsに記録する。 */
-export async function runGepsCrawlForCategory(
-  dateIso: string,
-  category: GepsCategory,
-): Promise<CrawlDateSummary> {
+/** 1日ぶんを巡回し、tenders/tender_documentsへ反映する。crawl_runsに記録する。 */
+export async function runDailyGepsCrawl(dateIso: string): Promise<CrawlDateSummary> {
   const client = createServiceClient();
 
   const { data: run, error: runError } = await client
@@ -142,7 +143,7 @@ export async function runGepsCrawlForCategory(
   let status: CrawlDateSummary["status"] = "completed";
 
   try {
-    const result = await crawlDate(dateIso, category);
+    const result = await crawlDate(dateIso);
     found = result.count;
     truncated = result.truncated;
 
@@ -168,7 +169,7 @@ export async function runGepsCrawlForCategory(
       run_id: run.id,
       code: "LAYOUT_CHANGED",
       message: err instanceof Error ? err.message : String(err),
-      payload: { dateIso, category },
+      payload: { dateIso },
     });
     throw err;
   } finally {
@@ -186,13 +187,4 @@ export async function runGepsCrawlForCategory(
   }
 
   return { date: dateIso, found, merged, documents, failed: failedDocs, truncated, status };
-}
-
-/** 前日ぶんを、物品・役務の両分類で巡回する。 */
-export async function runDailyGepsCrawl(dateIso: string): Promise<CrawlDateSummary[]> {
-  const summaries: CrawlDateSummary[] = [];
-  for (const category of CATEGORIES) {
-    summaries.push(await runGepsCrawlForCategory(dateIso, category));
-  }
-  return summaries;
 }
