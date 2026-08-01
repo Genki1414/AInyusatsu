@@ -4,9 +4,11 @@
 // 参照：docs/reference/ローカル実行手順.md
 
 import { refreshMarketRates } from "../jobs/refresh_market_rates";
+import { cliArgs } from "./_args";
 
 async function main() {
-  const periodMonths = process.argv[2] ? Number(process.argv[2]) : undefined;
+  const arg = cliArgs()[0];
+  const periodMonths = arg ? Number(arg) : undefined;
   console.log(`market_ratesを再計算します（対象=${periodMonths ?? 24}か月）`);
   const outcome = await refreshMarketRates(periodMonths);
   console.log(JSON.stringify(outcome, null, 2));

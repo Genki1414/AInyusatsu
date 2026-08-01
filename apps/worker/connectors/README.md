@@ -4,7 +4,9 @@ geps（調達ポータル）/ agency-site / public-page / public-pdf / mail / kk
 （実装仕様書_v1.md §3、案件収集戦略_v2.md、調達ポータルコネクタ設計.md を参照）
 
 - `p-portal-awards.ts`：落札実績オープンデータ（zip/CSV）のダウンロード（タスク1-8）。
-  `AWARDS_OPEN_DATA_BASE_URL` 環境変数の設定が必要。詳細は
+  ダウンロードURLはユーザーがブラウザの開発者ツールで確認済み（`api.p-portal.go.jp`のクエリ
+  パラメータ形式）でコードに既定値として持たせている。上書きしたい場合のみ
+  `AWARDS_OPEN_DATA_BASE_URL` 環境変数を設定する。詳細は
   `docs/reference/落札実績オープンデータ_列定義（推定）.md` を参照
 - `kkj.ts`：官公需情報ポータルAPI（タスク1-5）。`docs/reference/KKJ_api_guide.pdf`（公式仕様書）
   に基づきタグ名ベースでXMLを解析する。エンドポイントは`KKJ_API_URL`環境変数で上書き可能

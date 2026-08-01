@@ -5,23 +5,23 @@
 //   全件: successful_bid_record_info_all_{西暦}.zip（年ごと）
 //   差分: successful_bid_record_info_diff_{YYYYMMDD}.zip（日ごと・過去2か月分のみ存在）
 //
-// 【重要】zipファイルの実際の配置元URL（ドメイン以下のパス）は、ダウンロードページ
-// https://www.p-portal.go.jp/pps-web-biz/UAB02/OAB0201 が本セッションのネットワークポリシーで
-// 到達できず確認できていない。環境変数 AWARDS_OPEN_DATA_BASE_URL で指定すること。
+// ダウンロードURLの形式（ユーザーがブラウザの開発者ツールで確認済み。2026-08-01）：
+//   ダウンロードページ（https://www.p-portal.go.jp/pps-web-biz/UAB02/OAB0201）の
+//   ダウンロードリンクは静的なURLではなく、doDownload(fileName)というJS関数で
+//   `uab02FileDownloadUrl + fileName` へ遷移する形になっている。
+//   uab02FileDownloadUrlの実際の値は
+//     https://api.p-portal.go.jp/pps-web-biz/UAB03/OAB0301?fileversion=v001&filename=
+//   （www.ではなくapi.サブドメイン。パスではなくfilenameクエリパラメータの末尾に
+//   ファイル名を連結する）。固定の公開エンドポイントのため既定値としてコードに持たせ、
+//   環境変数 AWARDS_OPEN_DATA_BASE_URL は変更したい場合のみの上書き用とする。
 
 import AdmZip from "adm-zip";
 
 const BASE_URL_ENV = "AWARDS_OPEN_DATA_BASE_URL";
+const DEFAULT_BASE_URL = "https://api.p-portal.go.jp/pps-web-biz/UAB03/OAB0301?fileversion=v001&filename=";
 
 function baseUrl(): string {
-  const url = process.env[BASE_URL_ENV];
-  if (!url) {
-    throw new Error(
-      `${BASE_URL_ENV} が未設定です。https://www.p-portal.go.jp/pps-web-biz/UAB02/OAB0201 で ` +
-        "実際のダウンロードリンクを確認し、zipファイルの配置元URL（ファイル名を除いた部分）を設定してください。",
-    );
-  }
-  return url.replace(/\/$/, "");
+  return process.env[BASE_URL_ENV] || DEFAULT_BASE_URL;
 }
 
 function fullDataFileName(year: number): string {
@@ -69,7 +69,7 @@ export type FetchResult =
 /** 全件データ（年度ごと）を取得する。 */
 export async function fetchFullData(year: number): Promise<FetchResult> {
   const sourceFile = fullDataFileName(year);
-  const res = await downloadZip(`${baseUrl()}/${sourceFile}`);
+  const res = await downloadZip(`${baseUrl()}${encodeURIComponent(sourceFile)}`);
   if (!res.ok) return { found: false, sourceFile };
   const { fileName, text } = extractFirstCsv(res.buffer, sourceFile);
   return { found: true, csvFileName: fileName, sourceFile, text };
@@ -81,7 +81,7 @@ export async function fetchFullData(year: number): Promise<FetchResult> {
  */
 export async function fetchDiffData(date: Date): Promise<FetchResult> {
   const sourceFile = diffDataFileName(date);
-  const res = await downloadZip(`${baseUrl()}/${sourceFile}`);
+  const res = await downloadZip(`${baseUrl()}${encodeURIComponent(sourceFile)}`);
   if (!res.ok) return { found: false, sourceFile };
   const { fileName, text } = extractFirstCsv(res.buffer, sourceFile);
   return { found: true, csvFileName: fileName, sourceFile, text };

@@ -4,10 +4,11 @@
 // 参照：docs/reference/ローカル実行手順.md
 
 import { runKkjSync } from "../jobs/kkj_sync";
+import { cliArgs } from "./_args";
 import { yesterdayJst } from "./_date";
 
 async function main() {
-  const dateIso = process.argv[2] || yesterdayJst();
+  const dateIso = cliArgs()[0] || yesterdayJst();
   console.log(`KKJ同期を実行します（公告日=${dateIso}）`);
   const summary = await runKkjSync(dateIso);
   console.log(JSON.stringify(summary, null, 2));
