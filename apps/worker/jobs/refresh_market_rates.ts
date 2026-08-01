@@ -25,6 +25,7 @@ type AwardsRow = {
 function toNormalizedAward(row: AwardsRow): NormalizedAward {
   return {
     procurementNo: row.procurement_no,
+    name: null,
     item: row.item,
     agencyClass: row.agency_class,
     contractType: null,
@@ -37,6 +38,8 @@ function toNormalizedAward(row: AwardsRow): NormalizedAward {
     taxIncluded: row.tax_included,
     taxUnknown: row.tax_included == null,
     outlier: row.outlier,
+    winnerName: null,
+    corporateNumber: null,
   };
 }
 

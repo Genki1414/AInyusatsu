@@ -5,6 +5,7 @@ import {
   classifyItem,
   computeMarketRates,
   dedupeLatestByProcurementNo,
+  hasUnexpectedShape,
   normalizeAwardRow,
   normalizeDate,
   parseAwardsCsv,
@@ -12,31 +13,56 @@ import {
   type NormalizedAward,
 } from "./awards";
 
+// 実データ確認済み（2026-08-01、ユーザーがブラウザでダウンロードして直接確認）の1行の例。
+// 見出し行は無く、この形の行が1行目から並ぶ。
+const SAMPLE_ROW_CSV =
+  '"0000000000000496653","令和７年度デジタル人材採用に係る求人サービス等の利用支援","2026-04-01","31389000.00","W1","8004030","Ｐｏｌｅ＆Ｌｉｎｅ合同会社","7011003005763"';
+
 describe("stripBom / parseAwardsCsv", () => {
-  it("UTF-8 BOM付きCSVでもヘッダが壊れずパースできる", () => {
+  it("UTF-8 BOM付きCSVでも1行目からデータとしてパースできる（見出し行は無い）", () => {
     const bom = "﻿";
-    const csv =
-      bom +
-      "調達案件番号,調達機関名称,品目分類名称,予定価格,予定価格税区分,落札金額,落札金額税区分,契約方式,入札者数,落札日\n" +
-      "0000000000000565084,関東財務局,清掃,9200000,税抜,8740000,税抜,総額,2,2026年7月22日\n";
+    const csv = bom + SAMPLE_ROW_CSV + "\n";
 
     const rows = parseAwardsCsv(csv);
 
     expect(rows).toHaveLength(1);
-    // BOMがヘッダの1文字目に混入していると "調達案件番号" キーが取れなくなる
-    expect(rows[0]["調達案件番号"]).toBe("0000000000000565084");
-    expect(Object.keys(rows[0])).not.toContain(bom + "調達案件番号");
+    // BOMが1列目の値に混入していると procurementNo が取れなくなる
+    expect(rows[0].procurementNo).toBe("0000000000000496653");
+    expect(rows[0].corporateNumber).toBe("7011003005763");
   });
 
-  it("BOMが無くても通常通りパースできる", () => {
-    const csv = "調達案件番号,落札金額\n123,100\n";
-    const rows = parseAwardsCsv(csv);
-    expect(rows).toEqual([{ 調達案件番号: "123", 落札金額: "100" }]);
+  it("BOMが無くても通常通りパースできる。列は位置で割り当てる", () => {
+    const rows = parseAwardsCsv(SAMPLE_ROW_CSV + "\n");
+    expect(rows).toEqual([
+      {
+        procurementNo: "0000000000000496653",
+        name: "令和７年度デジタル人材採用に係る求人サービス等の利用支援",
+        openedAtRaw: "2026-04-01",
+        amountRaw: "31389000.00",
+        taxCode: "W1",
+        agencyCode: "8004030",
+        winnerName: "Ｐｏｌｅ＆Ｌｉｎｅ合同会社",
+        corporateNumber: "7011003005763",
+      },
+    ]);
   });
 
   it("空文字列は空配列を返す", () => {
     expect(parseAwardsCsv("")).toEqual([]);
     expect(parseAwardsCsv("﻿")).toEqual([]);
+  });
+});
+
+describe("hasUnexpectedShape", () => {
+  it("法人番号が13桁の数字なら想定どおりの構造とみなす", () => {
+    const rows = parseAwardsCsv(SAMPLE_ROW_CSV + "\n");
+    expect(hasUnexpectedShape(rows[0])).toBe(false);
+  });
+
+  it("法人番号が13桁でなければ構造がずれていると判定する（列がずれた場合の検知）", () => {
+    expect(hasUnexpectedShape({ corporateNumber: "123" })).toBe(true);
+    expect(hasUnexpectedShape({ corporateNumber: "" })).toBe(true);
+    expect(hasUnexpectedShape({})).toBe(true);
   });
 });
 
@@ -78,77 +104,45 @@ describe("classifyItem / classifyAgencyClass", () => {
 describe("normalizeAwardRow", () => {
   const ctx = { sourceBatch: "successful_bid_record_info_all_2026.zip" };
 
-  it("正常な行は落札率を計算し disclosed=true になる", () => {
-    const { award, skipped } = normalizeAwardRow(
-      {
-        調達案件番号: "0000000000000565084",
-        調達機関名称: "関東財務局",
-        品目分類名称: "清掃",
-        予定価格: "9,200,000円",
-        予定価格税区分: "税抜",
-        落札金額: "8,740,000円",
-        落札金額税区分: "税抜",
-        契約方式: "総額",
-        入札者数: "2",
-        落札日: "2026年7月22日",
-      },
-      ctx,
-    );
+  it("実データの行から、取得できる項目（案件番号・案件名・日付・金額・落札者・法人番号）を正規化する", () => {
+    const rows = parseAwardsCsv(SAMPLE_ROW_CSV + "\n");
+    const { award, skipped } = normalizeAwardRow(rows[0], ctx);
 
     expect(skipped).toBe(false);
-    expect(award.procurementNo).toBe("0000000000000565084");
-    expect(award.item).toBe("建物管理等");
-    expect(award.agencyClass).toBe("地方支分部局");
-    expect(award.budget).toBe(9_200_000);
-    expect(award.amount).toBe(8_740_000);
-    expect(award.bidders).toBe(2);
-    expect(award.openedAt).toBe("2026-07-22");
-    expect(award.rate).toBeCloseTo(0.95, 4);
-    expect(award.disclosed).toBe(true);
-    expect(award.taxIncluded).toBe(false); // 税抜
-    expect(award.taxUnknown).toBe(false);
+    expect(award.procurementNo).toBe("0000000000000496653");
+    expect(award.name).toBe("令和７年度デジタル人材採用に係る求人サービス等の利用支援");
+    expect(award.openedAt).toBe("2026-04-01");
+    expect(award.amount).toBe(31_389_000);
+    expect(award.winnerName).toBe("Ｐｏｌｅ＆Ｌｉｎｅ合同会社");
+    expect(award.corporateNumber).toBe("7011003005763");
+  });
+
+  it("予定価格・品目分類・機関区分・契約方式・入札者数はこのCSVに列が無いため常にnull（推測しない）", () => {
+    const rows = parseAwardsCsv(SAMPLE_ROW_CSV + "\n");
+    const { award } = normalizeAwardRow(rows[0], ctx);
+
+    expect(award.item).toBeNull();
+    expect(award.agencyClass).toBeNull();
+    expect(award.contractType).toBeNull();
+    expect(award.budget).toBeNull();
+    expect(award.bidders).toBeNull();
+    expect(award.rate).toBeNull();
+    expect(award.disclosed).toBe(false);
+    expect(award.taxIncluded).toBeNull();
+    expect(award.taxUnknown).toBe(true);
     expect(award.outlier).toBe(false);
   });
 
-  it("予定価格が非公表の行は disclosed=false・rate=null で、金額があれば保存対象", () => {
-    const { award, skipped } = normalizeAwardRow(
-      { 調達案件番号: "P1", 落札金額: "1,000,000", 予定価格: "非公表" },
-      ctx,
-    );
-    expect(skipped).toBe(false);
-    expect(award.disclosed).toBe(false);
-    expect(award.rate).toBeNull();
-  });
-
   it("落札金額が取れない行は skipped=true", () => {
-    const { skipped, skipReason } = normalizeAwardRow({ 調達案件番号: "P1", 予定価格: "1000" }, ctx);
+    const { skipped, skipReason } = normalizeAwardRow({ procurementNo: "P1" }, ctx);
     expect(skipped).toBe(true);
     expect(skipReason).toBe("amount_missing");
   });
 
   it("調達案件番号が取れない行は skipped=true（同一ファイル再取込の冪等性が保てないため）", () => {
-    const { skipped, skipReason } = normalizeAwardRow({ 落札金額: "1000", 予定価格: "1000" }, ctx);
+    const { skipped, skipReason } = normalizeAwardRow({ amountRaw: "1000" }, ctx);
     expect(skipped).toBe(true);
     expect(skipReason).toBe("procurement_no_missing");
-  });
-
-  it("税区分が判別できない場合は taxUnknown=true", () => {
-    const { award } = normalizeAwardRow(
-      { 落札金額: "1000", 予定価格: "2000", 落札金額税区分: "不明" },
-      ctx,
-    );
-    expect(award.taxIncluded).toBeNull();
-    expect(award.taxUnknown).toBe(true);
-    expect(award.rate).not.toBeNull(); // taxUnknownはrate計算自体は妨げない（集計時に除外する）
-  });
-
-  it("落札率が50%未満・100%超は outlier=true", () => {
-    const low = normalizeAwardRow({ 落札金額: "100", 予定価格: "1000" }, ctx).award;
-    const high = normalizeAwardRow({ 落札金額: "1500", 予定価格: "1000" }, ctx).award;
-    const normal = normalizeAwardRow({ 落札金額: "900", 予定価格: "1000" }, ctx).award;
-    expect(low.outlier).toBe(true);
-    expect(high.outlier).toBe(true);
-    expect(normal.outlier).toBe(false);
   });
 });
 
@@ -246,6 +240,7 @@ describe("computeMarketRates", () => {
 function base(overrides: Partial<NormalizedAward>): NormalizedAward {
   return {
     procurementNo: null,
+    name: null,
     item: null,
     agencyClass: null,
     contractType: null,
@@ -258,6 +253,8 @@ function base(overrides: Partial<NormalizedAward>): NormalizedAward {
     taxIncluded: null,
     taxUnknown: false,
     outlier: false,
+    winnerName: null,
+    corporateNumber: null,
     ...overrides,
   };
 }
