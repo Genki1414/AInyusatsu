@@ -25,7 +25,9 @@ import {
   type NormalizedGepsTender,
 } from "@ai-nyusatsu-bu/domain";
 
-const SEARCH_URL = "https://www.p-portal.go.jp/pps-web-biz/UZA01/OZA0101";
+// 実データ確認済み（2026-08-01、ユーザーがブラウザのソース表示で確認）。
+// 設計時の想定（UZA01/OZA0101）ではなく、実際の検索画面はUAA01/OAA0101だった。
+const SEARCH_URL = "https://www.p-portal.go.jp/pps-web-biz/UAA01/OAA0101";
 
 export type GepsDocument = {
   kind: DocKind;
@@ -77,13 +79,13 @@ export async function searchByDate(
     });
   }
 
-  // 公開開始日（開始・終了とも同じ日を指定して1日ぶんに絞る）
-  const dateFrom = page.getByLabel("公開開始日（開始）").or(page.getByLabel("公開開始日"));
-  const dateTo = page.getByLabel("公開開始日（終了）");
-  await dateFrom.first().fill(dateIso);
-  if (await dateTo.count()) {
-    await dateTo.first().fill(dateIso);
-  }
+  // 公開開始日（開始・終了とも同じ日を指定して1日ぶんに絞る）。
+  // 実データ確認済み（2026-08-01）：ラベルは「公開開始日の自」「公開開始日の至」
+  // （<label for="start-date-from">公開開始日の自</label> 等）。
+  const dateFrom = page.getByLabel("公開開始日の自");
+  const dateTo = page.getByLabel("公開開始日の至");
+  await dateFrom.fill(dateIso);
+  await dateTo.fill(dateIso);
 
   await page.getByRole("button", { name: "検索" }).click();
   await page.waitForLoadState("networkidle");
