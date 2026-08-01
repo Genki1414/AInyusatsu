@@ -107,8 +107,14 @@ export async function openDetailByIndex(
   page: Page,
   index: number,
 ): Promise<{ detail: GepsDetail; documentDownloadUrl: string | null; detailPageUrl: string }> {
+  // 実データ確認済み（2026-08-01）：waitForLoadState("networkidle")は「今のページが
+  // アイドル状態になるまで待つ」だけで、クリックが引き起こす遷移そのものとは紐付いて
+  // いないため、遷移が始まる前にresolveしてしまう競合が高頻度（実測5割超）で発生した
+  // （詳細画面がまだ"Loading..."や検索結果画面のままの状態で読み取りを始めていた）。
+  // detail画面のURL（/OAA0104）への遷移を明示的に待ってから読み取る。
   const link = page.getByRole("link", { name: "公示本文" }).nth(index);
-  await Promise.all([page.waitForLoadState("networkidle"), link.click()]);
+  await Promise.all([page.waitForURL(/OAA0104/), link.click()]);
+  await page.waitForLoadState("networkidle");
   const { detail, documentDownloadUrl } = await extractDetailFromCurrentPage(page);
   return { detail, documentDownloadUrl, detailPageUrl: page.url() };
 }
