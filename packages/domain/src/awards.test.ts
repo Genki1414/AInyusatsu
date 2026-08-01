@@ -133,6 +133,11 @@ describe("normalizeAwardRow", () => {
     expect(award.outlier).toBe(false);
   });
 
+  it("落札金額に小数が含まれる場合は円単位のintegerに丸める（実データに37.2のような値が実在する）", () => {
+    const { award } = normalizeAwardRow({ procurementNo: "P1", amountRaw: "37.2" }, ctx);
+    expect(award.amount).toBe(37);
+  });
+
   it("落札金額が取れない行は skipped=true", () => {
     const { skipped, skipReason } = normalizeAwardRow({ procurementNo: "P1" }, ctx);
     expect(skipped).toBe(true);
