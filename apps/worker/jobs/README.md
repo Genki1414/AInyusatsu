@@ -9,3 +9,6 @@ crawl / fetch_documents / fetch_documents_ic / parse / match / notify / remind /
   ICカード不要（連絡先情報入力方式）のためcollector_agentsは使わない。
   `GEPS_CONTACT_COMPANY` / `GEPS_CONTACT_NAME` / `GEPS_CONTACT_TEL` / `GEPS_CONTACT_EMAIL`
   環境変数が必要
+- `kkj_sync.ts`：官公需情報ポータル（KKJ検索API）の同期（タスク1-5）。`runKkjSync(dateIso)`。
+  資料のダウンロードは行わない（tendersへのupsertのみ）。`KKJ_API_URL`環境変数で
+  エンドポイントを上書き可能（既定 `http://www.kkj.go.jp/api/`）
