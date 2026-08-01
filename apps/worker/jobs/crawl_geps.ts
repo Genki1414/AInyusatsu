@@ -22,6 +22,12 @@ export type CrawlDateSummary = {
   merged: number;
   documents: number;
   failed: number;
+  /**
+   * 詳細画面から調達案件番号が取得できず、tendersへ投入せずスキップした件数。
+   * 実データではページごとに細かな表記ゆれがあり、1件の抽出失敗でジョブ全体を
+   * 止めないようにするため、推測で埋めずスキップする方針にした（推測しない）。
+   */
+  skipped: number;
   truncated: boolean;
   status: "completed" | "truncated" | "failed";
 };
@@ -139,6 +145,7 @@ export async function runDailyGepsCrawl(dateIso: string): Promise<CrawlDateSumma
   let merged = 0;
   let documents = 0;
   let failedDocs = 0;
+  let skipped = 0;
   let truncated = false;
   let status: CrawlDateSummary["status"] = "completed";
 
@@ -148,6 +155,23 @@ export async function runDailyGepsCrawl(dateIso: string): Promise<CrawlDateSumma
     truncated = result.truncated;
 
     for (const tender of result.tenders) {
+      if (!tender.procurementNo) {
+        // 実データではページごとに細かな表記ゆれがあり、詳細画面から調達案件番号を
+        // 取得できない案件が稀に発生する（tenders.codeがNOT NULL UNIQUEのため
+        // 推測で埋めることはできない）。1件の抽出失敗でジョブ全体を止めないよう、
+        // その案件だけスキップして続行する。原因調査用にcrawl_errorsへ記録する。
+        skipped++;
+        await client.from("crawl_errors").insert({
+          run_id: run.id,
+          code: "PARSE_INVALID",
+          message: "詳細画面から調達案件番号を取得できませんでした",
+          payload: { dateIso, name: tender.name, sourceUrl: tender.sourceUrl },
+        });
+        // eslint-disable-next-line no-console
+        console.error(`調達案件番号が取得できずスキップしました: ${tender.name || tender.sourceUrl}`);
+        continue;
+      }
+
       await ensureAgency(client, tender);
       const tenderId = await upsertTender(client, tender);
       merged++;
@@ -186,5 +210,5 @@ export async function runDailyGepsCrawl(dateIso: string): Promise<CrawlDateSumma
       .eq("id", run.id);
   }
 
-  return { date: dateIso, found, merged, documents, failed: failedDocs, truncated, status };
+  return { date: dateIso, found, merged, documents, failed: failedDocs, skipped, truncated, status };
 }
