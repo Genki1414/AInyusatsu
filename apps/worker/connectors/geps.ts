@@ -155,9 +155,11 @@ async function extractDetailFromCurrentPage(
   // 実データ確認済み（2026-08-01）：実際のリンク文言は「調達資料１ダウンロードURL」
   // （間に空白が無く、全角数字。資料は1〜5まで番号ごとに個別のリンクになりうる）で、
   // 想定していた「調達資料 ダウンロードURL」（半角スペース区切り・単一）とは異なっていた。
+  // 【重要】番号は全角数字（１２３…）。正規表現の\dは半角数字にしかマッチしないため、
+  // 全角数字（０-９）も明示的に含める（実機で\dのみだと1件もマッチしなかった）。
   // 【現状の制約】1件目（番号が最小のもの）だけを取得する。複数資料（調達資料1〜5）を
   // すべて取得する対応は未実装（docs/reference/調達ポータル_巡回_確認事項.md参照）。
-  const docLink = page.getByRole("link", { name: /^調達資料\d+ダウンロードURL/ }).first();
+  const docLink = page.getByRole("link", { name: /^調達資料[0-9０-９]+ダウンロードURL/ }).first();
   const documentDownloadUrl = (await docLink.count())
     ? new URL((await docLink.getAttribute("href")) ?? "", page.url()).toString()
     : null;
