@@ -49,6 +49,19 @@ export type GepsSearchResult = {
   truncated: boolean;
 };
 
+/**
+ * Cookie同意バナー（「同意する」ボタン、id="c-p-bn"）が表示されていれば閉じる。
+ * 実機確認済み（2026-08-01）：資料DL先（geps.go.jp/biz-contract配下）ではこのバナーが
+ * 「次へ」ボタンの上に重なり、クリックを妨げる（"subtree intercepts pointer events"）。
+ * 出ていない場合も多いため、存在チェックしてから閉じる（無ければ何もしない）。
+ */
+async function dismissCookieConsent(page: Page): Promise<void> {
+  const consentButton = page.getByRole("button", { name: "同意する" });
+  if (await consentButton.count()) {
+    await consentButton.click({ force: true }).catch(() => {});
+  }
+}
+
 function contactInfo(): { company: string; name: string; tel: string; email: string } {
   const company = process.env.GEPS_CONTACT_COMPANY;
   const name = process.env.GEPS_CONTACT_NAME;
@@ -185,6 +198,7 @@ async function extractDetailFromCurrentPage(
  */
 export async function downloadDocuments(page: Page, documentDownloadUrl: string): Promise<GepsDocument[]> {
   await page.goto(documentDownloadUrl);
+  await dismissCookieConsent(page);
 
   // 連絡先情報入力方法選択：実データ確認済み（2026-08-01）、リンクやボタンではなくradio
   // （「電子調達システムに登録している連絡先情報を利用する」と「連絡先情報をはじめから
@@ -199,7 +213,11 @@ export async function downloadDocuments(page: Page, documentDownloadUrl: string)
     el.dispatchEvent(new Event("click", { bubbles: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
   });
-  await page.getByRole("button", { name: "次へ", exact: true }).click();
+  // 実機確認済み：Cookie同意バナー（「同意する」）を閉じてもなお、画面下部固定の
+  // 「この画面の先頭へ」ボタンがスクロール位置によって「次へ」に重なりクリックを
+  // 妨げることがあった（"subtree intercepts pointer events"）。force:trueで、
+  // 座標上の重なりチェックを省略して直接クリックする。
+  await page.getByRole("button", { name: "次へ", exact: true }).click({ force: true });
 
   // 利用者情報入力（4項目・すべて必須）
   const contact = contactInfo();
