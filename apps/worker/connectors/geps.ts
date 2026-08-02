@@ -219,12 +219,18 @@ export async function downloadDocuments(page: Page, documentDownloadUrl: string)
   // 座標上の重なりチェックを省略して直接クリックする。
   await page.getByRole("button", { name: "次へ", exact: true }).click({ force: true });
 
-  // 利用者情報入力（4項目・すべて必須）
+  // 利用者情報入力（4項目・すべて必須）。実機確認済み（2026-08-03）：詳細画面と同様、
+  // ここも<label for>ではなく<tr><th>ラベル</th><td><input></td></tr>という表構造
+  // だったため、getByLabel()では見つからずタイムアウトしていた。thとの完全一致＋
+  // 直後のtd内のinputを直接指定する。
   const contact = contactInfo();
-  await page.getByLabel("商号又は名称").fill(contact.company);
-  await page.getByLabel("氏名").fill(contact.name);
-  await page.getByLabel("電話番号").fill(contact.tel);
-  await page.getByLabel("メールアドレス").fill(contact.email);
+  const fillByLabel = async (label: string, value: string) => {
+    await page.locator(`th:text-is("${label}") + td input`).first().fill(value);
+  };
+  await fillByLabel("商号又は名称", contact.company);
+  await fillByLabel("氏名", contact.name);
+  await fillByLabel("電話番号", contact.tel);
+  await fillByLabel("メールアドレス", contact.email);
 
   // 添付資料一覧が表示される。項番・資料種別・ファイル名を先に読み取っておく。
   const portalCategories = await scrapeDocumentCategories(page);
