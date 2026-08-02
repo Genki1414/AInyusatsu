@@ -189,7 +189,10 @@ export async function downloadDocuments(page: Page, documentDownloadUrl: string)
   // 連絡先情報入力方法選択：実データ確認済み（2026-08-01）、リンクやボタンではなくradio
   // （「電子調達システムに登録している連絡先情報を利用する」と「連絡先情報をはじめから
   // 入力する」の2択。既定では前者が選択されている）。後者を選んでから「次へ」で進む。
-  await page.getByRole("radio", { name: "連絡先情報をはじめから入力する" }).check();
+  // 実機確認済み：このradio自体はCSSで非表示にされ、見た目はスタイル付きのUIで
+  // 表現されている（"element is not visible"でcheck()がタイムアウトした）。
+  // force:trueで可視性チェックを省略し、直接チェック状態にする。
+  await page.getByRole("radio", { name: "連絡先情報をはじめから入力する" }).check({ force: true });
   await page.getByRole("button", { name: "次へ", exact: true }).click();
 
   // 利用者情報入力（4項目・すべて必須）
