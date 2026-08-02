@@ -189,10 +189,16 @@ export async function downloadDocuments(page: Page, documentDownloadUrl: string)
   // 連絡先情報入力方法選択：実データ確認済み（2026-08-01）、リンクやボタンではなくradio
   // （「電子調達システムに登録している連絡先情報を利用する」と「連絡先情報をはじめから
   // 入力する」の2択。既定では前者が選択されている）。後者を選んでから「次へ」で進む。
-  // 実機確認済み：このradio自体はCSSで非表示にされ、見た目はスタイル付きのUIで
-  // 表現されている（"element is not visible"でcheck()がタイムアウトした）。
-  // force:trueで可視性チェックを省略し、直接チェック状態にする。
-  await page.getByRole("radio", { name: "連絡先情報をはじめから入力する" }).check({ force: true });
+  // 実機確認済み：このradio自体は見た目のUI（スタイル付きの別要素）とは別に画面外へ
+  // 配置されており、force:trueでも"Element is outside of the viewport"で失敗する。
+  // クリック操作を模倣せず、DOM要素のcheckedプロパティを直接操作してchange/clickイベントを
+  // 発火させる（見た目や座標に依存しないため、この種の隠しinputパターンに対して確実）。
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await page.getByRole("radio", { name: "連絡先情報をはじめから入力する" }).evaluate((el: any) => {
+    el.checked = true;
+    el.dispatchEvent(new Event("click", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  });
   await page.getByRole("button", { name: "次へ", exact: true }).click();
 
   // 利用者情報入力（4項目・すべて必須）
