@@ -218,6 +218,10 @@ export async function downloadDocuments(page: Page, documentDownloadUrl: string)
   // 妨げることがあった（"subtree intercepts pointer events"）。force:trueで、
   // 座標上の重なりチェックを省略して直接クリックする。
   await page.getByRole("button", { name: "次へ", exact: true }).click({ force: true });
+  // 実機確認済み：クリック直後は次の画面の読み込みが終わっていないことがあり、
+  // 詳細画面の遷移待ちと同様の競合でth:text-is(...)が見つからずタイムアウトすることが
+  // あった。読み込み完了を待ってから入力欄を探す。
+  await page.waitForLoadState("networkidle");
 
   // 利用者情報入力（4項目・すべて必須）。実機確認済み（2026-08-03）：詳細画面と同様、
   // ここも<label for>ではなく<tr><th>ラベル</th><td><input></td></tr>という表構造
@@ -235,9 +239,13 @@ export async function downloadDocuments(page: Page, documentDownloadUrl: string)
   // 添付資料一覧が表示される。項番・資料種別・ファイル名を先に読み取っておく。
   const portalCategories = await scrapeDocumentCategories(page);
 
-  const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "ダウンロード" }).click();
-  const download = await downloadPromise;
+  // クリックが失敗した場合にwaitForEvent("download")のPromiseが宙に浮いたまま
+  // 後で拾い手のない例外（unhandled rejection）としてプロセスごと落ちることがあった
+  // （実機確認済み）。Promise.allで両方を確実に結びつけて後始末する。
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "ダウンロード" }).click(),
+  ]);
   const path = await download.path();
   if (!path) {
     throw new Error("調達資料のダウンロードに失敗しました（一時ファイルが取得できません）");
