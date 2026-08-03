@@ -300,11 +300,17 @@ async function scrapeDocumentCategories(page: Page): Promise<Map<string, string>
 
 // --- コネクタ本体 -----------------------------------------------------------
 
+export type GepsTenderError = {
+  index: number;
+  message: string;
+};
+
 export type GepsCrawlResult = {
   tenders: NormalizedGepsTender[];
   documentsByProcurementNo: Map<string, GepsDocument[]>;
   truncated: boolean;
   count: number;
+  tenderErrors: GepsTenderError[];
 };
 
 /** 1日分の巡回：検索→各案件の詳細取得→資料ダウンロードまでを行う（分類での絞り込みはできないため1日1回）。 */
@@ -317,34 +323,48 @@ export async function crawlDate(dateIso: string): Promise<GepsCrawlResult> {
     const search = await searchByDate(page, dateIso);
     const tenders: NormalizedGepsTender[] = [];
     const documentsByProcurementNo = new Map<string, GepsDocument[]>();
+    const tenderErrors: GepsTenderError[] = [];
 
     for (let i = 0; i < search.count; i++) {
-      // 詳細画面・資料DL画面への遷移で一覧のページ状態が失われるため、2件目以降は
-      // 案件ごとに検索をやり直してから i 番目の「公示本文」をクリックする
-      // （javascript:doSubmitParams(...)によるページ内遷移のため、ブラウザバックでの
-      // 復元が確実とは限らない。実データ確認済み・2026-08-01）。
-      if (i > 0) {
-        await searchByDate(page, dateIso);
-      }
-      const { detail, documentDownloadUrl, detailPageUrl } = await openDetailByIndex(page, i);
-      const normalized = normalizeGepsTender(detail, detailPageUrl);
-      tenders.push(normalized);
-
-      if (documentDownloadUrl) {
-        try {
-          const docs = await downloadDocuments(page, documentDownloadUrl);
-          documentsByProcurementNo.set(normalized.procurementNo, docs);
-        } catch (err) {
-          // 資料が取れない案件があっても、案件自体の投入は止めない（資料取得方針_v3.md）。
-          // 失敗理由はジョブ側でtender_documentsのfailure相当として扱う。
-          documentsByProcurementNo.set(normalized.procurementNo, []);
-          // eslint-disable-next-line no-console
-          console.error(`資料ダウンロード失敗: ${normalized.procurementNo}`, err);
+      try {
+        // 詳細画面・資料DL画面への遷移で一覧のページ状態が失われるため、2件目以降は
+        // 案件ごとに検索をやり直してから i 番目の「公示本文」をクリックする
+        // （javascript:doSubmitParams(...)によるページ内遷移のため、ブラウザバックでの
+        // 復元が確実とは限らない。実データ確認済み・2026-08-01）。
+        if (i > 0) {
+          await searchByDate(page, dateIso);
         }
+        const { detail, documentDownloadUrl, detailPageUrl } = await openDetailByIndex(page, i);
+        const normalized = normalizeGepsTender(detail, detailPageUrl);
+        tenders.push(normalized);
+
+        if (documentDownloadUrl) {
+          try {
+            const docs = await downloadDocuments(page, documentDownloadUrl);
+            documentsByProcurementNo.set(normalized.procurementNo, docs);
+          } catch (err) {
+            // 資料が取れない案件があっても、案件自体の投入は止めない（資料取得方針_v3.md）。
+            // 失敗理由はジョブ側でtender_documentsのfailure相当として扱う。
+            documentsByProcurementNo.set(normalized.procurementNo, []);
+            // eslint-disable-next-line no-console
+            console.error(`資料ダウンロード失敗: ${normalized.procurementNo}`, err);
+          }
+        }
+      } catch (err) {
+        // 実機確認済み（2026-08-03）：検索やり直しや詳細画面の取得も、サイト側の応答が
+        // 遅い時間帯にはタイムアウトすることがある。ここで捕まえずに投げると
+        // crawlDate()全体が例外で終了し、呼び出し元（jobs/crawl_geps.ts）は
+        // crawlDate()が正常返却した場合しかDBへupsertしないため、それまでに
+        // 既にtendersへ積まれていた（取得済みの）他の案件まで巻き添えで失われて
+        // しまう。1件の検索・詳細取得の失敗で他の全案件を巻き込まないよう、
+        // その案件だけスキップして次のiへ進む。
+        tenderErrors.push({ index: i, message: err instanceof Error ? err.message : String(err) });
+        // eslint-disable-next-line no-console
+        console.error(`検索・詳細取得に失敗しスキップしました（index=${i}）`, err);
       }
     }
 
-    return { tenders, documentsByProcurementNo, truncated: search.truncated, count: search.count };
+    return { tenders, documentsByProcurementNo, truncated: search.truncated, count: search.count, tenderErrors };
   } finally {
     await browser.close();
   }

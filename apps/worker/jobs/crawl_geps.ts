@@ -154,6 +154,20 @@ export async function runDailyGepsCrawl(dateIso: string): Promise<CrawlDateSumma
     found = result.count;
     truncated = result.truncated;
 
+    for (const tenderError of result.tenderErrors) {
+      // 検索やり直し・詳細画面取得がサイト側の遅延等で失敗した案件（crawlDate側で
+      // 既にスキップ済み）。原因調査用にcrawl_errorsへ記録する（実機確認済み・2026-08-03）。
+      skipped++;
+      await client.from("crawl_errors").insert({
+        run_id: run.id,
+        code: "RATE_LIMITED",
+        message: tenderError.message,
+        payload: { dateIso, index: tenderError.index },
+      });
+      // eslint-disable-next-line no-console
+      console.error(`検索・詳細取得に失敗しスキップしました（index=${tenderError.index}）: ${tenderError.message}`);
+    }
+
     for (const tender of result.tenders) {
       if (!tender.procurementNo) {
         // 実データではページごとに細かな表記ゆれがあり、詳細画面から調達案件番号を
