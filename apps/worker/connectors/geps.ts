@@ -247,7 +247,12 @@ export async function downloadDocuments(page: Page, documentDownloadUrl: string)
 
   // 利用者情報確認画面。表示された内容を確認し、再度「次へ」を押す。
   await page.getByRole("button", { name: "次へ", exact: true }).click({ force: true });
-  await page.waitForLoadState("networkidle");
+  // 実機確認済み（2026-08-03）：この先の資料一覧画面は、添付資料が多い案件だと
+  // アイコン等の読み込みが続き、waitForLoadState("networkidle")の30秒以内に
+  // ネットワークが完全に静止せずタイムアウトすることがあった（実際の画面遷移自体は
+  // 完了していた）。無関係な通信の有無に左右されないよう、実際に必要な
+  // 「ダウンロード」ボタンの表示を直接待つ方式に変更した。
+  await page.getByRole("button", { name: "ダウンロード" }).waitFor({ state: "visible", timeout: 45000 });
 
   // 添付資料一覧が表示される。項番・資料種別・ファイル名を先に読み取っておく。
   const portalCategories = await scrapeDocumentCategories(page);
