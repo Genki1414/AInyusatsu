@@ -30,6 +30,22 @@ const DOC_KIND_SLUG: Record<DocKind, string> = {
   その他: "other",
 };
 
+/**
+ * upload()にcontentTypeを渡さないと、Supabase Storageは既定で"text/plain;charset=UTF-8"を
+ * 設定してしまう（実機確認済み・2026-08-04。PDFをアップロードしてもtext/plainになっていた）。
+ * 資料は5種類の拡張子（pdf/docx/doc/xlsx/xls/xlsm/zip）に限られるため、拡張子から
+ * Content-Typeを明示する。該当なしはoctet-streamにする。
+ */
+const CONTENT_TYPE_BY_EXT: Record<string, string> = {
+  pdf: "application/pdf",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  xlsm: "application/vnd.ms-excel.sheet.macroEnabled.12",
+  zip: "application/zip",
+};
+
 export type CrawlDateSummary = {
   date: string;
   found: number;
@@ -113,10 +129,11 @@ async function saveDocuments(
       if (!existing) {
         const ext = doc.filename.includes(".") ? doc.filename.split(".").pop() : "bin";
         const storageKey = `tenders/${tenderId}/${DOC_KIND_SLUG[doc.kind]}_${sha256}.${ext}`;
+        const contentType = CONTENT_TYPE_BY_EXT[(ext ?? "").toLowerCase()] ?? "application/octet-stream";
 
         const { error: uploadError } = await client.storage
           .from(BUCKET)
-          .upload(storageKey, doc.buffer, { upsert: true });
+          .upload(storageKey, doc.buffer, { upsert: true, contentType });
         if (uploadError) throw new Error(uploadError.message);
 
         const { error: insertError } = await client.from("tender_documents").insert({
