@@ -11,10 +11,24 @@
 
 import { createHash } from "node:crypto";
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
-import type { NormalizedGepsTender } from "@ai-nyusatsu-bu/domain";
+import type { DocKind, NormalizedGepsTender } from "@ai-nyusatsu-bu/domain";
 import { crawlDate, type GepsDocument } from "../connectors/geps";
 
 const BUCKET = process.env.TENDER_DOCUMENTS_BUCKET || "tender-documents";
+
+/**
+ * Supabase Storageのキーは日本語（非ASCII文字）を許可せず、"Invalid key"エラーになる
+ * （実機確認済み・2026-08-03）。DocKindは表示用に日本語ラベルのままDB（tender_documentsの
+ * kind列）へ保存しつつ、Storageのキーだけこの英語スラッグに変換する。
+ */
+const DOC_KIND_SLUG: Record<DocKind, string> = {
+  公告: "notice",
+  入札説明書: "guideline",
+  仕様書: "spec",
+  数量表: "quantity",
+  様式: "form",
+  その他: "other",
+};
 
 export type CrawlDateSummary = {
   date: string;
@@ -98,7 +112,7 @@ async function saveDocuments(
 
       if (!existing) {
         const ext = doc.filename.includes(".") ? doc.filename.split(".").pop() : "bin";
-        const storageKey = `tenders/${tenderId}/${doc.kind}_${sha256}.${ext}`;
+        const storageKey = `tenders/${tenderId}/${DOC_KIND_SLUG[doc.kind]}_${sha256}.${ext}`;
 
         const { error: uploadError } = await client.storage
           .from(BUCKET)
