@@ -236,6 +236,19 @@ export async function downloadDocuments(page: Page, documentDownloadUrl: string)
   await fillByLabel("電話番号", contact.tel);
   await fillByLabel("メールアドレス", contact.email);
 
+  // 実機確認済み（2026-08-02、ユーザーのスクリーンショットで確認）：利用者情報入力の
+  // 「次へ」を押しても資料一覧画面には進まず、入力内容をそのまま表示する
+  // 「利用者情報確認」という中間画面がもう1つある。そこでも「次へ」を押して、
+  // ようやく資料一覧とダウンロードボタンのある「調達資料一式ダウンロード」画面に
+  // たどり着く。連絡先入力直後にダウンロードボタンを探しに行く実装では、この
+  // 確認画面を素通りできずタイムアウトしていた（2段階の「次へ」が必要）。
+  await page.getByRole("button", { name: "次へ", exact: true }).click({ force: true });
+  await page.waitForLoadState("networkidle");
+
+  // 利用者情報確認画面。表示された内容を確認し、再度「次へ」を押す。
+  await page.getByRole("button", { name: "次へ", exact: true }).click({ force: true });
+  await page.waitForLoadState("networkidle");
+
   // 添付資料一覧が表示される。項番・資料種別・ファイル名を先に読み取っておく。
   const portalCategories = await scrapeDocumentCategories(page);
 
