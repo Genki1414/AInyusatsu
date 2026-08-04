@@ -7,6 +7,7 @@
 //   - geps.ts           調達ポータルの正規化（タスク1-7）
 //   - document_text.ts  資料テキスト抽出のOCR要否判定（タスク2-2）
 //   - tender_merge.ts   AI解析結果をtendersへ安全にマージする（タスク2-4）
+//   - lots_merge.ts     数量表の行をtender_lotsへ保存する前の重複排除（タスク2-5）
 // 実装予定（実装仕様書_v1.md §1 / ClaudeCode_実装指示書.md §4 参照）
 //   - fit.ts        適合判定（タスク3-1）
 //   - costing.ts    原価集計・応札価格の検討（タスク4-5）
@@ -20,3 +21,4 @@ export * from "./kkj";
 export * from "./geps";
 export * from "./document_text";
 export * from "./tender_merge";
+export * from "./lots_merge";

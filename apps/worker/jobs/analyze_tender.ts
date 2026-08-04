@@ -1,11 +1,10 @@
-// AI解析結果の保存（タスク2-4）。
-// 参照：docs/実装仕様書_v1.md §2（tenders/tender_analyses/tender_forms）, §4
+// AI解析結果の保存（タスク2-4・2-5）。
+// 参照：docs/実装仕様書_v1.md §2（tenders/tender_analyses/tender_forms/tender_lots）, §4
 //
-// プロンプト1（基本情報と期限）・2（参加資格と参加条件）・4（提出書類）・5（注意事項）を実行し、
-// 結果をDBへ保存する。
+// プロンプト1（基本情報と期限）・2（参加資格と参加条件）・3（数量表の構造化と業種割当）・
+// 4（提出書類）・5（注意事項）を実行し、結果をDBへ保存する。
 //
 // 【スコープ外・別タスク】
-// - プロンプト3（数量表の構造化と業種割当）→ tender_lots への書き込みはタスク2-5
 // - プロンプト6（質問案の生成）は org 単位の questions テーブル向け（1案件×1org）で、
 //   全ユーザー共通のこの解析パイプラインには含まない。UI（タスク3系）からオンデマンドで
 //   呼ぶ想定
@@ -13,12 +12,15 @@
 //   上書きしない（agency_idの名寄せに影響するため）。空欄の項目（期限・予定価格・
 //   資格区分など、コネクタでは埋まらない列）だけをAI解析で埋める
 //   （packages/domain の mergeBasicInfoIntoTender 参照）
+// - tender_lotsにはevidence/source列が無いため、行ごとの引用・出典は保持しない
+//   （tender_analyses.raw.lotsに完全な出力を残しているので、必要ならそちらを参照する）
 
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
-import { mergeBasicInfoIntoTender, type TenderBasicFields } from "@ai-nyusatsu-bu/domain";
+import { dedupeLotsByLineNo, mergeBasicInfoIntoTender, type LotRow, type TenderBasicFields } from "@ai-nyusatsu-bu/domain";
 import {
   analyzeBasicInfo,
   analyzeForms,
+  analyzeLots,
   analyzeNotes,
   analyzeQualifications,
   callClaude,
@@ -32,6 +34,7 @@ export type AnalyzeTenderResult = {
   analysisVersion: number;
   tenderFieldsFilled: string[];
   formsCount: number;
+  lotsCount: number;
 };
 
 type TenderRow = TenderBasicFields & {
@@ -81,9 +84,10 @@ export async function analyzeTender(tenderId: string): Promise<AnalyzeTenderResu
     procurement: tender.procurement ?? "",
   };
 
-  const [basicInfo, qualifications, forms, notes] = await Promise.all([
+  const [basicInfo, qualifications, lots, forms, notes] = await Promise.all([
     analyzeBasicInfo({ meta, documents, callModel: callClaude }),
     analyzeQualifications({ meta, documents, callModel: callClaude }),
+    analyzeLots({ meta, documents, callModel: callClaude }),
     analyzeForms({ meta, documents, callModel: callClaude }),
     analyzeNotes({ meta, documents, callModel: callClaude }),
   ]);
@@ -139,8 +143,9 @@ export async function analyzeTender(tenderId: string): Promise<AnalyzeTenderResu
     model: MODEL_NAME,
     qualifications: qualifications.qualifications,
     conditions: qualifications.conditions,
+    trades: lots.trades_summary,
     notes: notes.notes,
-    raw: { basicInfo, qualifications, forms, notes },
+    raw: { basicInfo, qualifications, lots, forms, notes },
   });
   if (analysisError) throw new Error(`tender_analysesの保存に失敗しました: ${analysisError.message}`);
 
@@ -161,5 +166,33 @@ export async function analyzeTender(tenderId: string): Promise<AnalyzeTenderResu
     if (insertFormsError) throw new Error(`tender_formsの保存に失敗しました: ${insertFormsError.message}`);
   }
 
-  return { tenderId, analysisVersion: version, tenderFieldsFilled: Object.keys(patch), formsCount: forms.forms.length };
+  // tender_lots：最新の解析結果だけを残す（前回分は消してから入れ直す）。
+  const { error: deleteLotsError } = await client.from("tender_lots").delete().eq("tender_id", tenderId);
+  if (deleteLotsError) throw new Error(`tender_lotsの削除に失敗しました: ${deleteLotsError.message}`);
+
+  const lotRows: LotRow[] = dedupeLotsByLineNo(
+    lots.lots.map((l) => ({
+      line_no: l.line_no,
+      item: l.item,
+      spec: l.spec,
+      qty: l.qty,
+      unit: l.unit,
+      trade: l.trade,
+      confidence: l.confidence,
+    })),
+  );
+  if (lotRows.length > 0) {
+    const { error: insertLotsError } = await client
+      .from("tender_lots")
+      .insert(lotRows.map((l) => ({ tender_id: tenderId, ...l })));
+    if (insertLotsError) throw new Error(`tender_lotsの保存に失敗しました: ${insertLotsError.message}`);
+  }
+
+  return {
+    tenderId,
+    analysisVersion: version,
+    tenderFieldsFilled: Object.keys(patch),
+    formsCount: forms.forms.length,
+    lotsCount: lotRows.length,
+  };
 }
