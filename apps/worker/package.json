@@ -11,6 +11,7 @@
     "geps:crawl": "tsx --env-file=.env.local scripts/run-geps-crawl.ts",
     "awards:import": "tsx --env-file=.env.local scripts/run-import-awards.ts",
     "market-rates:refresh": "tsx --env-file=.env.local scripts/run-refresh-market-rates.ts",
+    "documents:extract-text": "tsx --env-file=.env.local scripts/run-extract-document-text.ts",
     "ai:smoke-test": "tsx --env-file=.env.local scripts/run-analyze-smoke-test.ts"
   },
   "dependencies": {
@@ -19,7 +20,9 @@
     "@ai-nyusatsu-bu/domain": "workspace:*",
     "adm-zip": "^0.5.16",
     "fast-xml-parser": "^4.5.1",
-    "playwright": "^1.49.1"
+    "pdf-parse": "^2.4.5",
+    "playwright": "^1.49.1",
+    "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.7",

@@ -236,6 +236,24 @@ export async function downloadDocuments(page: Page, documentDownloadUrl: string)
   await fillByLabel("電話番号", contact.tel);
   await fillByLabel("メールアドレス", contact.email);
 
+  // 実機確認済み（2026-08-02、ユーザーのスクリーンショットで確認）：利用者情報入力の
+  // 「次へ」を押しても資料一覧画面には進まず、入力内容をそのまま表示する
+  // 「利用者情報確認」という中間画面がもう1つある。そこでも「次へ」を押して、
+  // ようやく資料一覧とダウンロードボタンのある「調達資料一式ダウンロード」画面に
+  // たどり着く。連絡先入力直後にダウンロードボタンを探しに行く実装では、この
+  // 確認画面を素通りできずタイムアウトしていた（2段階の「次へ」が必要）。
+  await page.getByRole("button", { name: "次へ", exact: true }).click({ force: true });
+  await page.waitForLoadState("networkidle");
+
+  // 利用者情報確認画面。表示された内容を確認し、再度「次へ」を押す。
+  await page.getByRole("button", { name: "次へ", exact: true }).click({ force: true });
+  // 実機確認済み（2026-08-03）：この先の資料一覧画面は、添付資料が多い案件だと
+  // アイコン等の読み込みが続き、waitForLoadState("networkidle")の30秒以内に
+  // ネットワークが完全に静止せずタイムアウトすることがあった（実際の画面遷移自体は
+  // 完了していた）。無関係な通信の有無に左右されないよう、実際に必要な
+  // 「ダウンロード」ボタンの表示を直接待つ方式に変更した。
+  await page.getByRole("button", { name: "ダウンロード" }).waitFor({ state: "visible", timeout: 45000 });
+
   // 添付資料一覧が表示される。項番・資料種別・ファイル名を先に読み取っておく。
   const portalCategories = await scrapeDocumentCategories(page);
 
@@ -282,11 +300,17 @@ async function scrapeDocumentCategories(page: Page): Promise<Map<string, string>
 
 // --- コネクタ本体 -----------------------------------------------------------
 
+export type GepsTenderError = {
+  index: number;
+  message: string;
+};
+
 export type GepsCrawlResult = {
   tenders: NormalizedGepsTender[];
   documentsByProcurementNo: Map<string, GepsDocument[]>;
   truncated: boolean;
   count: number;
+  tenderErrors: GepsTenderError[];
 };
 
 /** 1日分の巡回：検索→各案件の詳細取得→資料ダウンロードまでを行う（分類での絞り込みはできないため1日1回）。 */
@@ -299,34 +323,48 @@ export async function crawlDate(dateIso: string): Promise<GepsCrawlResult> {
     const search = await searchByDate(page, dateIso);
     const tenders: NormalizedGepsTender[] = [];
     const documentsByProcurementNo = new Map<string, GepsDocument[]>();
+    const tenderErrors: GepsTenderError[] = [];
 
     for (let i = 0; i < search.count; i++) {
-      // 詳細画面・資料DL画面への遷移で一覧のページ状態が失われるため、2件目以降は
-      // 案件ごとに検索をやり直してから i 番目の「公示本文」をクリックする
-      // （javascript:doSubmitParams(...)によるページ内遷移のため、ブラウザバックでの
-      // 復元が確実とは限らない。実データ確認済み・2026-08-01）。
-      if (i > 0) {
-        await searchByDate(page, dateIso);
-      }
-      const { detail, documentDownloadUrl, detailPageUrl } = await openDetailByIndex(page, i);
-      const normalized = normalizeGepsTender(detail, detailPageUrl);
-      tenders.push(normalized);
-
-      if (documentDownloadUrl) {
-        try {
-          const docs = await downloadDocuments(page, documentDownloadUrl);
-          documentsByProcurementNo.set(normalized.procurementNo, docs);
-        } catch (err) {
-          // 資料が取れない案件があっても、案件自体の投入は止めない（資料取得方針_v3.md）。
-          // 失敗理由はジョブ側でtender_documentsのfailure相当として扱う。
-          documentsByProcurementNo.set(normalized.procurementNo, []);
-          // eslint-disable-next-line no-console
-          console.error(`資料ダウンロード失敗: ${normalized.procurementNo}`, err);
+      try {
+        // 詳細画面・資料DL画面への遷移で一覧のページ状態が失われるため、2件目以降は
+        // 案件ごとに検索をやり直してから i 番目の「公示本文」をクリックする
+        // （javascript:doSubmitParams(...)によるページ内遷移のため、ブラウザバックでの
+        // 復元が確実とは限らない。実データ確認済み・2026-08-01）。
+        if (i > 0) {
+          await searchByDate(page, dateIso);
         }
+        const { detail, documentDownloadUrl, detailPageUrl } = await openDetailByIndex(page, i);
+        const normalized = normalizeGepsTender(detail, detailPageUrl);
+        tenders.push(normalized);
+
+        if (documentDownloadUrl) {
+          try {
+            const docs = await downloadDocuments(page, documentDownloadUrl);
+            documentsByProcurementNo.set(normalized.procurementNo, docs);
+          } catch (err) {
+            // 資料が取れない案件があっても、案件自体の投入は止めない（資料取得方針_v3.md）。
+            // 失敗理由はジョブ側でtender_documentsのfailure相当として扱う。
+            documentsByProcurementNo.set(normalized.procurementNo, []);
+            // eslint-disable-next-line no-console
+            console.error(`資料ダウンロード失敗: ${normalized.procurementNo}`, err);
+          }
+        }
+      } catch (err) {
+        // 実機確認済み（2026-08-03）：検索やり直しや詳細画面の取得も、サイト側の応答が
+        // 遅い時間帯にはタイムアウトすることがある。ここで捕まえずに投げると
+        // crawlDate()全体が例外で終了し、呼び出し元（jobs/crawl_geps.ts）は
+        // crawlDate()が正常返却した場合しかDBへupsertしないため、それまでに
+        // 既にtendersへ積まれていた（取得済みの）他の案件まで巻き添えで失われて
+        // しまう。1件の検索・詳細取得の失敗で他の全案件を巻き込まないよう、
+        // その案件だけスキップして次のiへ進む。
+        tenderErrors.push({ index: i, message: err instanceof Error ? err.message : String(err) });
+        // eslint-disable-next-line no-console
+        console.error(`検索・詳細取得に失敗しスキップしました（index=${i}）`, err);
       }
     }
 
-    return { tenders, documentsByProcurementNo, truncated: search.truncated, count: search.count };
+    return { tenders, documentsByProcurementNo, truncated: search.truncated, count: search.count, tenderErrors };
   } finally {
     await browser.close();
   }

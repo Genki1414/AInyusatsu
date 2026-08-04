@@ -11,10 +11,40 @@
 
 import { createHash } from "node:crypto";
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
-import type { NormalizedGepsTender } from "@ai-nyusatsu-bu/domain";
+import type { DocKind, NormalizedGepsTender } from "@ai-nyusatsu-bu/domain";
 import { crawlDate, type GepsDocument } from "../connectors/geps";
 
 const BUCKET = process.env.TENDER_DOCUMENTS_BUCKET || "tender-documents";
+
+/**
+ * Supabase Storageのキーは日本語（非ASCII文字）を許可せず、"Invalid key"エラーになる
+ * （実機確認済み・2026-08-03）。DocKindは表示用に日本語ラベルのままDB（tender_documentsの
+ * kind列）へ保存しつつ、Storageのキーだけこの英語スラッグに変換する。
+ */
+const DOC_KIND_SLUG: Record<DocKind, string> = {
+  公告: "notice",
+  入札説明書: "guideline",
+  仕様書: "spec",
+  数量表: "quantity",
+  様式: "form",
+  その他: "other",
+};
+
+/**
+ * upload()にcontentTypeを渡さないと、Supabase Storageは既定で"text/plain;charset=UTF-8"を
+ * 設定してしまう（実機確認済み・2026-08-04。PDFをアップロードしてもtext/plainになっていた）。
+ * 資料は5種類の拡張子（pdf/docx/doc/xlsx/xls/xlsm/zip）に限られるため、拡張子から
+ * Content-Typeを明示する。該当なしはoctet-streamにする。
+ */
+const CONTENT_TYPE_BY_EXT: Record<string, string> = {
+  pdf: "application/pdf",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  xlsm: "application/vnd.ms-excel.sheet.macroEnabled.12",
+  zip: "application/zip",
+};
 
 export type CrawlDateSummary = {
   date: string;
@@ -98,11 +128,12 @@ async function saveDocuments(
 
       if (!existing) {
         const ext = doc.filename.includes(".") ? doc.filename.split(".").pop() : "bin";
-        const storageKey = `tenders/${tenderId}/${doc.kind}_${sha256}.${ext}`;
+        const storageKey = `tenders/${tenderId}/${DOC_KIND_SLUG[doc.kind]}_${sha256}.${ext}`;
+        const contentType = CONTENT_TYPE_BY_EXT[(ext ?? "").toLowerCase()] ?? "application/octet-stream";
 
         const { error: uploadError } = await client.storage
           .from(BUCKET)
-          .upload(storageKey, doc.buffer, { upsert: true });
+          .upload(storageKey, doc.buffer, { upsert: true, contentType });
         if (uploadError) throw new Error(uploadError.message);
 
         const { error: insertError } = await client.from("tender_documents").insert({
@@ -153,6 +184,20 @@ export async function runDailyGepsCrawl(dateIso: string): Promise<CrawlDateSumma
     const result = await crawlDate(dateIso);
     found = result.count;
     truncated = result.truncated;
+
+    for (const tenderError of result.tenderErrors) {
+      // 検索やり直し・詳細画面取得がサイト側の遅延等で失敗した案件（crawlDate側で
+      // 既にスキップ済み）。原因調査用にcrawl_errorsへ記録する（実機確認済み・2026-08-03）。
+      skipped++;
+      await client.from("crawl_errors").insert({
+        run_id: run.id,
+        code: "RATE_LIMITED",
+        message: tenderError.message,
+        payload: { dateIso, index: tenderError.index },
+      });
+      // eslint-disable-next-line no-console
+      console.error(`検索・詳細取得に失敗しスキップしました（index=${tenderError.index}）: ${tenderError.message}`);
+    }
 
     for (const tender of result.tenders) {
       if (!tender.procurementNo) {
