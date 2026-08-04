@@ -1,4 +1,10 @@
-// Claude APIアダプタとプロンプト定義の置き場。
+// Claude APIのアダプタ・プロンプト・出力スキーマ。外部呼び出しは adapters/claude.ts 経由のみ。
 // プロンプト本文は docs/AI解析プロンプト集.md を正とする（書き換えない）。
-// 実装はタスク2-3（プロンプト6本と出力スキーマ）で着手する。
-export {};
+export * from "./extract";
+export * from "./analyze";
+export * from "./schemas/basic_info";
+export * from "./schemas/qualifications";
+export * from "./schemas/lots";
+export * from "./schemas/forms";
+export * from "./schemas/notes";
+export * from "./schemas/questions";

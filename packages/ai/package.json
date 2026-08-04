@@ -4,5 +4,17 @@
   "private": true,
   "description": "Claude APIのアダプタ・プロンプト・出力スキーマ。外部呼び出しはこのパッケージ経由のみ。",
   "type": "module",
-  "main": "./src/index.ts"
+  "main": "./src/index.ts",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.115.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
+  }
 }
