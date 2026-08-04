@@ -63,6 +63,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@ai-nyusatsu-bu/ai':
+        specifier: workspace:*
+        version: link:../../packages/ai
       '@ai-nyusatsu-bu/db':
         specifier: workspace:*
         version: link:../../packages/db

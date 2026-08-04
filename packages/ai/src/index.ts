@@ -8,3 +8,4 @@ export * from "./schemas/lots";
 export * from "./schemas/forms";
 export * from "./schemas/notes";
 export * from "./schemas/questions";
+export * from "../adapters/claude";

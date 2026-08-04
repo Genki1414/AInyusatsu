@@ -10,9 +10,11 @@
     "kkj:sync": "tsx --env-file=.env.local scripts/run-kkj-sync.ts",
     "geps:crawl": "tsx --env-file=.env.local scripts/run-geps-crawl.ts",
     "awards:import": "tsx --env-file=.env.local scripts/run-import-awards.ts",
-    "market-rates:refresh": "tsx --env-file=.env.local scripts/run-refresh-market-rates.ts"
+    "market-rates:refresh": "tsx --env-file=.env.local scripts/run-refresh-market-rates.ts",
+    "ai:smoke-test": "tsx --env-file=.env.local scripts/run-analyze-smoke-test.ts"
   },
   "dependencies": {
+    "@ai-nyusatsu-bu/ai": "workspace:*",
     "@ai-nyusatsu-bu/db": "workspace:*",
     "@ai-nyusatsu-bu/domain": "workspace:*",
     "adm-zip": "^0.5.16",
