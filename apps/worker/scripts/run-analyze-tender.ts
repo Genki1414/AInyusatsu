@@ -1,4 +1,4 @@
-// AI解析結果の保存ジョブ（タスク2-4）をローカルから実行するCLI。
+// AI解析結果の保存ジョブ（タスク2-4・2-5）をローカルから実行するCLI。
 // 使い方: pnpm --filter worker analyze:tender -- <tenders.id>
 // 事前条件：対象案件の資料でタスク2-2のテキスト抽出が完了していること
 //   （pnpm --filter worker documents:extract-text）
