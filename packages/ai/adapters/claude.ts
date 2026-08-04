@@ -6,8 +6,11 @@
 // 沿い、実在する現行のSonnet系モデルIDを使う。モデルを変更する場合は
 // docs/AI解析プロンプト集.md §8「変更したときは必ず測る」のとおりゴールドセットで再測定すること。
 //
-// 【重要・未検証】本セッションのネットワークポリシーでANTHROPIC_API_KEYを使った実呼び出しを
-// 確認できていない。実際に呼び出して確認してから使うこと。
+// 【実機確認済み・2026-08-04】claude-sonnet-5に対しては、`temperature`パラメータ自体が
+// 廃止されており、指定するとAPIが400（invalid_request_error）を返す
+// （"`temperature` is deprecated for this model."）。そのためこのモデルへは送らない。
+// extract()側のインターフェース（temperature: 0固定）はドキュメントの意図を残すため
+// そのままにしているが、実際にAPIへ渡すのはこのアダプタの責務なので、ここで無視する。
 
 import Anthropic from "@anthropic-ai/sdk";
 import type { CallModel } from "../src/extract";
@@ -28,11 +31,11 @@ function getClient(): Anthropic {
 }
 
 /** Claude APIを呼び出し、応答のテキスト部分を返す。extract()のcallModelとして渡す。 */
-export const callClaude: CallModel = async ({ system, user, temperature }) => {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export const callClaude: CallModel = async ({ system, user, temperature: _temperature }) => {
   const res = await getClient().messages.create({
     model: MODEL,
     max_tokens: MAX_TOKENS,
-    temperature,
     system,
     messages: [{ role: "user", content: user }],
   });
