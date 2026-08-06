@@ -4,7 +4,9 @@
 // プロンプト1（基本情報と期限）・2（参加資格と参加条件）・3（数量表の構造化と業種割当）・
 // 4（提出書類）・5（注意事項）を実行し、結果をDBへ保存する。あわせて期限の前後関係・
 // 和暦変換ミスの検出（タスク2-3b、docs/AI解析プロンプト集.md §1）を行い、違反があれば
-// tenders.needs_reviewを立てる。
+// tenders.needs_reviewを立てる。解析が完了したら tenders.collect_status を「解析完了」に
+// 進める（docs/ai-nyusatsu-bu-prototype-v7.jsx の状態遷移：取得済→AI解析中→解析完了→公開中）。
+// 「公開中」への遷移はユーザーによる公開操作（タスク3系の画面）で行うため、ここでは行わない。
 //
 // 【スコープ外・別タスク】
 // - プロンプト6（質問案の生成）は org 単位の questions テーブル向け（1案件×1org）で、
@@ -148,7 +150,7 @@ export async function analyzeTender(tenderId: string): Promise<AnalyzeTenderResu
 
   const { error: updateError } = await client
     .from("tenders")
-    .update({ ...patch, needs_review: needsReview, review_reasons: reviewReasons })
+    .update({ ...patch, needs_review: needsReview, review_reasons: reviewReasons, collect_status: "解析完了" })
     .eq("id", tenderId);
   if (updateError) throw new Error(`tendersの更新に失敗しました: ${updateError.message}`);
 
