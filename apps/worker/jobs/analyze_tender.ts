@@ -1,8 +1,10 @@
-// AI解析結果の保存（タスク2-4・2-5）。
+// AI解析結果の保存（タスク2-4・2-5・2-3b）。
 // 参照：docs/実装仕様書_v1.md §2（tenders/tender_analyses/tender_forms/tender_lots）, §4
 //
 // プロンプト1（基本情報と期限）・2（参加資格と参加条件）・3（数量表の構造化と業種割当）・
-// 4（提出書類）・5（注意事項）を実行し、結果をDBへ保存する。
+// 4（提出書類）・5（注意事項）を実行し、結果をDBへ保存する。あわせて期限の前後関係・
+// 和暦変換ミスの検出（タスク2-3b、docs/AI解析プロンプト集.md §1）を行い、違反があれば
+// tenders.needs_reviewを立てる。
 //
 // 【スコープ外・別タスク】
 // - プロンプト6（質問案の生成）は org 単位の questions テーブル向け（1案件×1org）で、
@@ -16,7 +18,13 @@
 //   （tender_analyses.raw.lotsに完全な出力を残しているので、必要ならそちらを参照する）
 
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
-import { dedupeLotsByLineNo, mergeBasicInfoIntoTender, type LotRow, type TenderBasicFields } from "@ai-nyusatsu-bu/domain";
+import {
+  dedupeLotsByLineNo,
+  mergeBasicInfoIntoTender,
+  validateTenderDates,
+  type LotRow,
+  type TenderBasicFields,
+} from "@ai-nyusatsu-bu/domain";
 import {
   analyzeBasicInfo,
   analyzeForms,
@@ -35,10 +43,13 @@ export type AnalyzeTenderResult = {
   tenderFieldsFilled: string[];
   formsCount: number;
   lotsCount: number;
+  needsReview: boolean;
+  reviewReasons: string[];
 };
 
 type TenderRow = TenderBasicFields & {
   notice_no: string | null;
+  notice_date: string | null;
   procurement: string | null;
   agencies: { name: string | null } | { name: string | null }[] | null;
 };
@@ -56,7 +67,7 @@ export async function analyzeTender(tenderId: string): Promise<AnalyzeTenderResu
   const { data: tender, error: tenderError } = await client
     .from("tenders")
     .select(
-      "org_unit, submit_deadline, qa_deadline, bid_open_at, term_from, term_to, place, qual_category, item, grade, areas, budget, notice_no, procurement, agencies(name)",
+      "org_unit, submit_deadline, qa_deadline, bid_open_at, term_from, term_to, place, qual_category, item, grade, areas, budget, notice_no, notice_date, procurement, agencies(name)",
     )
     .eq("id", tenderId)
     .single<TenderRow>();
@@ -122,10 +133,24 @@ export async function analyzeTender(tenderId: string): Promise<AnalyzeTenderResu
     budget: basicInfo.budget.value,
   };
   const patch = mergeBasicInfoIntoTender(currentFields, extractedFields);
-  if (Object.keys(patch).length > 0) {
-    const { error: updateError } = await client.from("tenders").update(patch).eq("id", tenderId);
-    if (updateError) throw new Error(`tendersの更新に失敗しました: ${updateError.message}`);
-  }
+
+  // タスク2-3b：期限の前後関係・和暦変換ミスの検出。コネクタの確定値とAI解析で新たに
+  // 埋めた値の両方を含む「今の実際の状態」（currentFields + patch）に対して検証する。
+  const effectiveDates = { ...currentFields, ...patch };
+  const dateIssues = validateTenderDates({
+    noticeDate: tender.notice_date,
+    submitDeadline: effectiveDates.submit_deadline,
+    qaDeadline: effectiveDates.qa_deadline,
+    bidOpenAt: effectiveDates.bid_open_at,
+  });
+  const needsReview = dateIssues.length > 0;
+  const reviewReasons = dateIssues.map((i) => i.message);
+
+  const { error: updateError } = await client
+    .from("tenders")
+    .update({ ...patch, needs_review: needsReview, review_reasons: reviewReasons })
+    .eq("id", tenderId);
+  if (updateError) throw new Error(`tendersの更新に失敗しました: ${updateError.message}`);
 
   // tender_analyses：バージョンを1つ進めて追加保存する（過去の解析結果を残す）。
   const { data: latest } = await client
@@ -194,5 +219,7 @@ export async function analyzeTender(tenderId: string): Promise<AnalyzeTenderResu
     tenderFieldsFilled: Object.keys(patch),
     formsCount: forms.forms.length,
     lotsCount: lotRows.length,
+    needsReview,
+    reviewReasons,
   };
 }
