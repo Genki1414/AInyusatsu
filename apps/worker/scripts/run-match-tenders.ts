@@ -1,0 +1,16 @@
+// 提案の作成（match ジョブ、タスク3-2）をローカルから実行するCLI。
+// 使い方: pnpm --filter worker match:tenders
+// 参照：docs/reference/ローカル実行手順.md
+
+import { runMatchTenders } from "../jobs/match_tenders";
+
+async function main() {
+  console.log("公開中の案件を条件セットごとに採点し、proposalsへ保存します");
+  const result = await runMatchTenders();
+  console.log(JSON.stringify(result, null, 2));
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exitCode = 1;
+});
