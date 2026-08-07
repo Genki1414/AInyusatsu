@@ -13,7 +13,8 @@
     "market-rates:refresh": "tsx --env-file=.env.local scripts/run-refresh-market-rates.ts",
     "documents:extract-text": "tsx --env-file=.env.local scripts/run-extract-document-text.ts",
     "ai:smoke-test": "tsx --env-file=.env.local scripts/run-analyze-smoke-test.ts",
-    "analyze:tender": "tsx --env-file=.env.local scripts/run-analyze-tender.ts"
+    "analyze:tender": "tsx --env-file=.env.local scripts/run-analyze-tender.ts",
+    "match:tenders": "tsx --env-file=.env.local scripts/run-match-tenders.ts"
   },
   "dependencies": {
     "@ai-nyusatsu-bu/ai": "workspace:*",
