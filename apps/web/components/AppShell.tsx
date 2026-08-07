@@ -8,6 +8,8 @@ import { logout } from "@/app/actions";
 const NAV = [
   { key: "home", href: "/", label: "今日やること" },
   { key: "proposals", href: "/proposals", label: "提案された案件" },
+  { key: "criteria", href: "/criteria", label: "提案条件" },
+  { key: "qualifications", href: "/qualifications", label: "入札資格" },
 ] as const;
 
 export type NavKey = (typeof NAV)[number]["key"];
