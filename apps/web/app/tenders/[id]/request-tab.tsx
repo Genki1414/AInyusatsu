@@ -5,7 +5,12 @@
 // 業種ごとに数量表の該当行だけを切り出し、対象業種の協力会社（メール登録済みのみ）に
 // チェックを入れて送信する。実際にメールが送信されるため、送信ボタンには確認ダイアログを
 // 挟んでいる（components/ConfirmSubmitButton）。
+//
+// 御社による正式取得（company_tenders.official_status）が「取得済」になるまでは送信できない
+// （docs/資料取得方針_v3.md §5「取得済みになるまで…作業を促さない」を見積依頼にも適用する。
+// ユーザーからの明示的な要望による）。サーバー側（actions.ts）でも同じ判定をしている。
 import { useActionState } from "react";
+import Link from "next/link";
 import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
 import { Panel, Pill } from "@/components/ui";
 import { buildQuoteRequestEmail, groupLotsByTrade, type QuoteRequestLot } from "@ai-nyusatsu-bu/domain";
@@ -19,6 +24,7 @@ const input = "rounded border border-slate-300 bg-white px-2 py-1 text-xs focus:
 
 export function RequestTab({
   tenderId,
+  senderOrgName,
   tenderName,
   agencyName,
   place,
@@ -27,8 +33,10 @@ export function RequestTab({
   lots,
   partners,
   suggestedDueAt,
+  officialStatus,
 }: {
   tenderId: string;
+  senderOrgName: string;
   tenderName: string;
   agencyName: string;
   place: string | null;
@@ -37,10 +45,27 @@ export function RequestTab({
   lots: QuoteRequestLot[];
   partners: RequestTabPartner[];
   suggestedDueAt: string | null;
+  officialStatus: "未取得" | "申請中" | "取得済";
 }) {
   const boundAction = sendQuoteRequests.bind(null, tenderId);
   const [state, formAction, pending] = useActionState(boundAction, initialState);
   const tradeGroups = groupLotsByTrade(lots);
+
+  if (officialStatus !== "取得済") {
+    return (
+      <Panel title="見積依頼">
+        <p className="text-xs text-slate-700">
+          協力会社への見積依頼は、御社による資料の正式取得（取得済）が完了してから送信できます。
+        </p>
+        <p className="mt-1 text-xs text-slate-500">
+          現在の状況：<Pill tone={officialStatus === "申請中" ? "amber" : "rose"}>{officialStatus}</Pill>
+        </p>
+        <Link href={`/tenders/${tenderId}?tab=docs`} className="mt-2 inline-block text-xs text-blue-800 underline">
+          「資料」タブで正式取得の手順を確認する
+        </Link>
+      </Panel>
+    );
+  }
 
   if (tradeGroups.length === 0) {
     return (
@@ -55,6 +80,7 @@ export function RequestTab({
       {tradeGroups.map((group) => {
         const candidates = partners.filter((p) => p.email);
         const { body } = buildQuoteRequestEmail({
+          senderOrgName,
           tenderName,
           agencyName,
           place,

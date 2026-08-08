@@ -31,11 +31,14 @@ type TenderRow = {
   term_from: string | null;
   term_to: string | null;
   source_url: string | null;
+  acquire_method: string;
   collect_status: string;
   needs_review: boolean;
   review_reasons: string[];
   agencies: { name: string } | { name: string }[] | null;
 };
+
+type OfficialStatus = "未取得" | "申請中" | "取得済";
 
 const TABS = [
   { key: "fit", label: "参加判断", icon: Target },
@@ -76,11 +79,12 @@ export default async function TenderDetailPage({
 
   const { supabase, orgName } = await requireOrgContext();
 
-  const [{ data: tender }, { data: documents }, { data: lots }, { data: analysis }, { data: proposal }, { data: partners }] = await Promise.all([
+  const [{ data: tender }, { data: documents }, { data: lots }, { data: analysis }, { data: proposal }, { data: partners }, { data: companyTender }] =
+    await Promise.all([
     supabase
       .from("tenders")
       .select(
-        "id, name, org_unit, notice_no, item, grade, areas, budget, qa_deadline, submit_deadline, bid_open_at, place, term_from, term_to, source_url, collect_status, needs_review, review_reasons, agencies(name)",
+        "id, name, org_unit, notice_no, item, grade, areas, budget, qa_deadline, submit_deadline, bid_open_at, place, term_from, term_to, source_url, acquire_method, collect_status, needs_review, review_reasons, agencies(name)",
       )
       .eq("id", id)
       .maybeSingle<TenderRow>(),
@@ -105,10 +109,12 @@ export default async function TenderDetailPage({
       .limit(1)
       .maybeSingle<FitTabProposal & { status: string }>(),
     supabase.from("partners").select("id, name, base, email").eq("active", true).returns<RequestTabPartner[]>(),
+    supabase.from("company_tenders").select("official_status").eq("tender_id", id).maybeSingle<{ official_status: OfficialStatus }>(),
   ]);
 
   if (!tender) notFound();
 
+  const officialStatus: OfficialStatus = companyTender?.official_status ?? "未取得";
   const gotDocs = DOC_KINDS.filter((kind) => (documents ?? []).some((d) => d.kind === kind && d.fetched)).length;
 
   // 見積依頼の回答期限の目安：提出期限の3日前（datetime-local用にAsia/Tokyoのローカル表記へ）。
@@ -185,13 +191,23 @@ export default async function TenderDetailPage({
       </div>
 
       {tab === "fit" && <FitTab proposal={proposal} />}
-      {tab === "docs" && <DocsTab documents={documents ?? []} lots={lots ?? []} sourceUrl={tender.source_url} />}
+      {tab === "docs" && (
+        <DocsTab
+          documents={documents ?? []}
+          lots={lots ?? []}
+          sourceUrl={tender.source_url}
+          tenderId={id}
+          acquireMethod={tender.acquire_method}
+          officialStatus={officialStatus}
+        />
+      )}
       {tab === "analysis" && (
         <AnalysisTab tender={{ item: tender.item, grade: tender.grade, areas: tender.areas, place: tender.place }} analysis={analysis} />
       )}
       {tab === "request" && (
         <RequestTab
           tenderId={id}
+          senderOrgName={orgName}
           tenderName={tender.name}
           agencyName={agencyName(tender.agencies)}
           place={tender.place}
@@ -200,6 +216,7 @@ export default async function TenderDetailPage({
           lots={lots ?? []}
           partners={partners ?? []}
           suggestedDueAt={suggestedDueAt}
+          officialStatus={officialStatus}
         />
       )}
     </AppShell>

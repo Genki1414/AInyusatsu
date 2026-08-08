@@ -33,6 +33,7 @@ describe("groupLotsByTrade", () => {
 describe("buildQuoteRequestEmail", () => {
   it("件名は「【見積依頼】案件名」になる", () => {
     const { subject } = buildQuoteRequestEmail({
+      senderOrgName: "東葉総合サービス株式会社",
       tenderName: "庁舎清掃業務委託",
       agencyName: "関東地方整備局",
       place: null,
@@ -45,8 +46,9 @@ describe("buildQuoteRequestEmail", () => {
     expect(subject).toBe("【見積依頼】庁舎清掃業務委託");
   });
 
-  it("本文に案件名・回答期限・数量表の行が含まれる", () => {
+  it("本文に挨拶・送信元・案件名・回答期限・数量表の行が含まれる", () => {
     const { body } = buildQuoteRequestEmail({
+      senderOrgName: "東葉総合サービス株式会社",
       tenderName: "庁舎清掃業務委託",
       agencyName: "関東地方整備局",
       place: "東京都千代田区",
@@ -56,6 +58,8 @@ describe("buildQuoteRequestEmail", () => {
       trade: "清掃",
       lots: [{ line_no: 1, item: "日常清掃", spec: "床面清掃", qty: 1, unit: "式", trade: "清掃" }],
     });
+    expect(body).toContain("お世話になっております。");
+    expect(body).toContain("東葉総合サービス株式会社でございます。");
     expect(body).toContain("案件名：庁舎清掃業務委託");
     expect(body).toContain("履行場所：東京都千代田区");
     expect(body).toContain("履行期間：2026-09-01 〜 2027-03-31");
@@ -63,8 +67,9 @@ describe("buildQuoteRequestEmail", () => {
     expect(body).toContain("1. 日常清掃（床面清掃） 1式");
   });
 
-  it("履行場所・履行期間が無ければその行を省く", () => {
+  it("履行場所・履行期間が無ければ「未確認」と表示する（推測しない）", () => {
     const { body } = buildQuoteRequestEmail({
+      senderOrgName: "東葉総合サービス株式会社",
       tenderName: "庁舎清掃業務委託",
       agencyName: "関東地方整備局",
       place: null,
@@ -74,7 +79,7 @@ describe("buildQuoteRequestEmail", () => {
       trade: "清掃",
       lots: [],
     });
-    expect(body).not.toContain("履行場所");
-    expect(body).not.toContain("履行期間");
+    expect(body).toContain("履行場所：未確認");
+    expect(body).toContain("履行期間：未確認 〜 未確認");
   });
 });

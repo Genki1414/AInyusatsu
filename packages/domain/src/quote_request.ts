@@ -36,6 +36,7 @@ export function groupLotsByTrade<T extends QuoteRequestLot>(lots: T[]): TradeLot
 }
 
 export type QuoteRequestEmailInput = {
+  senderOrgName: string; // 送信元（自社）の名称。挨拶文に使う
   tenderName: string;
   agencyName: string;
   place: string | null;
@@ -55,18 +56,22 @@ function formatLotLine(lot: QuoteRequestLot): string {
 /** 依頼メールの件名・本文を組み立てる（編集前のひな形。呼び出し側で編集可能にする想定）。 */
 export function buildQuoteRequestEmail(input: QuoteRequestEmailInput): { subject: string; body: string } {
   const subject = `【見積依頼】${input.tenderName}`;
-  const lines: (string | null)[] = [
-    `${input.agencyName} 発注の下記案件について、${input.trade}の見積をお願いいたします。`,
+  const lines: string[] = [
+    "お世話になっております。",
+    `${input.senderOrgName}でございます。`,
+    "",
+    `${input.agencyName} 発注の下記案件について、${input.trade}のお見積りをお願いできますでしょうか。`,
     "",
     `案件名：${input.tenderName}`,
-    input.place ? `履行場所：${input.place}` : null,
-    input.termFrom && input.termTo ? `履行期間：${input.termFrom} 〜 ${input.termTo}` : null,
+    `履行場所：${input.place ?? "未確認"}`,
+    `履行期間：${input.termFrom ?? "未確認"} 〜 ${input.termTo ?? "未確認"}`,
     `回答期限：${input.dueAtLabel}`,
     "",
     "【対象範囲】",
     ...input.lots.map(formatLotLine),
     "",
-    "ご対応いただけない場合も、その旨のご返信をお願いいたします。",
+    "お忙しいところ恐れ入りますが、ご都合が合わない場合もその旨をご返信いただけますと幸いです。",
+    "どうぞよろしくお願いいたします。",
   ];
-  return { subject, body: lines.filter((line): line is string => line !== null).join("\n") };
+  return { subject, body: lines.join("\n") };
 }

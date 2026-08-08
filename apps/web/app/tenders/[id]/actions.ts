@@ -53,8 +53,18 @@ export async function sendQuoteRequests(
   }
   const dueAtLabel = new Date(dueAtIso).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
 
-  const { orgId } = await requireOrgContext();
+  const { orgId, orgName } = await requireOrgContext();
   const supabase = await createClient();
+
+  // 御社による正式取得が完了するまでは送信させない（画面側のガードに加え、こちらでも検証する）。
+  const { data: companyTender } = await supabase
+    .from("company_tenders")
+    .select("official_status")
+    .eq("tender_id", tenderId)
+    .maybeSingle<{ official_status: string }>();
+  if (companyTender?.official_status !== "取得済") {
+    return { error: "資料の正式取得（取得済）が完了してから見積依頼を送信できます。「資料」タブから設定してください。", summary: null };
+  }
 
   const [{ data: tender, error: tenderError }, { data: lots, error: lotsError }, { data: partners, error: partnersError }] = await Promise.all([
     supabase.from("tenders").select("name, place, term_from, term_to, agencies(name)").eq("id", tenderId).single<TenderRow>(),
@@ -89,6 +99,7 @@ export async function sendQuoteRequests(
       typeof bodyOverride === "string" && bodyOverride.trim() !== ""
         ? bodyOverride
         : buildQuoteRequestEmail({
+            senderOrgName: orgName,
             tenderName: tender.name,
             agencyName: agencyName(tender.agencies),
             place: tender.place,
