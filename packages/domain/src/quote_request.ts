@@ -72,6 +72,7 @@ export function buildQuoteRequestEmail(input: QuoteRequestEmailInput): { subject
     "【対象範囲】",
     ...input.lots.map(formatLotLine),
     "",
+    "見積もり可能なようでしたら、その旨ご返信ください。仕様書等の詳細資料をお送りいたします。",
     "お忙しいところ恐れ入りますが、ご都合が合わない場合もその旨をご返信いただけますと幸いです。",
     "どうぞよろしくお願いいたします。",
     "",

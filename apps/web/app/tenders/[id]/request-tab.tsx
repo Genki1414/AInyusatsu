@@ -60,7 +60,8 @@ function PartnerPicker({
     if (area && p.areas.length > 0 && !p.areas.includes(area)) return false;
     return true;
   };
-  const noMatch = !candidates.some(matches);
+  const visibleCount = candidates.filter(matches).length;
+  const noMatch = visibleCount === 0;
 
   return (
     <div className="mt-1">
@@ -89,6 +90,9 @@ function PartnerPicker({
             ))}
           </select>
         </label>
+        <span className="text-xs text-slate-400">
+          {visibleCount}社を表示中（全{candidates.length}社）
+        </span>
       </div>
       <div className="max-h-48 space-y-0.5 overflow-y-auto rounded border border-slate-100 p-1">
         {noMatch && <p className="px-1.5 py-1 text-xs text-slate-400">該当する協力会社がありません</p>}

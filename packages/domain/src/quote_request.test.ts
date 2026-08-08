@@ -71,6 +71,23 @@ describe("buildQuoteRequestEmail", () => {
     expect(body).toContain("1. 日常清掃（床面清掃） 1式");
   });
 
+  it("本文に、見積可能な場合は資料を送付する旨が含まれる", () => {
+    const { body } = buildQuoteRequestEmail({
+      senderOrgName: "東葉総合サービス株式会社",
+      senderContactName: "山田 太郎",
+      senderContactEmail: "yamada@example.co.jp",
+      tenderName: "庁舎清掃業務委託",
+      agencyName: "関東地方整備局",
+      place: null,
+      termFrom: null,
+      termTo: null,
+      dueAtLabel: "2026/08/20 17:00",
+      trade: "清掃",
+      lots: [],
+    });
+    expect(body).toContain("見積もり可能なようでしたら、その旨ご返信ください。仕様書等の詳細資料をお送りいたします。");
+  });
+
   it("末尾に送信元の署名（組織名・担当者名・連絡先メール）が入る", () => {
     const { body } = buildQuoteRequestEmail({
       senderOrgName: "東葉総合サービス株式会社",
