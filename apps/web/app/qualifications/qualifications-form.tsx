@@ -1,7 +1,8 @@
 "use client";
 
 import { useActionState } from "react";
-import { AreaCheckboxGroup, Panel } from "@/components/ui";
+import { AreaCheckboxGroup } from "@/components/AreaCheckboxGroup";
+import { Panel } from "@/components/ui";
 import { AREA_OPTIONS, ITEM_OPTIONS, PREFECTURE_OPTIONS, QUAL_CATEGORIES } from "@/lib/catalog";
 import { saveQualifications, type QualificationsState } from "./actions";
 

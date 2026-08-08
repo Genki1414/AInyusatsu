@@ -2,7 +2,8 @@
 
 import { useActionState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { AreaCheckboxGroup, Panel } from "@/components/ui";
+import { AreaCheckboxGroup } from "@/components/AreaCheckboxGroup";
+import { Panel } from "@/components/ui";
 import { AREA_OPTIONS, PREFECTURE_OPTIONS, TRADE_OPTIONS } from "@/lib/catalog";
 import { savePartner, type PartnerState } from "./actions";
 

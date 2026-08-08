@@ -54,6 +54,7 @@ function PartnerPicker({
   const [query, setQuery] = useState("");
   const [tradeOnly, setTradeOnly] = useState(true);
   const [area, setArea] = useState("");
+  const [selectedCount, setSelectedCount] = useState(0);
   const q = query.trim().toLowerCase();
 
   const matches = (p: RequestTabPartner) => {
@@ -66,13 +67,19 @@ function PartnerPicker({
   const noMatch = visibleCount === 0;
   const listRef = useRef<HTMLDivElement>(null);
 
-  // チェックボックスは非制御（フォーム送信時の値をそのまま使うため）なので、
+  // チェックボックスは非制御（フォーム送信時の値をそのまま使うため）で、選択数もこのref経由で
+  // 数え直す（ボタンでのDOM直接操作はchangeイベントを発火しないため、都度手動で更新する）。
+  function updateSelectedCount() {
+    setSelectedCount(listRef.current?.querySelectorAll<HTMLInputElement>('input[type="checkbox"]:checked').length ?? 0);
+  }
+
   // 「表示中の全社を選択」はDOMを直接操作する。hiddenが付いていない
   // （＝絞り込みに一致している）labelの中のcheckboxだけを対象にする。
   function selectAllVisible() {
     listRef.current?.querySelectorAll<HTMLInputElement>('label:not(.hidden) input[type="checkbox"]').forEach((el) => {
       el.checked = true;
     });
+    updateSelectedCount();
   }
 
   // 絞り込みで隠れているチェックも含めて、この業種の選択を全て解除する
@@ -80,6 +87,7 @@ function PartnerPicker({
     listRef.current?.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((el) => {
       el.checked = false;
     });
+    updateSelectedCount();
   }
 
   // 絞り込みに関わらず、AIのおすすめ（recommendedのキーにある会社）だけを選択する
@@ -87,6 +95,7 @@ function PartnerPicker({
     listRef.current?.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((el) => {
       el.checked = Boolean(recommended[el.value]);
     });
+    updateSelectedCount();
   }
 
   return (
@@ -128,6 +137,7 @@ function PartnerPicker({
         <span className="text-xs text-slate-400">
           {visibleCount}社を表示中（全{candidates.length}社）
         </span>
+        <span className="text-xs font-medium text-blue-800">{selectedCount}社を選択中</span>
         {visibleCount > 0 && (
           <button
             type="button"
@@ -156,7 +166,11 @@ function PartnerPicker({
           </button>
         )}
       </div>
-      <div ref={listRef} className="max-h-48 space-y-0.5 overflow-y-auto rounded border border-slate-100 p-1">
+      <div
+        ref={listRef}
+        onChange={updateSelectedCount}
+        className="max-h-48 space-y-0.5 overflow-y-auto rounded border border-slate-100 p-1"
+      >
         {noMatch && <p className="px-1.5 py-1 text-xs text-slate-400">該当する協力会社がありません</p>}
         {candidates.map((p) => (
           <label
