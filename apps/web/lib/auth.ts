@@ -7,6 +7,8 @@ type Supabase = Awaited<ReturnType<typeof createClient>>;
 export type OrgContext = {
   supabase: Supabase;
   userId: string;
+  userName: string;
+  userEmail: string;
   orgId: string;
   orgName: string;
 };
@@ -20,9 +22,9 @@ export async function requireOrgContext(): Promise<OrgContext> {
 
   const { data: profile } = await supabase
     .from("users")
-    .select("org_id")
+    .select("org_id, name")
     .eq("id", user.id)
-    .single<{ org_id: string }>();
+    .single<{ org_id: string; name: string }>();
   if (!profile) redirect("/login");
 
   const { data: organization } = await supabase
@@ -31,5 +33,12 @@ export async function requireOrgContext(): Promise<OrgContext> {
     .eq("id", profile.org_id)
     .single<{ name: string }>();
 
-  return { supabase, userId: user.id, orgId: profile.org_id, orgName: organization?.name ?? "組織未設定" };
+  return {
+    supabase,
+    userId: user.id,
+    userName: profile.name,
+    userEmail: user.email ?? "",
+    orgId: profile.org_id,
+    orgName: organization?.name ?? "組織未設定",
+  };
 }

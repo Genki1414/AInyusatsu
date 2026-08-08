@@ -77,7 +77,7 @@ export default async function TenderDetailPage({
   const { tab: tabParam } = await searchParams;
   const tab: TabKey = TABS.some((t) => t.key === tabParam) ? (tabParam as TabKey) : "fit";
 
-  const { supabase, orgName } = await requireOrgContext();
+  const { supabase, orgName, userName, userEmail } = await requireOrgContext();
 
   const [{ data: tender }, { data: documents }, { data: lots }, { data: analysis }, { data: proposal }, { data: partners }, { data: companyTender }] =
     await Promise.all([
@@ -208,6 +208,8 @@ export default async function TenderDetailPage({
         <RequestTab
           tenderId={id}
           senderOrgName={orgName}
+          senderContactName={userName}
+          senderContactEmail={userEmail}
           tenderName={tender.name}
           agencyName={agencyName(tender.agencies)}
           place={tender.place}

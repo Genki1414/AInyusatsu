@@ -25,6 +25,8 @@ const input = "rounded border border-slate-300 bg-white px-2 py-1 text-xs focus:
 export function RequestTab({
   tenderId,
   senderOrgName,
+  senderContactName,
+  senderContactEmail,
   tenderName,
   agencyName,
   place,
@@ -37,6 +39,8 @@ export function RequestTab({
 }: {
   tenderId: string;
   senderOrgName: string;
+  senderContactName: string;
+  senderContactEmail: string;
   tenderName: string;
   agencyName: string;
   place: string | null;
@@ -81,6 +85,8 @@ export function RequestTab({
         const candidates = partners.filter((p) => p.email);
         const { body } = buildQuoteRequestEmail({
           senderOrgName,
+          senderContactName,
+          senderContactEmail,
           tenderName,
           agencyName,
           place,

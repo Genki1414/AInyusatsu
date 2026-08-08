@@ -53,7 +53,7 @@ export async function sendQuoteRequests(
   }
   const dueAtLabel = new Date(dueAtIso).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
 
-  const { orgId, orgName } = await requireOrgContext();
+  const { orgId, orgName, userName, userEmail } = await requireOrgContext();
   const supabase = await createClient();
 
   // 御社による正式取得が完了するまでは送信させない（画面側のガードに加え、こちらでも検証する）。
@@ -100,6 +100,8 @@ export async function sendQuoteRequests(
         ? bodyOverride
         : buildQuoteRequestEmail({
             senderOrgName: orgName,
+            senderContactName: userName,
+            senderContactEmail: userEmail,
             tenderName: tender.name,
             agencyName: agencyName(tender.agencies),
             place: tender.place,

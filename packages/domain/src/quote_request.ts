@@ -36,7 +36,9 @@ export function groupLotsByTrade<T extends QuoteRequestLot>(lots: T[]): TradeLot
 }
 
 export type QuoteRequestEmailInput = {
-  senderOrgName: string; // 送信元（自社）の名称。挨拶文に使う
+  senderOrgName: string; // 送信元（自社）の名称。挨拶文・署名に使う
+  senderContactName: string; // 送信元の担当者名（署名に使う）
+  senderContactEmail: string; // 送信元の連絡先メールアドレス（署名に使う）
   tenderName: string;
   agencyName: string;
   place: string | null;
@@ -72,6 +74,11 @@ export function buildQuoteRequestEmail(input: QuoteRequestEmailInput): { subject
     "",
     "お忙しいところ恐れ入りますが、ご都合が合わない場合もその旨をご返信いただけますと幸いです。",
     "どうぞよろしくお願いいたします。",
+    "",
+    "--",
+    input.senderOrgName,
+    input.senderContactName,
+    input.senderContactEmail,
   ];
   return { subject, body: lines.join("\n") };
 }

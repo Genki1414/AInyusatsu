@@ -34,6 +34,8 @@ describe("buildQuoteRequestEmail", () => {
   it("件名は「【見積依頼】案件名」になる", () => {
     const { subject } = buildQuoteRequestEmail({
       senderOrgName: "東葉総合サービス株式会社",
+      senderContactName: "山田 太郎",
+      senderContactEmail: "yamada@example.co.jp",
       tenderName: "庁舎清掃業務委託",
       agencyName: "関東地方整備局",
       place: null,
@@ -49,6 +51,8 @@ describe("buildQuoteRequestEmail", () => {
   it("本文に挨拶・送信元・案件名・回答期限・数量表の行が含まれる", () => {
     const { body } = buildQuoteRequestEmail({
       senderOrgName: "東葉総合サービス株式会社",
+      senderContactName: "山田 太郎",
+      senderContactEmail: "yamada@example.co.jp",
       tenderName: "庁舎清掃業務委託",
       agencyName: "関東地方整備局",
       place: "東京都千代田区",
@@ -67,9 +71,29 @@ describe("buildQuoteRequestEmail", () => {
     expect(body).toContain("1. 日常清掃（床面清掃） 1式");
   });
 
+  it("末尾に送信元の署名（組織名・担当者名・連絡先メール）が入る", () => {
+    const { body } = buildQuoteRequestEmail({
+      senderOrgName: "東葉総合サービス株式会社",
+      senderContactName: "山田 太郎",
+      senderContactEmail: "yamada@example.co.jp",
+      tenderName: "庁舎清掃業務委託",
+      agencyName: "関東地方整備局",
+      place: null,
+      termFrom: null,
+      termTo: null,
+      dueAtLabel: "2026/08/20 17:00",
+      trade: "清掃",
+      lots: [],
+    });
+    const lines = body.split("\n");
+    expect(lines.slice(-3)).toEqual(["東葉総合サービス株式会社", "山田 太郎", "yamada@example.co.jp"]);
+  });
+
   it("履行場所・履行期間が無ければ「未確認」と表示する（推測しない）", () => {
     const { body } = buildQuoteRequestEmail({
       senderOrgName: "東葉総合サービス株式会社",
+      senderContactName: "山田 太郎",
+      senderContactEmail: "yamada@example.co.jp",
       tenderName: "庁舎清掃業務委託",
       agencyName: "関東地方整備局",
       place: null,

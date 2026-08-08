@@ -36,17 +36,40 @@ export type TenderLotRow = {
   trade: string | null;
 };
 
-const OFFICIAL_STEPS: Record<string, string[]> = {
+type OfficialStepGroup = { label: string | null; steps: string[] };
+
+// 電子調達は2通りの経路がある。方法Aは実機確認済み（docs/資料取得方針_v3.md §0-1、
+// 2026-08-01）、方法B（電子認証カードでのログイン）はユーザーからの要望で追加した。
+// どちらも最終的に同じ資料一式が取得できる。
+const OFFICIAL_STEP_GROUPS: Record<string, OfficialStepGroup[]> = {
   電子調達: [
-    "調達ポータルの案件検索から、この案件の公告番号で検索する",
-    "案件詳細の「調達資料 ダウンロードURL」を開く",
-    "連絡先情報の入力方法で「連絡先情報をはじめから入力する」を選ぶ（ICカードは不要）",
-    "商号・氏名・電話・メールを入力し、資料一式をダウンロードする",
+    {
+      label: "方法A：連絡先情報を入力する（ICカード不要）",
+      steps: [
+        "調達ポータルの案件検索から、この案件の公告番号で検索する",
+        "案件詳細の「調達資料 ダウンロードURL」を開く",
+        "連絡先情報の入力方法で「連絡先情報をはじめから入力する」を選ぶ",
+        "商号・氏名・電話・メールを入力し、資料一式をダウンロードする",
+      ],
+    },
+    {
+      label: "方法B：電子調達システムにログインする（電子認証カードが必要）",
+      steps: [
+        "ICカードリーダーに電子認証カードをセットする",
+        "調達ポータルへ、電子調達システムに登録済みの連絡先情報でログインする",
+        "この案件の公告番号で検索し、調達資料をダウンロードする",
+      ],
+    },
   ],
-  公開Web: ["公告記載の窓口へ交付申請する（不要な場合はそのまま参加可）", "様式一式をダウンロードする", "質問期限までに不明点を照会する"],
-  公開PDF: ["公告記載の取得方法を確認する", "調達ポータルから御社名義で取得する"],
-  メール: ["交付メールに返信して参加表明する", "資料一式の再送を依頼する（御社名義の記録を残すため）"],
-  FAX: ["FAX申込様式を印刷する", "発注機関へ送信する", "受領した資料を確認する"],
+  公開Web: [
+    {
+      label: null,
+      steps: ["公告記載の窓口へ交付申請する（不要な場合はそのまま参加可）", "様式一式をダウンロードする", "質問期限までに不明点を照会する"],
+    },
+  ],
+  公開PDF: [{ label: null, steps: ["公告記載の取得方法を確認する", "調達ポータルから御社名義で取得する"] }],
+  メール: [{ label: null, steps: ["交付メールに返信して参加表明する", "資料一式の再送を依頼する（御社名義の記録を残すため）"] }],
+  FAX: [{ label: null, steps: ["FAX申込様式を印刷する", "発注機関へ送信する", "受領した資料を確認する"] }],
 };
 
 const OFFICIAL_STATUS_TONE = { 未取得: "rose", 申請中: "amber", 取得済: "green" } as const;
@@ -68,7 +91,7 @@ export function DocsTab({
 }) {
   const got = DOC_KINDS.filter((kind) => documents.some((d) => d.kind === kind && d.fetched));
   const missing = DOC_KINDS.length - got.length;
-  const steps = OFFICIAL_STEPS[acquireMethod] ?? ["公告記載の手順を確認する"];
+  const stepGroups = OFFICIAL_STEP_GROUPS[acquireMethod] ?? [{ label: null, steps: ["公告記載の手順を確認する"] }];
 
   return (
     <div className="space-y-3">
@@ -96,14 +119,21 @@ export function DocsTab({
         <p className="mt-2 text-xs leading-relaxed text-amber-900">
           システムが取得した資料は解析用です。この案件は御社名義での正式取得が必要です。
         </p>
-        <ol className="mt-2 space-y-1.5">
-          {steps.map((s, i) => (
-            <li key={s} className="flex gap-2 text-xs text-slate-700">
-              <span className="w-4 shrink-0 tabular-nums text-slate-400">{i + 1}</span>
-              {s}
-            </li>
+        <div className="mt-2 space-y-3">
+          {stepGroups.map((group, gi) => (
+            <div key={group.label ?? gi}>
+              {group.label && <div className="text-xs font-semibold text-slate-700">{group.label}</div>}
+              <ol className="mt-1 space-y-1.5">
+                {group.steps.map((s, i) => (
+                  <li key={s} className="flex gap-2 text-xs text-slate-700">
+                    <span className="w-4 shrink-0 tabular-nums text-slate-400">{i + 1}</span>
+                    {s}
+                  </li>
+                ))}
+              </ol>
+            </div>
           ))}
-        </ol>
+        </div>
         {sourceUrl && (
           <p className="mt-2 text-xs text-slate-500">
             公告元URL：
