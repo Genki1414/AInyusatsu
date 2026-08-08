@@ -20,6 +20,9 @@ importers:
       '@ai-nyusatsu-bu/ai':
         specifier: workspace:*
         version: link:../../packages/ai
+      '@ai-nyusatsu-bu/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@ai-nyusatsu-bu/domain':
         specifier: workspace:*
         version: link:../../packages/domain

@@ -47,6 +47,7 @@ export type QuoteRequestEmailInput = {
   dueAtLabel: string; // 表示用に整形済みの文字列（timezone変換は呼び出し側の責務）
   trade: string;
   lots: QuoteRequestLot[];
+  responseUrl: string; // 協力会社の回答ページ（/q/[token]）への個別URL。呼び出し側が発行する
 };
 
 function formatLotLine(lot: QuoteRequestLot): string {
@@ -72,8 +73,10 @@ export function buildQuoteRequestEmail(input: QuoteRequestEmailInput): { subject
     "【対象範囲】",
     ...input.lots.map(formatLotLine),
     "",
-    "見積もり可能なようでしたら、その旨ご返信ください。仕様書等の詳細資料をお送りいたします。",
-    "お忙しいところ恐れ入りますが、ご都合が合わない場合もその旨をご返信いただけますと幸いです。",
+    "下記の専用フォームから、お見積り金額のご入力をお願いいたします。",
+    input.responseUrl,
+    "",
+    "お忙しいところ恐れ入りますが、ご都合が合わない場合も上記フォームから「今回は見送る」をお選びください。",
     "どうぞよろしくお願いいたします。",
     "",
     "--",

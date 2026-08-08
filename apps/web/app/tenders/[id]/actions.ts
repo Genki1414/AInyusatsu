@@ -5,7 +5,8 @@ import { sendEmail } from "@ai-nyusatsu-bu/notifications";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { requireOrgContext } from "@/lib/auth";
-import { DUE_AT_PLACEHOLDER } from "./quote-request-shared";
+import { getAppUrl } from "@/lib/app-url";
+import { DUE_AT_PLACEHOLDER, RESPONSE_URL_PLACEHOLDER } from "./quote-request-shared";
 
 type TenderRow = {
   name: string;
@@ -110,6 +111,7 @@ export async function sendQuoteRequests(
             dueAtLabel: DUE_AT_PLACEHOLDER,
             trade: group.trade,
             lots: group.lots,
+            responseUrl: RESPONSE_URL_PLACEHOLDER,
           }).body;
     const body = rawBody.split(DUE_AT_PLACEHOLDER).join(dueAtLabel);
     const subject = `【見積依頼】${tender.name}`;
@@ -137,10 +139,12 @@ export async function sendQuoteRequests(
       const partner = partnerById.get(partnerId);
       if (!partner) continue;
 
-      const { error: quoteError } = await supabase
+      const { data: quote, error: quoteError } = await supabase
         .from("quotes")
-        .insert({ request_id: request.id, partner_id: partnerId, channel: "メール" });
-      if (quoteError) {
+        .insert({ request_id: request.id, partner_id: partnerId, channel: "メール" })
+        .select("response_token")
+        .single<{ response_token: string }>();
+      if (quoteError || !quote) {
         failed.push(`${partner.name}：見積の記録に失敗しました`);
         continue;
       }
@@ -149,8 +153,12 @@ export async function sendQuoteRequests(
         failed.push(`${partner.name}：メールアドレス未登録のため送信していません`);
         continue;
       }
+      // 回答ページのURLは協力会社（quotesの行）ごとに異なるため、共通のbodyに埋め込んだ
+      // プレースホルダーを、この協力会社のURLへ送信直前に置換する。
+      const responseUrl = `${getAppUrl()}/q/${quote.response_token}`;
+      const personalizedBody = body.split(RESPONSE_URL_PLACEHOLDER).join(responseUrl);
       try {
-        await sendEmail({ to: partner.email, subject, text: body });
+        await sendEmail({ to: partner.email, subject, text: personalizedBody });
         sentCount++;
       } catch (err) {
         failed.push(`${partner.name}：${err instanceof Error ? err.message : "送信に失敗しました"}`);

@@ -16,7 +16,7 @@ import { Panel, Pill } from "@/components/ui";
 import { buildQuoteRequestEmail, groupLotsByTrade, type QuoteRequestLot } from "@ai-nyusatsu-bu/domain";
 import { AREA_OPTIONS, PREFECTURE_OPTIONS } from "@/lib/catalog";
 import { sendQuoteRequests, type SendQuoteRequestsState } from "./actions";
-import { DUE_AT_PLACEHOLDER } from "./quote-request-shared";
+import { DUE_AT_PLACEHOLDER, RESPONSE_URL_PLACEHOLDER } from "./quote-request-shared";
 // 型のみのimport（@ai-nyusatsu-bu/ai に依存する実装は絶対にこのファイルへ持ち込まない。
 // Client Componentなのでバンドルに @anthropic-ai/sdk が混ざってしまう）。
 import type { PartnerRecommendationResult } from "./recommend";
@@ -282,6 +282,7 @@ export function RequestTab({
           dueAtLabel: DUE_AT_PLACEHOLDER,
           trade: group.trade,
           lots: group.lots,
+          responseUrl: RESPONSE_URL_PLACEHOLDER,
         });
         return (
           <Panel key={group.trade} title={`${group.trade}（数量表 ${group.lots.length}行）`}>
