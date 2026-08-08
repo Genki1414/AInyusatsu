@@ -110,7 +110,7 @@ export default async function TenderDetailPage({
       .order("score", { ascending: false })
       .limit(1)
       .maybeSingle<FitTabProposal & { status: string }>(),
-    supabase.from("partners").select("id, name, base, email").eq("active", true).returns<RequestTabPartner[]>(),
+    supabase.from("partners").select("id, name, base, email, trades, areas").eq("active", true).returns<RequestTabPartner[]>(),
     supabase.from("company_tenders").select("official_status").eq("tender_id", id).maybeSingle<{ official_status: OfficialStatus }>(),
   ]);
 

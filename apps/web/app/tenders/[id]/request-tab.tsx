@@ -14,22 +14,33 @@ import Link from "next/link";
 import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
 import { Panel, Pill } from "@/components/ui";
 import { buildQuoteRequestEmail, groupLotsByTrade, type QuoteRequestLot } from "@ai-nyusatsu-bu/domain";
+import { AREA_OPTIONS } from "@/lib/catalog";
 import { sendQuoteRequests, type SendQuoteRequestsState } from "./actions";
 import { DUE_AT_PLACEHOLDER } from "./quote-request-shared";
 
-export type RequestTabPartner = { id: string; name: string; base: string | null; email: string | null };
+export type RequestTabPartner = { id: string; name: string; base: string | null; email: string | null; trades: string[]; areas: string[] };
 
 const initialState: SendQuoteRequestsState = { error: null, summary: null };
 const input = "rounded border border-slate-300 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300";
 
-// 協力会社が多い業種でも選びやすいよう、絞り込み検索＋スクロール枠にする。
-// フィルタで絞り込んでも項目自体はDOMに残す（hidden切替）ことで、選択中に
-// 検索語を変えてもチェック状態（フォームの値）が失われないようにしている。
+// 協力会社が多い業種でも選びやすいよう、会社名・対応業種・エリアで絞り込める検索＋
+// スクロール枠にする。フィルタで絞り込んでも項目自体はDOMに残す（hidden切替）ことで、
+// 選択中に検索条件を変えてもチェック状態（フォームの値）が失われないようにしている。
+// 対応業種・エリアが未登録の協力会社は、絞り込みで除外されないようにしている
+// （データ未整備を理由に依頼先の候補から漏れないようにするため）。
 function PartnerPicker({ trade, candidates }: { trade: string; candidates: RequestTabPartner[] }) {
   const [query, setQuery] = useState("");
+  const [tradeOnly, setTradeOnly] = useState(true);
+  const [area, setArea] = useState("");
   const q = query.trim().toLowerCase();
-  const matches = (p: RequestTabPartner) => !q || `${p.name}${p.base ?? ""}`.toLowerCase().includes(q);
-  const noMatch = q !== "" && !candidates.some(matches);
+
+  const matches = (p: RequestTabPartner) => {
+    if (q && !`${p.name}${p.base ?? ""}`.toLowerCase().includes(q)) return false;
+    if (tradeOnly && p.trades.length > 0 && !p.trades.includes(trade)) return false;
+    if (area && p.areas.length > 0 && !p.areas.includes(area)) return false;
+    return true;
+  };
+  const noMatch = !candidates.some(matches);
 
   return (
     <div className="mt-1">
@@ -42,6 +53,23 @@ function PartnerPicker({ trade, candidates }: { trade: string; candidates: Reque
           className={`${input} mb-1.5 block w-full`}
         />
       )}
+      <div className="mb-1.5 flex flex-wrap items-center gap-3">
+        <label className="flex items-center gap-1 text-xs text-slate-600">
+          <input type="checkbox" checked={tradeOnly} onChange={(e) => setTradeOnly(e.target.checked)} />
+          対応業種（{trade}）のみ表示
+        </label>
+        <label className="flex items-center gap-1 text-xs text-slate-600">
+          エリア
+          <select value={area} onChange={(e) => setArea(e.target.value)} className={input}>
+            <option value="">指定なし</option>
+            {AREA_OPTIONS.map((a) => (
+              <option key={a} value={a}>
+                {a}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
       <div className="max-h-48 space-y-0.5 overflow-y-auto rounded border border-slate-100 p-1">
         {noMatch && <p className="px-1.5 py-1 text-xs text-slate-400">該当する協力会社がありません</p>}
         {candidates.map((p) => (
@@ -52,6 +80,8 @@ function PartnerPicker({ trade, candidates }: { trade: string; candidates: Reque
             <input type="checkbox" name={`partners_${trade}`} value={p.id} />
             {p.name}
             {p.base && <span className="text-slate-400">（{p.base}）</span>}
+            {p.trades.length > 0 && <span className="text-slate-400">・{p.trades.join("／")}</span>}
+            {p.areas.length > 0 && <span className="text-slate-400">・{p.areas.join("／")}</span>}
           </label>
         ))}
       </div>
