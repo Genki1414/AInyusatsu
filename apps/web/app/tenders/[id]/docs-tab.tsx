@@ -74,10 +74,13 @@ const OFFICIAL_STEP_GROUPS: Record<string, OfficialStepGroup[]> = {
 
 const OFFICIAL_STATUS_TONE = { 未取得: "rose", 申請中: "amber", 取得済: "green" } as const;
 
+const GEPS_PORTAL_TOP_URL = "https://www.p-portal.go.jp/";
+
 export function DocsTab({
   documents,
   lots,
   sourceUrl,
+  connectorId,
   tenderId,
   acquireMethod,
   officialStatus,
@@ -85,6 +88,7 @@ export function DocsTab({
   documents: TenderDocumentRow[];
   lots: TenderLotRow[];
   sourceUrl: string | null;
+  connectorId: string | null;
   tenderId: string;
   acquireMethod: string;
   officialStatus: "未取得" | "申請中" | "取得済";
@@ -134,13 +138,23 @@ export function DocsTab({
             </div>
           ))}
         </div>
-        {sourceUrl && (
+        {connectorId === "geps" ? (
           <p className="mt-2 text-xs text-slate-500">
-            公告元URL：
-            <a href={sourceUrl} target="_blank" rel="noopener noreferrer" className="break-all text-blue-800 underline">
-              {sourceUrl}
+            公告元URLは調達ポータル（電子調達システム）の画面遷移によるものです。案件ごとに固定されないため、リンク先が表示されない場合があります。上記の手順のとおり、
+            <a href={GEPS_PORTAL_TOP_URL} target="_blank" rel="noopener noreferrer" className="text-blue-800 underline">
+              調達ポータル
             </a>
+            で公告番号から案件を検索してください。
           </p>
+        ) : (
+          sourceUrl && (
+            <p className="mt-2 text-xs text-slate-500">
+              公告元URL：
+              <a href={sourceUrl} target="_blank" rel="noopener noreferrer" className="break-all text-blue-800 underline">
+                {sourceUrl}
+              </a>
+            </p>
+          )
         )}
         <div className="mt-3 flex flex-wrap gap-2">
           <form action={setOfficialStatus.bind(null, tenderId, "申請中")}>

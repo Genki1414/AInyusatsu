@@ -31,6 +31,7 @@ type TenderRow = {
   term_from: string | null;
   term_to: string | null;
   source_url: string | null;
+  connector_id: string | null;
   acquire_method: string;
   collect_status: string;
   needs_review: boolean;
@@ -84,7 +85,7 @@ export default async function TenderDetailPage({
     supabase
       .from("tenders")
       .select(
-        "id, name, org_unit, notice_no, item, grade, areas, budget, qa_deadline, submit_deadline, bid_open_at, place, term_from, term_to, source_url, acquire_method, collect_status, needs_review, review_reasons, agencies(name)",
+        "id, name, org_unit, notice_no, item, grade, areas, budget, qa_deadline, submit_deadline, bid_open_at, place, term_from, term_to, source_url, connector_id, acquire_method, collect_status, needs_review, review_reasons, agencies(name)",
       )
       .eq("id", id)
       .maybeSingle<TenderRow>(),
@@ -196,6 +197,7 @@ export default async function TenderDetailPage({
           documents={documents ?? []}
           lots={lots ?? []}
           sourceUrl={tender.source_url}
+          connectorId={tender.connector_id}
           tenderId={id}
           acquireMethod={tender.acquire_method}
           officialStatus={officialStatus}
