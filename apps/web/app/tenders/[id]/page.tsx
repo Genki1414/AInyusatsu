@@ -1,18 +1,22 @@
 // 案件詳細。docs/ai-nyusatsu-bu-prototype-v7.jsx の Detail 相当。
 //
 // プロトタイプのタブは 進め方／参加判断／資料／公告の中身／質問／見積依頼／見積・原価／
-// 提出書類／結果 の9つだが、進め方以降の多くは見積依頼（タスク4-1）・原価集計（タスク4-5）
-// に依存するため、このタスク（3-3）では 参加判断（適合）・資料・公告の中身（解析） の
-// 3タブのみを実装する。進め方タブは、その土台となるジョブが揃ってから別タスクで追加する。
-import { AlertTriangle, FileText, Sparkles, Target } from "lucide-react";
+// 提出書類／結果 の9つ。進め方・質問・見積比較・提出書類・結果は、原価集計（タスク4-5）や
+// 質問案生成など未着手の機能に依存するため、引き続き含めない。見積依頼（タスク4-1）は
+// tender_lots・partnersだけで実装できるためこのPRで追加する。
+import { AlertTriangle, FileText, Send, Sparkles, Target } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { groupLotsByTrade } from "@ai-nyusatsu-bu/domain";
 import { AppShell } from "@/components/AppShell";
+import { CopyButton } from "@/components/CopyButton";
 import { CollectPill, Field, Panel, ProposePill } from "@/components/ui";
 import { requireOrgContext } from "@/lib/auth";
 import { AnalysisTab, type AnalysisTabAnalysis } from "./analysis-tab";
 import { DOC_KINDS, DocsTab, type TenderDocumentRow, type TenderLotRow } from "./docs-tab";
 import { FitTab, type FitTabProposal } from "./fit-tab";
+import { getPartnerRecommendations, type PartnerRecommendationResult } from "./recommend";
+import { RequestTab, type RequestTabPartner } from "./request-tab";
 
 type TenderRow = {
   id: string;
@@ -30,16 +34,21 @@ type TenderRow = {
   term_from: string | null;
   term_to: string | null;
   source_url: string | null;
+  connector_id: string | null;
+  acquire_method: string;
   collect_status: string;
   needs_review: boolean;
   review_reasons: string[];
   agencies: { name: string } | { name: string }[] | null;
 };
 
+type OfficialStatus = "未取得" | "申請中" | "取得済";
+
 const TABS = [
   { key: "fit", label: "参加判断", icon: Target },
   { key: "docs", label: "資料", icon: FileText },
   { key: "analysis", label: "公告の中身", icon: Sparkles },
+  { key: "request", label: "見積依頼", icon: Send },
 ] as const;
 type TabKey = (typeof TABS)[number]["key"];
 
@@ -72,13 +81,14 @@ export default async function TenderDetailPage({
   const { tab: tabParam } = await searchParams;
   const tab: TabKey = TABS.some((t) => t.key === tabParam) ? (tabParam as TabKey) : "fit";
 
-  const { supabase, orgName } = await requireOrgContext();
+  const { supabase, orgId, orgName, userName, userEmail } = await requireOrgContext();
 
-  const [{ data: tender }, { data: documents }, { data: lots }, { data: analysis }, { data: proposal }] = await Promise.all([
+  const [{ data: tender }, { data: documents }, { data: lots }, { data: analysis }, { data: proposal }, { data: partners }, { data: companyTender }] =
+    await Promise.all([
     supabase
       .from("tenders")
       .select(
-        "id, name, org_unit, notice_no, item, grade, areas, budget, qa_deadline, submit_deadline, bid_open_at, place, term_from, term_to, source_url, collect_status, needs_review, review_reasons, agencies(name)",
+        "id, name, org_unit, notice_no, item, grade, areas, budget, qa_deadline, submit_deadline, bid_open_at, place, term_from, term_to, source_url, connector_id, acquire_method, collect_status, needs_review, review_reasons, agencies(name)",
       )
       .eq("id", id)
       .maybeSingle<TenderRow>(),
@@ -102,11 +112,42 @@ export default async function TenderDetailPage({
       .order("score", { ascending: false })
       .limit(1)
       .maybeSingle<FitTabProposal & { status: string }>(),
+    supabase.from("partners").select("id, name, base, email, trades, areas, rating, memo").eq("active", true).returns<RequestTabPartner[]>(),
+    supabase.from("company_tenders").select("official_status").eq("tender_id", id).maybeSingle<{ official_status: OfficialStatus }>(),
   ]);
 
   if (!tender) notFound();
 
+  const officialStatus: OfficialStatus = companyTender?.official_status ?? "未取得";
   const gotDocs = DOC_KINDS.filter((kind) => (documents ?? []).some((d) => d.kind === kind && d.fetched)).length;
+
+  // 見積依頼先のAIおすすめ選定（ユーザーからの要望：タブを開いたら自動で推薦する）。
+  // 正式取得が済んでいない・数量表が無い場合は送信自体ができないため計算しない。
+  const tradeGroups = groupLotsByTrade(lots ?? []);
+  const recommendations: Record<string, PartnerRecommendationResult | null> =
+    tab === "request" && officialStatus === "取得済" && tradeGroups.length > 0
+      ? await getPartnerRecommendations(supabase, orgId, id, tender.item, tender.place, tradeGroups, partners ?? [])
+      : {};
+
+  // 見積依頼の回答期限の目安：提出期限の3日前（datetime-local用にAsia/Tokyoのローカル表記へ）。
+  let suggestedDueAt: string | null = null;
+  if (tender.submit_deadline) {
+    const target = new Date(tender.submit_deadline);
+    if (!Number.isNaN(target.getTime())) {
+      target.setDate(target.getDate() - 3);
+      const parts = new Intl.DateTimeFormat("sv-SE", {
+        timeZone: "Asia/Tokyo",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      }).formatToParts(target);
+      const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+      suggestedDueAt = `${get("year")}-${get("month")}-${get("day")}T${get("hour")}:${get("minute")}`;
+    }
+  }
 
   return (
     <AppShell active="proposals" orgName={orgName}>
@@ -117,11 +158,17 @@ export default async function TenderDetailPage({
       <Panel>
         <div className="flex flex-wrap items-start gap-3">
           <div className="min-w-0 flex-1">
-            <h1 className="text-sm font-semibold leading-snug">{tender.name}</h1>
-            <div className="mt-1 text-xs text-slate-500">
-              {agencyName(tender.agencies)}
-              {tender.org_unit && `／${tender.org_unit}`}
-              {tender.notice_no && `／公告番号 ${tender.notice_no}`}
+            <div className="flex flex-wrap items-start gap-1.5">
+              <h1 className="text-sm font-semibold leading-snug">{tender.name}</h1>
+              <CopyButton value={tender.name} label="案件名" />
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+              <span>
+                {agencyName(tender.agencies)}
+                {tender.org_unit && `／${tender.org_unit}`}
+                {tender.notice_no && `／公告番号 ${tender.notice_no}`}
+              </span>
+              {tender.notice_no && <CopyButton value={tender.notice_no} label="公告番号" />}
             </div>
             <div className="mt-2 flex flex-wrap gap-1">
               <CollectPill s={tender.collect_status} />
@@ -162,9 +209,37 @@ export default async function TenderDetailPage({
       </div>
 
       {tab === "fit" && <FitTab proposal={proposal} />}
-      {tab === "docs" && <DocsTab documents={documents ?? []} lots={lots ?? []} sourceUrl={tender.source_url} />}
+      {tab === "docs" && (
+        <DocsTab
+          documents={documents ?? []}
+          lots={lots ?? []}
+          sourceUrl={tender.source_url}
+          connectorId={tender.connector_id}
+          tenderId={id}
+          acquireMethod={tender.acquire_method}
+          officialStatus={officialStatus}
+        />
+      )}
       {tab === "analysis" && (
         <AnalysisTab tender={{ item: tender.item, grade: tender.grade, areas: tender.areas, place: tender.place }} analysis={analysis} />
+      )}
+      {tab === "request" && (
+        <RequestTab
+          tenderId={id}
+          senderOrgName={orgName}
+          senderContactName={userName}
+          senderContactEmail={userEmail}
+          tenderName={tender.name}
+          agencyName={agencyName(tender.agencies)}
+          place={tender.place}
+          termFrom={tender.term_from}
+          termTo={tender.term_to}
+          lots={lots ?? []}
+          partners={partners ?? []}
+          suggestedDueAt={suggestedDueAt}
+          officialStatus={officialStatus}
+          recommendations={recommendations}
+        />
       )}
     </AppShell>
   );

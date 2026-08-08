@@ -2,8 +2,9 @@
 
 import { useActionState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { AreaCheckboxGroup } from "@/components/AreaCheckboxGroup";
 import { Panel } from "@/components/ui";
-import { TRADE_OPTIONS } from "@/lib/catalog";
+import { AREA_OPTIONS, PREFECTURE_OPTIONS, TRADE_OPTIONS } from "@/lib/catalog";
 import { savePartner, type PartnerState } from "./actions";
 
 export type PartnerFormValues = {
@@ -24,9 +25,13 @@ const initialState: PartnerState = { error: null, savedId: null };
 const checkbox = "flex items-center gap-1.5 rounded border border-slate-200 px-2 py-1 text-xs text-slate-700";
 const input = "rounded border border-slate-300 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300";
 
+const AREA_CATALOG: readonly string[] = [...AREA_OPTIONS, ...PREFECTURE_OPTIONS];
+
 export function PartnerForm({ values }: { values: PartnerFormValues }) {
   const [state, formAction, pending] = useActionState(savePartner, initialState);
   const router = useRouter();
+  // 一覧にない値（過去の自由入力）は選択肢から消さず、その他欄に残す
+  const otherAreas = values.areas.filter((a) => !AREA_CATALOG.includes(a));
 
   useEffect(() => {
     if (state.savedId && state.savedId !== values.id) {
@@ -78,11 +83,17 @@ export function PartnerForm({ values }: { values: PartnerFormValues }) {
           </div>
         </div>
 
-        <label className="mt-3 block border-t border-slate-100 pt-2.5 text-xs">
-          <span className="font-medium text-slate-700">対応エリア</span>
-          <span className="ml-2 text-xs text-slate-400">1行に1つ（例：東京、千葉）</span>
-          <textarea name="areas" defaultValue={values.areas.join("\n")} rows={2} className={`${input} mt-1 block w-full`} />
-        </label>
+        <div className="mt-3 border-t border-slate-100 pt-2.5">
+          <div className="text-xs font-medium text-slate-700">対応エリア</div>
+          <div className="mt-2">
+            <AreaCheckboxGroup name="areas" options={AREA_CATALOG} selected={values.areas} />
+          </div>
+          <label className="mt-2 block text-xs">
+            <span className="font-medium text-slate-700">その他（自由入力）</span>
+            <span className="ml-2 text-xs text-slate-400">上の一覧にない場合のみ。1行に1つ</span>
+            <textarea name="areas_other" defaultValue={otherAreas.join("\n")} rows={2} className={`${input} mt-1 block w-full`} />
+          </label>
+        </div>
 
         <label className="mt-3 block border-t border-slate-100 pt-2.5 text-xs">
           <span className="font-medium text-slate-700">メモ</span>

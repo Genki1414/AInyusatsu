@@ -6,7 +6,7 @@
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { Panel } from "@/components/ui";
-import { AREA_OPTIONS, ITEM_OPTIONS } from "@/lib/catalog";
+import { AREA_OPTIONS, ITEM_OPTIONS, PREFECTURE_OPTIONS } from "@/lib/catalog";
 import { requireOrgContext } from "@/lib/auth";
 import { CriteriaForm, type CriteriaFormValues } from "./criteria-form";
 
@@ -50,7 +50,7 @@ export default async function CriteriaPage({ searchParams }: { searchParams: Pro
   ]);
 
   const itemOptions = profile?.items?.length ? profile.items : ITEM_OPTIONS;
-  const areaOptions = profile?.areas?.length ? profile.areas : AREA_OPTIONS;
+  const areaOptions = profile?.areas?.length ? profile.areas : [...AREA_OPTIONS, ...PREFECTURE_OPTIONS];
 
   const selected = (sets ?? []).find((s) => s.id === set) ?? null;
   const values: CriteriaFormValues = selected
