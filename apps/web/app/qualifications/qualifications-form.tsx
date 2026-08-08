@@ -1,8 +1,8 @@
 "use client";
 
 import { useActionState } from "react";
-import { Panel } from "@/components/ui";
-import { AREA_OPTIONS, ITEM_OPTIONS, QUAL_CATEGORIES } from "@/lib/catalog";
+import { AreaCheckboxGroup, Panel } from "@/components/ui";
+import { AREA_OPTIONS, ITEM_OPTIONS, PREFECTURE_OPTIONS, QUAL_CATEGORIES } from "@/lib/catalog";
 import { saveQualifications, type QualificationsState } from "./actions";
 
 export type QualificationsFormProfile = {
@@ -67,14 +67,7 @@ export function QualificationsForm({ profile }: { profile: QualificationsFormPro
       </Panel>
 
       <Panel title="競争参加地域">
-        <div className="flex flex-wrap gap-2">
-          {AREA_OPTIONS.map((a) => (
-            <label key={a} className={checkbox}>
-              <input type="checkbox" name="areas" value={a} defaultChecked={profile.areas.includes(a)} />
-              {a}
-            </label>
-          ))}
-        </div>
+        <AreaCheckboxGroup name="areas" options={[...AREA_OPTIONS, ...PREFECTURE_OPTIONS]} selected={profile.areas} />
       </Panel>
 
       {state.error && (

@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Panel } from "@/components/ui";
+import { AreaCheckboxGroup, Panel } from "@/components/ui";
 import { saveCriteriaSet, type CriteriaState } from "./actions";
 
 export type CriteriaFormValues = {
@@ -57,13 +57,8 @@ export function CriteriaForm({ values, itemOptions, areaOptions }: { values: Cri
 
         <div className="border-b border-slate-100 py-2.5">
           <div className="text-xs font-medium text-slate-700">競争参加地域</div>
-          <div className="mt-2 flex flex-wrap gap-1">
-            {areaOptions.map((a) => (
-              <label key={a} className={checkbox}>
-                <input type="checkbox" name="areas" value={a} defaultChecked={values.areas.includes(a)} />
-                {a}
-              </label>
-            ))}
+          <div className="mt-2">
+            <AreaCheckboxGroup name="areas" options={areaOptions} selected={values.areas} />
           </div>
         </div>
 

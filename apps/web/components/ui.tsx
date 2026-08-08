@@ -3,6 +3,7 @@
 // proposals.status）にあわせて移植したもの。文言はプロトタイプのまま変えない。
 import { AlertTriangle, CheckCircle2, X } from "lucide-react";
 import type { ReactNode } from "react";
+import { AREA_OPTIONS } from "@/lib/catalog";
 
 export function Panel({
   title,
@@ -142,5 +143,46 @@ export function ReasonIcon({ kind }: { kind: "ok" | "ng" }) {
     <CheckCircle2 size={12} className="mt-0.5 shrink-0 text-emerald-600" />
   ) : (
     <AlertTriangle size={12} className="mt-0.5 shrink-0 text-amber-600" />
+  );
+}
+
+// エリアのチェックボックス群。地方区分（AREA_OPTIONS）と都道府県を分けて表示する
+// （optionsに両方混ざっていても、AREA_OPTIONSに含まれる値だけを地方区分として振り分ける）。
+export function AreaCheckboxGroup({ name, options, selected }: { name: string; options: readonly string[]; selected: string[] }) {
+  const unique = Array.from(new Set(options));
+  const regionOptions: readonly string[] = AREA_OPTIONS;
+  const regions = unique.filter((a) => regionOptions.includes(a));
+  const prefectures = unique.filter((a) => !regionOptions.includes(a));
+  const checkbox = "flex items-center gap-1.5 rounded border border-slate-200 px-2 py-1 text-xs text-slate-700";
+
+  return (
+    <div className="space-y-2">
+      {regions.length > 0 && (
+        <div>
+          <div className="text-xs text-slate-500">地方区分</div>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {regions.map((a) => (
+              <label key={a} className={checkbox}>
+                <input type="checkbox" name={name} value={a} defaultChecked={selected.includes(a)} />
+                {a}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+      {prefectures.length > 0 && (
+        <div>
+          <div className="text-xs text-slate-500">都道府県</div>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {prefectures.map((a) => (
+              <label key={a} className={checkbox}>
+                <input type="checkbox" name={name} value={a} defaultChecked={selected.includes(a)} />
+                {a}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

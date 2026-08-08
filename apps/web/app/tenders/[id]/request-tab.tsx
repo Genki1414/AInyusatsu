@@ -14,7 +14,7 @@ import Link from "next/link";
 import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
 import { Panel, Pill } from "@/components/ui";
 import { buildQuoteRequestEmail, groupLotsByTrade, type QuoteRequestLot } from "@ai-nyusatsu-bu/domain";
-import { AREA_OPTIONS } from "@/lib/catalog";
+import { AREA_OPTIONS, PREFECTURE_OPTIONS } from "@/lib/catalog";
 import { sendQuoteRequests, type SendQuoteRequestsState } from "./actions";
 import { DUE_AT_PLACEHOLDER } from "./quote-request-shared";
 // 型のみのimport（@ai-nyusatsu-bu/ai に依存する実装は絶対にこのファイルへ持ち込まない。
@@ -34,6 +34,8 @@ export type RequestTabPartner = {
 
 const initialState: SendQuoteRequestsState = { error: null, summary: null };
 const input = "rounded border border-slate-300 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300";
+// 都道府県のうち、地方区分（AREA_OPTIONS）と重複する値（北海道）はエリア絞り込みの選択肢から重複表示しない
+const PREFECTURE_ONLY_OPTIONS = PREFECTURE_OPTIONS.filter((p) => !(AREA_OPTIONS as readonly string[]).includes(p));
 
 // 協力会社が多い業種でも選びやすいよう、会社名・対応業種・エリアで絞り込める検索＋
 // スクロール枠にする。フィルタで絞り込んでも項目自体はDOMに残す（hidden切替）ことで、
@@ -80,6 +82,13 @@ function PartnerPicker({
     });
   }
 
+  // 絞り込みに関わらず、AIのおすすめ（recommendedのキーにある会社）だけを選択する
+  function selectRecommended() {
+    listRef.current?.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((el) => {
+      el.checked = Boolean(recommended[el.value]);
+    });
+  }
+
   return (
     <div className="mt-1">
       {candidates.length > 6 && (
@@ -100,11 +109,20 @@ function PartnerPicker({
           エリア
           <select value={area} onChange={(e) => setArea(e.target.value)} className={input}>
             <option value="">指定なし</option>
-            {AREA_OPTIONS.map((a) => (
-              <option key={a} value={a}>
-                {a}
-              </option>
-            ))}
+            <optgroup label="地方区分">
+              {AREA_OPTIONS.map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="都道府県">
+              {PREFECTURE_ONLY_OPTIONS.map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </optgroup>
           </select>
         </label>
         <span className="text-xs text-slate-400">
@@ -126,6 +144,15 @@ function PartnerPicker({
             className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs text-slate-700 hover:bg-slate-50"
           >
             リセット
+          </button>
+        )}
+        {Object.keys(recommended).length > 0 && (
+          <button
+            type="button"
+            onClick={selectRecommended}
+            className="rounded border border-violet-300 bg-violet-50 px-2 py-0.5 text-xs text-violet-700 hover:bg-violet-100"
+          >
+            AIのおすすめを選択
           </button>
         )}
       </div>
