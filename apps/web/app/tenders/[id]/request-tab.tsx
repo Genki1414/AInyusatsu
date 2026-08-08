@@ -32,6 +32,21 @@ export type RequestTabPartner = {
   memo: string | null;
 };
 
+// AIのおすすめ理由は1社ずつ丁寧に書かれる分、長くなりやすいので、既定では短く表示し、
+// 必要なときだけ展開できるようにする（文章自体は変えない）。
+function TruncatedText({ text, limit = 40 }: { text: string; limit?: number }) {
+  const [expanded, setExpanded] = useState(false);
+  if (text.length <= limit) return <>{text}</>;
+  return (
+    <>
+      {expanded ? text : `${text.slice(0, limit)}…`}
+      <button type="button" onClick={() => setExpanded((v) => !v)} className="ml-1 text-blue-800 underline">
+        {expanded ? "閉じる" : "詳しく見る"}
+      </button>
+    </>
+  );
+}
+
 const initialState: SendQuoteRequestsState = { error: null, summary: null };
 const input = "rounded border border-slate-300 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300";
 // 都道府県のうち、地方区分（AREA_OPTIONS）と重複する値（北海道）はエリア絞り込みの選択肢から重複表示しない
@@ -279,7 +294,7 @@ export function RequestTab({
                     if (!partner) return null;
                     return (
                       <li key={r.partner_id} className="text-xs text-violet-900">
-                        ・{partner.name}：{r.reason}
+                        ・{partner.name}：<TruncatedText text={r.reason} />
                       </li>
                     );
                   })}
@@ -290,7 +305,9 @@ export function RequestTab({
               <p className="mb-2 text-xs text-slate-400">AIによるおすすめは取得できませんでした（{rec.unavailableReason}）</p>
             )}
             {rec && rec.recommendations.length === 0 && !rec.unavailableReason && rec.note && (
-              <p className="mb-2 text-xs text-slate-400">AIのおすすめ：{rec.note}</p>
+              <p className="mb-2 text-xs text-slate-400">
+                AIのおすすめ：<TruncatedText text={rec.note} limit={50} />
+              </p>
             )}
             <div className="text-xs font-medium text-slate-700">依頼先</div>
             {candidates.length === 0 ? (
