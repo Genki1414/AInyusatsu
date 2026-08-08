@@ -9,7 +9,7 @@
 // 御社による正式取得（company_tenders.official_status）が「取得済」になるまでは送信できない
 // （docs/資料取得方針_v3.md §5「取得済みになるまで…作業を促さない」を見積依頼にも適用する。
 // ユーザーからの明示的な要望による）。サーバー側（actions.ts）でも同じ判定をしている。
-import { useActionState, useState } from "react";
+import { useActionState, useRef, useState } from "react";
 import Link from "next/link";
 import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
 import { Panel, Pill } from "@/components/ui";
@@ -62,6 +62,16 @@ function PartnerPicker({
   };
   const visibleCount = candidates.filter(matches).length;
   const noMatch = visibleCount === 0;
+  const listRef = useRef<HTMLDivElement>(null);
+
+  // チェックボックスは非制御（フォーム送信時の値をそのまま使うため）なので、
+  // 「表示中の全社を選択」はDOMを直接操作する。hiddenが付いていない
+  // （＝絞り込みに一致している）labelの中のcheckboxだけを対象にする。
+  function selectAllVisible() {
+    listRef.current?.querySelectorAll<HTMLInputElement>('label:not(.hidden) input[type="checkbox"]').forEach((el) => {
+      el.checked = true;
+    });
+  }
 
   return (
     <div className="mt-1">
@@ -93,8 +103,17 @@ function PartnerPicker({
         <span className="text-xs text-slate-400">
           {visibleCount}社を表示中（全{candidates.length}社）
         </span>
+        {visibleCount > 0 && (
+          <button
+            type="button"
+            onClick={selectAllVisible}
+            className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs text-slate-700 hover:bg-slate-50"
+          >
+            表示中の全社を選択
+          </button>
+        )}
       </div>
-      <div className="max-h-48 space-y-0.5 overflow-y-auto rounded border border-slate-100 p-1">
+      <div ref={listRef} className="max-h-48 space-y-0.5 overflow-y-auto rounded border border-slate-100 p-1">
         {noMatch && <p className="px-1.5 py-1 text-xs text-slate-400">該当する協力会社がありません</p>}
         {candidates.map((p) => (
           <label
