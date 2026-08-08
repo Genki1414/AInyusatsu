@@ -3,6 +3,11 @@
 // 抽出結果には必ず原文の引用と出典を持たせ、出典のない抽出はUIで「未確認」として扱う
 // （CLAUDE.md 最重要の前提3）。プロトタイプのモックデータには引用・出典が無いため、
 // この点は実データにあわせてプロトタイプから拡張している。
+//
+// 営業品目・等級・競争参加地域・履行場所は tenders 側（コネクタの確定値優先でAI解析が
+// 空欄だけ埋めたもの）を表示に使うが、その値がAI解析（プロンプト1）の抽出結果と一致する
+// ときだけ根拠（引用・出典）を添える。コネクタ由来の値にAIの根拠を誤って紐付けないため
+// （値が食い違う＝コネクタの確定値が採用されたケースでは根拠を出さない）。
 import { AlertTriangle } from "lucide-react";
 import { Bar, Field, Panel, Pill } from "@/components/ui";
 
@@ -13,12 +18,53 @@ export type AnalysisTabTender = {
   place: string | null;
 };
 
+type EvidencedValue<T> = { value: T; quote: string | null; source: string | null };
+
+type RawBasicInfo = {
+  item?: EvidencedValue<string | null>;
+  grade?: EvidencedValue<string | null>;
+  areas?: EvidencedValue<string[]>;
+  place?: EvidencedValue<string | null>;
+  unknown_fields?: string[];
+};
+
 export type AnalysisTabAnalysis = {
   qualifications: { text: string; category: string; quote: string; source: string }[];
   conditions: { text: string; quote: string; source: string }[];
   notes: { text: string; importance: "critical" | "normal"; reason: string; quote: string; source: string }[];
   trades: { trade: string; confidence: number; evidence: string; source: string; excluded: boolean; excluded_reason: string | null }[];
+  raw: { basicInfo?: RawBasicInfo; qualifications?: { unknown_reason: string | null } } | null;
 } | null;
+
+// AI解析プロンプト集.md §1 の出力キー→画面表示名。unknown_fields（AIが判定できなかった
+// 項目）をユーザーに分かる形で示すために使う。
+const FIELD_LABELS: Record<string, string> = {
+  name: "案件名",
+  agency: "発注機関",
+  org_unit: "部署",
+  notice_no: "公告番号",
+  notice_date: "公告日",
+  submit_deadline: "提出期限",
+  qa_deadline: "質問期限",
+  bid_open_at: "開札日時",
+  term_from: "履行期間（開始）",
+  term_to: "履行期間（終了）",
+  place: "履行場所",
+  qual_category: "資格区分",
+  item: "営業品目",
+  grade: "等級",
+  areas: "競争参加地域",
+  budget: "予定価格",
+  jv_allowed: "JVの可否",
+  electronic_bidding: "電子入札対応",
+};
+
+function sameStrings(a: string[], b: string[]) {
+  if (a.length !== b.length) return false;
+  const sa = [...a].sort();
+  const sb = [...b].sort();
+  return sa.every((v, i) => v === sb[i]);
+}
 
 function Evidence({ quote, source }: { quote: string | null; source: string | null }) {
   if (!source) {
@@ -39,14 +85,28 @@ export function AnalysisTab({ tender, analysis }: { tender: AnalysisTabTender; a
       </Panel>
     );
   }
+
+  const basicInfo = analysis.raw?.basicInfo;
+  // コネクタの確定値が採用された（AIの抽出値と食い違う）場合は根拠を出さない。
+  const itemEvidence = basicInfo?.item && basicInfo.item.value === tender.item ? basicInfo.item : null;
+  const gradeEvidence = basicInfo?.grade && basicInfo.grade.value === tender.grade ? basicInfo.grade : null;
+  const areasEvidence = basicInfo?.areas && sameStrings(basicInfo.areas.value, tender.areas) ? basicInfo.areas : null;
+  const placeEvidence = basicInfo?.place && basicInfo.place.value === tender.place ? basicInfo.place : null;
+  const unknownFieldLabels = (basicInfo?.unknown_fields ?? []).map((k) => FIELD_LABELS[k] ?? k);
+  const qualUnknownReason = analysis.raw?.qualifications?.unknown_reason ?? null;
+  const qualUnknownLabel = qualUnknownReason ? `未確認（${qualUnknownReason}）` : "未確認";
+
   return (
     <div className="grid gap-3 lg:grid-cols-[2fr_1fr]">
       <div className="space-y-3">
         <Panel title="AIによる要約">
+          <p className="mb-2 text-xs leading-relaxed text-slate-400">
+            「未確認」の項目は、資料に記載が無いか、AIがまだ判定できていない項目です。必須の条件とは限りません。
+          </p>
           <dl>
             <Field label="参加資格">
               {analysis.qualifications.length === 0 ? (
-                <span className="text-slate-400">未確認</span>
+                <Pill tone="slate">{qualUnknownLabel}</Pill>
               ) : (
                 <ul className="space-y-1">
                   {analysis.qualifications.map((q, i) => (
@@ -58,13 +118,41 @@ export function AnalysisTab({ tender, analysis }: { tender: AnalysisTabTender; a
               )}
             </Field>
             <Field label="営業品目・等級">
-              {tender.item ?? "未確認"}／{tender.grade ?? "未確認"}
+              <div className="flex flex-wrap items-center gap-1">
+                {tender.item ?? <Pill tone="slate">営業品目 未確認</Pill>}
+                <span className="text-slate-300">／</span>
+                {tender.grade ?? <Pill tone="slate">等級 未確認</Pill>}
+              </div>
+              {itemEvidence && (
+                <div className="mt-0.5 text-[11px]">
+                  営業品目：<Evidence quote={itemEvidence.quote} source={itemEvidence.source} />
+                </div>
+              )}
+              {gradeEvidence && (
+                <div className="mt-0.5 text-[11px]">
+                  等級：<Evidence quote={gradeEvidence.quote} source={gradeEvidence.source} />
+                </div>
+              )}
             </Field>
-            <Field label="競争参加地域">{tender.areas.length > 0 ? tender.areas.join("・") : "未確認"}</Field>
-            <Field label="履行場所">{tender.place ?? "未確認"}</Field>
+            <Field label="競争参加地域">
+              <div>{tender.areas.length > 0 ? tender.areas.join("・") : <Pill tone="slate">未確認</Pill>}</div>
+              {areasEvidence && (
+                <div className="mt-0.5 text-[11px]">
+                  <Evidence quote={areasEvidence.quote} source={areasEvidence.source} />
+                </div>
+              )}
+            </Field>
+            <Field label="履行場所">
+              <div>{tender.place ?? <Pill tone="slate">未確認</Pill>}</div>
+              {placeEvidence && (
+                <div className="mt-0.5 text-[11px]">
+                  <Evidence quote={placeEvidence.quote} source={placeEvidence.source} />
+                </div>
+              )}
+            </Field>
             <Field label="参加条件">
               {analysis.conditions.length === 0 ? (
-                <span className="text-slate-400">未確認</span>
+                <Pill tone="slate">{qualUnknownLabel}</Pill>
               ) : (
                 <ul className="space-y-1">
                   {analysis.conditions.map((c, i) => (
@@ -76,6 +164,9 @@ export function AnalysisTab({ tender, analysis }: { tender: AnalysisTabTender; a
               )}
             </Field>
           </dl>
+          {unknownFieldLabels.length > 0 && (
+            <p className="mt-2 text-xs text-slate-400">AIが資料から判定できなかった項目：{unknownFieldLabels.join("・")}</p>
+          )}
         </Panel>
 
         {analysis.notes.length > 0 && (

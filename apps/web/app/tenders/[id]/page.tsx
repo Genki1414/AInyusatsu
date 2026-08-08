@@ -100,7 +100,7 @@ export default async function TenderDetailPage({
     supabase.from("tender_lots").select("line_no, item, spec, qty, unit, trade").eq("tender_id", id).order("line_no").returns<TenderLotRow[]>(),
     supabase
       .from("tender_analyses")
-      .select("qualifications, conditions, notes, trades")
+      .select("qualifications, conditions, notes, trades, raw")
       .eq("tender_id", id)
       .order("version", { ascending: false })
       .limit(1)
