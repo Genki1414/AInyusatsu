@@ -100,10 +100,13 @@ export function AnalysisTab({ tender, analysis }: { tender: AnalysisTabTender; a
     <div className="grid gap-3 lg:grid-cols-[2fr_1fr]">
       <div className="space-y-3">
         <Panel title="AIによる要約">
+          <p className="mb-2 text-xs leading-relaxed text-slate-400">
+            「未確認」の項目は、資料に記載が無いか、AIがまだ判定できていない項目です。必須の条件とは限りません。
+          </p>
           <dl>
             <Field label="参加資格">
               {analysis.qualifications.length === 0 ? (
-                <span className="text-slate-400">{qualUnknownLabel}</span>
+                <Pill tone="slate">{qualUnknownLabel}</Pill>
               ) : (
                 <ul className="space-y-1">
                   {analysis.qualifications.map((q, i) => (
@@ -115,8 +118,10 @@ export function AnalysisTab({ tender, analysis }: { tender: AnalysisTabTender; a
               )}
             </Field>
             <Field label="営業品目・等級">
-              <div>
-                {tender.item ?? "未確認"}／{tender.grade ?? "未確認"}
+              <div className="flex flex-wrap items-center gap-1">
+                {tender.item ?? <Pill tone="slate">営業品目 未確認</Pill>}
+                <span className="text-slate-300">／</span>
+                {tender.grade ?? <Pill tone="slate">等級 未確認</Pill>}
               </div>
               {itemEvidence && (
                 <div className="mt-0.5 text-[11px]">
@@ -130,7 +135,7 @@ export function AnalysisTab({ tender, analysis }: { tender: AnalysisTabTender; a
               )}
             </Field>
             <Field label="競争参加地域">
-              <div>{tender.areas.length > 0 ? tender.areas.join("・") : "未確認"}</div>
+              <div>{tender.areas.length > 0 ? tender.areas.join("・") : <Pill tone="slate">未確認</Pill>}</div>
               {areasEvidence && (
                 <div className="mt-0.5 text-[11px]">
                   <Evidence quote={areasEvidence.quote} source={areasEvidence.source} />
@@ -138,7 +143,7 @@ export function AnalysisTab({ tender, analysis }: { tender: AnalysisTabTender; a
               )}
             </Field>
             <Field label="履行場所">
-              <div>{tender.place ?? "未確認"}</div>
+              <div>{tender.place ?? <Pill tone="slate">未確認</Pill>}</div>
               {placeEvidence && (
                 <div className="mt-0.5 text-[11px]">
                   <Evidence quote={placeEvidence.quote} source={placeEvidence.source} />
@@ -147,7 +152,7 @@ export function AnalysisTab({ tender, analysis }: { tender: AnalysisTabTender; a
             </Field>
             <Field label="参加条件">
               {analysis.conditions.length === 0 ? (
-                <span className="text-slate-400">{qualUnknownLabel}</span>
+                <Pill tone="slate">{qualUnknownLabel}</Pill>
               ) : (
                 <ul className="space-y-1">
                   {analysis.conditions.map((c, i) => (
