@@ -7,6 +7,7 @@
 import { AlertTriangle, FileText, Send, Sparkles, Target } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { groupLotsByTrade } from "@ai-nyusatsu-bu/domain";
 import { AppShell } from "@/components/AppShell";
 import { CopyButton } from "@/components/CopyButton";
 import { CollectPill, Field, Panel, ProposePill } from "@/components/ui";
@@ -14,6 +15,7 @@ import { requireOrgContext } from "@/lib/auth";
 import { AnalysisTab, type AnalysisTabAnalysis } from "./analysis-tab";
 import { DOC_KINDS, DocsTab, type TenderDocumentRow, type TenderLotRow } from "./docs-tab";
 import { FitTab, type FitTabProposal } from "./fit-tab";
+import { getPartnerRecommendations, type PartnerRecommendationResult } from "./recommend";
 import { RequestTab, type RequestTabPartner } from "./request-tab";
 
 type TenderRow = {
@@ -79,7 +81,7 @@ export default async function TenderDetailPage({
   const { tab: tabParam } = await searchParams;
   const tab: TabKey = TABS.some((t) => t.key === tabParam) ? (tabParam as TabKey) : "fit";
 
-  const { supabase, orgName, userName, userEmail } = await requireOrgContext();
+  const { supabase, orgId, orgName, userName, userEmail } = await requireOrgContext();
 
   const [{ data: tender }, { data: documents }, { data: lots }, { data: analysis }, { data: proposal }, { data: partners }, { data: companyTender }] =
     await Promise.all([
@@ -110,7 +112,7 @@ export default async function TenderDetailPage({
       .order("score", { ascending: false })
       .limit(1)
       .maybeSingle<FitTabProposal & { status: string }>(),
-    supabase.from("partners").select("id, name, base, email, trades, areas").eq("active", true).returns<RequestTabPartner[]>(),
+    supabase.from("partners").select("id, name, base, email, trades, areas, rating, memo").eq("active", true).returns<RequestTabPartner[]>(),
     supabase.from("company_tenders").select("official_status").eq("tender_id", id).maybeSingle<{ official_status: OfficialStatus }>(),
   ]);
 
@@ -118,6 +120,14 @@ export default async function TenderDetailPage({
 
   const officialStatus: OfficialStatus = companyTender?.official_status ?? "未取得";
   const gotDocs = DOC_KINDS.filter((kind) => (documents ?? []).some((d) => d.kind === kind && d.fetched)).length;
+
+  // 見積依頼先のAIおすすめ選定（ユーザーからの要望：タブを開いたら自動で推薦する）。
+  // 正式取得が済んでいない・数量表が無い場合は送信自体ができないため計算しない。
+  const tradeGroups = groupLotsByTrade(lots ?? []);
+  const recommendations: Record<string, PartnerRecommendationResult | null> =
+    tab === "request" && officialStatus === "取得済" && tradeGroups.length > 0
+      ? await getPartnerRecommendations(supabase, orgId, id, tender.item, tender.place, tradeGroups, partners ?? [])
+      : {};
 
   // 見積依頼の回答期限の目安：提出期限の3日前（datetime-local用にAsia/Tokyoのローカル表記へ）。
   let suggestedDueAt: string | null = null;
@@ -228,6 +238,7 @@ export default async function TenderDetailPage({
           partners={partners ?? []}
           suggestedDueAt={suggestedDueAt}
           officialStatus={officialStatus}
+          recommendations={recommendations}
         />
       )}
     </AppShell>

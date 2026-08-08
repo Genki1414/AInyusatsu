@@ -17,8 +17,20 @@ import { buildQuoteRequestEmail, groupLotsByTrade, type QuoteRequestLot } from "
 import { AREA_OPTIONS } from "@/lib/catalog";
 import { sendQuoteRequests, type SendQuoteRequestsState } from "./actions";
 import { DUE_AT_PLACEHOLDER } from "./quote-request-shared";
+// 型のみのimport（@ai-nyusatsu-bu/ai に依存する実装は絶対にこのファイルへ持ち込まない。
+// Client Componentなのでバンドルに @anthropic-ai/sdk が混ざってしまう）。
+import type { PartnerRecommendationResult } from "./recommend";
 
-export type RequestTabPartner = { id: string; name: string; base: string | null; email: string | null; trades: string[]; areas: string[] };
+export type RequestTabPartner = {
+  id: string;
+  name: string;
+  base: string | null;
+  email: string | null;
+  trades: string[];
+  areas: string[];
+  rating: number | null;
+  memo: string | null;
+};
 
 const initialState: SendQuoteRequestsState = { error: null, summary: null };
 const input = "rounded border border-slate-300 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300";
@@ -28,7 +40,15 @@ const input = "rounded border border-slate-300 bg-white px-2 py-1 text-xs focus:
 // 選択中に検索条件を変えてもチェック状態（フォームの値）が失われないようにしている。
 // 対応業種・エリアが未登録の協力会社は、絞り込みで除外されないようにしている
 // （データ未整備を理由に依頼先の候補から漏れないようにするため）。
-function PartnerPicker({ trade, candidates }: { trade: string; candidates: RequestTabPartner[] }) {
+function PartnerPicker({
+  trade,
+  candidates,
+  recommended,
+}: {
+  trade: string;
+  candidates: RequestTabPartner[];
+  recommended: Record<string, string>;
+}) {
   const [query, setQuery] = useState("");
   const [tradeOnly, setTradeOnly] = useState(true);
   const [area, setArea] = useState("");
@@ -79,6 +99,7 @@ function PartnerPicker({ trade, candidates }: { trade: string; candidates: Reque
           >
             <input type="checkbox" name={`partners_${trade}`} value={p.id} />
             {p.name}
+            {recommended[p.id] && <Pill tone="violet">AIのおすすめ</Pill>}
             {p.base && <span className="text-slate-400">（{p.base}）</span>}
             {p.trades.length > 0 && <span className="text-slate-400">・{p.trades.join("／")}</span>}
             {p.areas.length > 0 && <span className="text-slate-400">・{p.areas.join("／")}</span>}
@@ -103,6 +124,7 @@ export function RequestTab({
   partners,
   suggestedDueAt,
   officialStatus,
+  recommendations,
 }: {
   tenderId: string;
   senderOrgName: string;
@@ -117,6 +139,7 @@ export function RequestTab({
   partners: RequestTabPartner[];
   suggestedDueAt: string | null;
   officialStatus: "未取得" | "申請中" | "取得済";
+  recommendations: Record<string, PartnerRecommendationResult | null>;
 }) {
   const boundAction = sendQuoteRequests.bind(null, tenderId);
   const [state, formAction, pending] = useActionState(boundAction, initialState);
@@ -150,6 +173,8 @@ export function RequestTab({
     <form action={formAction} className="space-y-3">
       {tradeGroups.map((group) => {
         const candidates = partners.filter((p) => p.email);
+        const rec = recommendations[group.trade] ?? null;
+        const recommendedMap = Object.fromEntries((rec?.recommendations ?? []).map((r) => [r.partner_id, r.reason]));
         const { body } = buildQuoteRequestEmail({
           senderOrgName,
           senderContactName,
@@ -165,13 +190,35 @@ export function RequestTab({
         });
         return (
           <Panel key={group.trade} title={`${group.trade}（数量表 ${group.lots.length}行）`}>
+            {rec && rec.recommendations.length > 0 && (
+              <div className="mb-2 rounded border border-violet-200 bg-violet-50 px-2 py-1.5">
+                <p className="text-xs font-medium text-violet-800">AIのおすすめ</p>
+                <ul className="mt-1 space-y-0.5">
+                  {rec.recommendations.map((r) => {
+                    const partner = partners.find((p) => p.id === r.partner_id);
+                    if (!partner) return null;
+                    return (
+                      <li key={r.partner_id} className="text-xs text-violet-900">
+                        ・{partner.name}：{r.reason}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
+            {rec?.unavailableReason && (
+              <p className="mb-2 text-xs text-slate-400">AIによるおすすめは取得できませんでした（{rec.unavailableReason}）</p>
+            )}
+            {rec && rec.recommendations.length === 0 && !rec.unavailableReason && rec.note && (
+              <p className="mb-2 text-xs text-slate-400">AIのおすすめ：{rec.note}</p>
+            )}
             <div className="text-xs font-medium text-slate-700">依頼先</div>
             {candidates.length === 0 ? (
               <p className="mt-1 text-xs text-slate-500">
                 この業種に対応するメール登録済みの協力会社がありません。「協力会社」画面から登録してください。
               </p>
             ) : (
-              <PartnerPicker trade={group.trade} candidates={candidates} />
+              <PartnerPicker trade={group.trade} candidates={candidates} recommended={recommendedMap} />
             )}
 
             <label className="mt-3 block text-xs">
