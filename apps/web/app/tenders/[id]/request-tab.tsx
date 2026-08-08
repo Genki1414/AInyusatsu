@@ -73,6 +73,13 @@ function PartnerPicker({
     });
   }
 
+  // 絞り込みで隠れているチェックも含めて、この業種の選択を全て解除する
+  function resetAll() {
+    listRef.current?.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((el) => {
+      el.checked = false;
+    });
+  }
+
   return (
     <div className="mt-1">
       {candidates.length > 6 && (
@@ -110,6 +117,15 @@ function PartnerPicker({
             className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs text-slate-700 hover:bg-slate-50"
           >
             表示中の全社を選択
+          </button>
+        )}
+        {candidates.length > 0 && (
+          <button
+            type="button"
+            onClick={resetAll}
+            className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs text-slate-700 hover:bg-slate-50"
+          >
+            リセット
           </button>
         )}
       </div>
