@@ -10,10 +10,11 @@
 //   - lots_merge.ts     数量表の行をtender_lotsへ保存する前の重複排除（タスク2-5）
 //   - tender_date_validation.ts  期限の前後関係・和暦変換ミスの検出（タスク2-3b）
 //   - fit.ts            適合判定（タスク3-1）
+//   - quote_request.ts  数量表の業種別切り出し・見積依頼メールの組み立て（タスク4-1）
 // 実装予定（実装仕様書_v1.md §1 / ClaudeCode_実装指示書.md §4 参照）
 //   - costing.ts    原価集計・応札価格の検討（タスク4-5）
 //   - guide.ts       10ステップの状態導出
-//   - recommend.ts   協力会社の推薦
+//   - recommend.ts   協力会社の推薦（見積実績に基づくランキング。実績データが無いため未着手）
 
 export * from "./awards";
 export * from "./dedupe";
@@ -25,3 +26,4 @@ export * from "./tender_merge";
 export * from "./lots_merge";
 export * from "./tender_date_validation";
 export * from "./fit";
+export * from "./quote_request";
