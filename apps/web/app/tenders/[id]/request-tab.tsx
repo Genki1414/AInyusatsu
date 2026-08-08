@@ -9,7 +9,7 @@
 // 御社による正式取得（company_tenders.official_status）が「取得済」になるまでは送信できない
 // （docs/資料取得方針_v3.md §5「取得済みになるまで…作業を促さない」を見積依頼にも適用する。
 // ユーザーからの明示的な要望による）。サーバー側（actions.ts）でも同じ判定をしている。
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import Link from "next/link";
 import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
 import { Panel, Pill } from "@/components/ui";
@@ -21,6 +21,43 @@ export type RequestTabPartner = { id: string; name: string; base: string | null;
 
 const initialState: SendQuoteRequestsState = { error: null, summary: null };
 const input = "rounded border border-slate-300 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300";
+
+// 協力会社が多い業種でも選びやすいよう、絞り込み検索＋スクロール枠にする。
+// フィルタで絞り込んでも項目自体はDOMに残す（hidden切替）ことで、選択中に
+// 検索語を変えてもチェック状態（フォームの値）が失われないようにしている。
+function PartnerPicker({ trade, candidates }: { trade: string; candidates: RequestTabPartner[] }) {
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const matches = (p: RequestTabPartner) => !q || `${p.name}${p.base ?? ""}`.toLowerCase().includes(q);
+  const noMatch = q !== "" && !candidates.some(matches);
+
+  return (
+    <div className="mt-1">
+      {candidates.length > 6 && (
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="会社名で絞り込み"
+          className={`${input} mb-1.5 block w-full`}
+        />
+      )}
+      <div className="max-h-48 space-y-0.5 overflow-y-auto rounded border border-slate-100 p-1">
+        {noMatch && <p className="px-1.5 py-1 text-xs text-slate-400">該当する協力会社がありません</p>}
+        {candidates.map((p) => (
+          <label
+            key={p.id}
+            className={`flex items-center gap-1.5 rounded px-1.5 py-1 text-xs text-slate-700 hover:bg-slate-50 ${matches(p) ? "" : "hidden"}`}
+          >
+            <input type="checkbox" name={`partners_${trade}`} value={p.id} />
+            {p.name}
+            {p.base && <span className="text-slate-400">（{p.base}）</span>}
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export function RequestTab({
   tenderId,
@@ -104,15 +141,7 @@ export function RequestTab({
                 この業種に対応するメール登録済みの協力会社がありません。「協力会社」画面から登録してください。
               </p>
             ) : (
-              <div className="mt-1 flex flex-wrap gap-2">
-                {candidates.map((p) => (
-                  <label key={p.id} className="flex items-center gap-1.5 rounded border border-slate-200 px-2 py-1 text-xs text-slate-700">
-                    <input type="checkbox" name={`partners_${group.trade}`} value={p.id} />
-                    {p.name}
-                    {p.base && <span className="text-slate-400">（{p.base}）</span>}
-                  </label>
-                ))}
-              </div>
+              <PartnerPicker trade={group.trade} candidates={candidates} />
             )}
 
             <label className="mt-3 block text-xs">

@@ -8,6 +8,7 @@ import { AlertTriangle, FileText, Send, Sparkles, Target } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
+import { CopyButton } from "@/components/CopyButton";
 import { CollectPill, Field, Panel, ProposePill } from "@/components/ui";
 import { requireOrgContext } from "@/lib/auth";
 import { AnalysisTab, type AnalysisTabAnalysis } from "./analysis-tab";
@@ -147,11 +148,17 @@ export default async function TenderDetailPage({
       <Panel>
         <div className="flex flex-wrap items-start gap-3">
           <div className="min-w-0 flex-1">
-            <h1 className="text-sm font-semibold leading-snug">{tender.name}</h1>
-            <div className="mt-1 text-xs text-slate-500">
-              {agencyName(tender.agencies)}
-              {tender.org_unit && `／${tender.org_unit}`}
-              {tender.notice_no && `／公告番号 ${tender.notice_no}`}
+            <div className="flex flex-wrap items-start gap-1.5">
+              <h1 className="text-sm font-semibold leading-snug">{tender.name}</h1>
+              <CopyButton value={tender.name} label="案件名" />
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+              <span>
+                {agencyName(tender.agencies)}
+                {tender.org_unit && `／${tender.org_unit}`}
+                {tender.notice_no && `／公告番号 ${tender.notice_no}`}
+              </span>
+              {tender.notice_no && <CopyButton value={tender.notice_no} label="公告番号" />}
             </div>
             <div className="mt-2 flex flex-wrap gap-1">
               <CollectPill s={tender.collect_status} />
