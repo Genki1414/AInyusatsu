@@ -10,6 +10,7 @@ import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
 import { Panel, Pill } from "@/components/ui";
 import { buildQuoteRequestEmail, groupLotsByTrade, type QuoteRequestLot } from "@ai-nyusatsu-bu/domain";
 import { sendQuoteRequests, type SendQuoteRequestsState } from "./actions";
+import { DUE_AT_PLACEHOLDER } from "./quote-request-shared";
 
 export type RequestTabPartner = { id: string; name: string; base: string | null; email: string | null };
 
@@ -59,7 +60,7 @@ export function RequestTab({
           place,
           termFrom,
           termTo,
-          dueAtLabel: "（送信時に入力した回答期限が入ります）",
+          dueAtLabel: DUE_AT_PLACEHOLDER,
           trade: group.trade,
           lots: group.lots,
         });

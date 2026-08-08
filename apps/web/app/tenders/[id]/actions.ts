@@ -5,6 +5,7 @@ import { sendEmail } from "@ai-nyusatsu-bu/notifications";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { requireOrgContext } from "@/lib/auth";
+import { DUE_AT_PLACEHOLDER } from "./quote-request-shared";
 
 type TenderRow = {
   name: string;
@@ -80,8 +81,11 @@ export async function sendQuoteRequests(
     const partnerIds = formData.getAll(`partners_${group.trade}`).filter((v): v is string => typeof v === "string");
     if (partnerIds.length === 0) continue;
 
+    // フォームのtextareaは常に値を持つ（プレビュー生成時のDUE_AT_PLACEHOLDERを含む）ため、
+    // 「空かどうか」では編集の有無を判定できない。ユーザーが編集していてもいなくても、
+    // プレースホルダーを実際の回答期限へ置換してから使う。
     const bodyOverride = formData.get(`body_${group.trade}`);
-    const body =
+    const rawBody =
       typeof bodyOverride === "string" && bodyOverride.trim() !== ""
         ? bodyOverride
         : buildQuoteRequestEmail({
@@ -90,10 +94,11 @@ export async function sendQuoteRequests(
             place: tender.place,
             termFrom: tender.term_from,
             termTo: tender.term_to,
-            dueAtLabel,
+            dueAtLabel: DUE_AT_PLACEHOLDER,
             trade: group.trade,
             lots: group.lots,
           }).body;
+    const body = rawBody.split(DUE_AT_PLACEHOLDER).join(dueAtLabel);
     const subject = `【見積依頼】${tender.name}`;
 
     const { data: request, error: requestError } = await supabase
