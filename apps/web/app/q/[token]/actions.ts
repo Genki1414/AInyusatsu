@@ -4,8 +4,12 @@
 // 該当のquotes行を更新する（他の経路と違い、認証済みユーザーのセッションが存在しない）。
 //
 // このページでは見積金額は受け付けない（正式な見積書として弱いため）。「見送る」「資料請求」の
-// どちらかを記録し、資料請求なら本部取得資料の署名付きURLを協力会社へ自動送付したうえで、
-// 依頼元の担当者にも通知する（CLAUDE.md 最重要の前提4の例外。ユーザー決定 2026-08-21）。
+// どちらかを記録し、資料請求なら本部取得資料の署名付きURLを協力会社へ自動送付する
+// （CLAUDE.md 最重要の前提4の例外。ユーザー決定 2026-08-21）。
+//
+// 依頼元の担当者へのメール通知は行わない。通知の送信元を各顧客企業のドメインで用意する
+// 必要があり運用が回らないため（ユーザー決定 2026-08-21）。担当者は案件詳細の
+// 「見積状況」タブで回答を確認する。
 //
 // メール文面・資料の並び順・署名付きURLの有効期限は packages/domain の純ロジック
 // （quote_response.ts）に置き、ここでは副作用（DB更新・Storage・送信）だけを行う。
@@ -15,13 +19,11 @@ import { createServiceClient } from "@ai-nyusatsu-bu/db";
 import { sendEmail } from "@ai-nyusatsu-bu/notifications";
 import {
   buildDocumentsEmail,
-  buildResponseNotificationEmail,
   documentFilenames,
   signedUrlTtlSeconds,
   sortDocumentsByKind,
   type QuoteResponseChoice,
 } from "@ai-nyusatsu-bu/domain";
-import { getAppUrl } from "@/lib/app-url";
 
 export type QuoteResponseState = { error: string | null; saved: boolean };
 
@@ -136,10 +138,12 @@ export async function submitQuoteResponse(
     return { error: "送信に失敗しました。時間をおいて再度お試しください。", saved: false };
   }
 
-  // 資料の自動送付と担当者への通知。ここで失敗しても回答自体は記録済みなので、
-  // 協力会社の画面はエラーにしない（担当者への通知本文に理由を残し、見積状況タブにも出す）。
-  const warning = requestedDocuments ? await sendDocuments(supabase, ctx) : null;
-  await notifyOrg(supabase, ctx, choice, parsed.data.memo, warning);
+  // 資料の自動送付。ここで失敗しても回答自体は記録済みなので、協力会社の画面はエラーに
+  // しない（失敗はログに残し、見積状況タブに「資料の自動送付に失敗（要対応）」として出す）。
+  if (requestedDocuments) {
+    const warning = await sendDocuments(supabase, ctx);
+    if (warning) console.error(`[quote-response] ${warning}（quote=${ctx.id}）`);
+  }
 
   revalidatePath(`/q/${token}`);
   if (ctx.request) revalidatePath(`/tenders/${ctx.request.tenderId}`);
@@ -227,62 +231,20 @@ async function sendDocuments(supabase: Supabase, ctx: QuoteContext): Promise<str
   return failed.length > 0 ? `一部の資料（${failed.join("・")}）を送付できませんでした。手動での対応が必要です` : null;
 }
 
-/** 自組織のメールアドレスを取得する（協力会社への返信先・通知先に使う）。 */
-async function orgEmails(supabase: Supabase, orgId: string): Promise<string[]> {
+/** 協力会社への返信先に使う、自組織のメールアドレスを1件取得する。 */
+async function firstOrgEmail(supabase: Supabase, orgId: string): Promise<string | null> {
   const { data, error } = await supabase
     .from("users")
     .select("email, role")
     .eq("org_id", orgId)
     .order("role") // owner が member より先に来る
-    .returns<{ email: string; role: string }[]>();
+    .limit(1)
+    .maybeSingle<{ email: string; role: string }>();
   if (error) {
-    console.error("[quote-response] 通知先ユーザーの取得に失敗しました", error);
-    return [];
+    console.error("[quote-response] 返信先ユーザーの取得に失敗しました", error);
+    return null;
   }
-  return (data ?? []).map((u) => u.email).filter(Boolean);
-}
-
-async function firstOrgEmail(supabase: Supabase, orgId: string): Promise<string | null> {
-  const emails = await orgEmails(supabase, orgId);
-  return emails[0] ?? null;
-}
-
-/** 依頼元（org）の担当者全員へ、協力会社の回答を通知する。 */
-async function notifyOrg(
-  supabase: Supabase,
-  ctx: QuoteContext,
-  choice: QuoteResponseChoice,
-  memo: string | null,
-  warning: string | null,
-): Promise<void> {
-  if (!ctx.request) return;
-
-  const to = await orgEmails(supabase, ctx.request.orgId);
-  if (to.length === 0) {
-    console.error(`[quote-response] 通知先が見つかりませんでした（org=${ctx.request.orgId}）`);
-    return;
-  }
-
-  const dueAt = ctx.request.dueAt ? new Date(ctx.request.dueAt) : null;
-  const { subject, body } = buildResponseNotificationEmail({
-    partnerName: ctx.partner?.name ?? "協力会社",
-    tenderName: ctx.request.tenderName,
-    trade: ctx.request.trade,
-    choice,
-    memo,
-    afterDue: dueAt !== null && !Number.isNaN(dueAt.getTime()) && dueAt.getTime() < Date.now(),
-    warning,
-    tenderUrl: `${getAppUrl()}/tenders/${ctx.request.tenderId}?tab=quote-status`,
-  });
-
-  // 1人への送信が失敗しても他の担当者への通知は続ける（回答自体は記録済み）。
-  for (const address of to) {
-    try {
-      await sendEmail({ to: address, subject, text: body });
-    } catch (err) {
-      console.error(`[quote-response] 担当者への通知に失敗しました（${address}）`, err);
-    }
-  }
+  return data?.email ?? null;
 }
 
 /**
