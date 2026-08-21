@@ -22,7 +22,10 @@ export const basicInfoSchema = z.object({
   areas: evidencedField(z.array(z.string())),
   budget: z.object({
     value: z.number().nullable(),
-    disclosed: z.boolean(),
+    // 予定価格に一切触れていない資料では、公表・非公表の別も判断できないためnullが返る
+    // （「分からない項目は null にする」AI解析プロンプト集.md §全体ルール1）。
+    // 「非公表」「事後公表」と明記されている場合はfalseが返る。
+    disclosed: z.boolean().nullable(),
     quote: z.string().nullable(),
     source: z.string().nullable(),
   }),
