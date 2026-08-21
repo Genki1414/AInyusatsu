@@ -3,6 +3,7 @@
 export * from "./extract";
 export * from "./analyze";
 export * from "./usage";
+export * from "./batch_plan";
 export * from "./recommend";
 export * from "./schemas/basic_info";
 export * from "./schemas/qualifications";
@@ -13,3 +14,4 @@ export * from "./schemas/questions";
 export * from "./schemas/partner_recommend";
 export * from "../prompts/user_template";
 export * from "../adapters/claude";
+export * from "../adapters/claude_batch";

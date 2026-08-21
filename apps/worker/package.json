@@ -14,6 +14,7 @@
     "documents:extract-text": "tsx --env-file=.env.local scripts/run-extract-document-text.ts",
     "ai:smoke-test": "tsx --env-file=.env.local scripts/run-analyze-smoke-test.ts",
     "analyze:tender": "tsx --env-file=.env.local scripts/run-analyze-tender.ts",
+    "analyze:batch": "tsx --env-file=.env.local scripts/run-analyze-batch.ts",
     "match:tenders": "tsx --env-file=.env.local scripts/run-match-tenders.ts",
     "quotes:remind": "tsx --env-file=.env.local scripts/run-remind-quotes.ts"
   },
