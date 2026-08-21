@@ -126,10 +126,12 @@ async function saveDocuments(
         .eq("sha256", sha256)
         .maybeSingle<{ id: string; filename: string | null }>();
 
-      // 既に同じ資料（同一ハッシュ）がある場合は再ダウンロードしないが、
-      // ファイル名を保存する前に取得した資料はfilenameが空のままなので、ここで補完する
-      // （そうしないと、再収集しても協力会社へ送る資料名が「その他」のままになる）。
-      if (existing && !existing.filename) {
+      // 既に同じ資料（同一ハッシュ）がある場合は再ダウンロードしないが、ファイル名は
+      // 再収集で最新の値に直す。空のまま（ファイル名の保存に対応する前のデータ）だけでなく、
+      // 文字化けした名前（CP932をUTF-8として読んでいた頃のデータ）も直す必要があるため、
+      // 値が違っていれば上書きする。ファイル名を人が編集する画面は無いので、
+      // 収集結果で上書きして失われるものは無い。
+      if (existing && existing.filename !== doc.filename) {
         const { error: backfillError } = await client
           .from("tender_documents")
           .update({ filename: doc.filename })
