@@ -8,7 +8,8 @@ export type LotRow = {
   qty: number | null;
   unit: string | null;
   trade: string | null;
-  confidence: number;
+  // 業種割当の確からしさ。AIが判定できなかった行では null（tender_lots.confidence も nullable）
+  confidence: number | null;
 };
 
 /**

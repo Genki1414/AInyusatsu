@@ -21,3 +21,19 @@ describe("notesSchema", () => {
     expect(result.success).toBe(false);
   });
 });
+
+describe("notesSchema（判定できない項目のnull許容）", () => {
+  it("重要度・理由・引用・出典がnullでも注意事項を捨てない", () => {
+    const result = notesSchema.safeParse({
+      notes: [{ text: "処分費は落札者の負担とする", importance: null, reason: null, quote: null, source: null }],
+      unknown_reason: null,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("notesごと省略されても空配列として受理する", () => {
+    const result = notesSchema.safeParse({});
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.notes).toEqual([]);
+  });
+});

@@ -3,7 +3,11 @@
 // ParseInvalidErrorを投げる（呼び出し元はPARSE_INVALIDとして記録し、案件は「解析失敗」として残す。
 // 黙って落とさない＝CLAUDE.mdの「エラーは握りつぶさない」）。
 
-import type { ZodType } from "zod";
+import type { ZodType, ZodTypeDef } from "zod";
+
+// スキーマは「入力（モデルの生JSON）」と「出力（検証後の値）」の型が食い違う。
+// 省略されたキーを既定値で埋める（.default(null) など）ため、入力側は unknown として受ける。
+type OutputSchema<T> = ZodType<T, ZodTypeDef, unknown>;
 
 /** 2回試行してもスキーマに適合する出力が得られなかった場合に投げる。 */
 export class ParseInvalidError extends Error {
@@ -85,7 +89,7 @@ export type ExtractParams<T> = {
   promptName: string;
   system: string;
   user: string;
-  schema: ZodType<T>;
+  schema: OutputSchema<T>;
   callModel: CallModel;
   onInvalid?: OnInvalid;
 };
