@@ -3,10 +3,10 @@
 // 資料原本（storage_key）はユーザーに配らない方針（CLAUDE.md 最重要の前提4）のため、
 // ダウンロード・プレビューは提供しない。取得状況と公告元URLのみ表示する。
 //
-// 「機関が出していない（正常）」と「取得失敗（要対応）」の区別（CLAUDE.md 最重要の前提7）は
-// tender_documents に列が無く、authenticated から読めるデータには持たせていない
-// （failure_code はtenders単位のみ）。このタスク（3-3）では「取得済／未取得」のみを表示し、
-// 理由の区別は行わない。
+// 「機関が出していない（正常）」と「取得失敗（要対応）」は文言を分ける
+// （CLAUDE.md 最重要の前提7 / docs/資料取得方針_v3.md「資料が無い理由を2つに分ける」）。
+// 「ありません」と「取れていません」は意味が違う。判定は packages/domain の
+// document_status.ts に置き、この画面は表示だけを行う。
 //
 // 御社による正式取得（タスク4-1追加）：本部の取得（AI解析用）とは別に、顧客自身が
 // 自社名義で資料を取得する必要がある（docs/資料取得方針_v3.md §1・§5）。取得方法は
@@ -14,10 +14,9 @@
 // （2026-08-01 実機確認）に基づき、ICカードが不要な経路を案内する
 // （プロトタイプのOfficialModal執筆時点はICカードが必要という古い前提だったため、
 // 実機確認済みの内容に合わせて書き換えている）。
+import { REQUIRED_DOC_KINDS, type DocumentAvailability, type DocumentAvailabilityStatus } from "@ai-nyusatsu-bu/domain";
 import { Panel, Pill } from "@/components/ui";
 import { setOfficialStatus } from "./official-actions";
-
-export const DOC_KINDS = ["公告", "入札説明書", "仕様書", "数量表", "様式"] as const;
 
 export type TenderDocumentRow = {
   kind: string;
@@ -25,6 +24,16 @@ export type TenderDocumentRow = {
   fetched_at: string | null;
   page_count: number | null;
   ocr_used: boolean;
+  extract_error: string | null;
+};
+
+// 状態ごとの表示。「未公開」は正常な状態なので警告色にしない。
+const STATUS_VIEW: Record<DocumentAvailabilityStatus, { label: string; tone: "green" | "amber" | "rose" | "slate"; note: (kind: string) => string }> = {
+  取得済: { label: "取得済", tone: "green", note: () => "" },
+  本文なし: { label: "本文なし", tone: "amber", note: (kind) => `${kind}は取得できましたが、本文を読み取れていません` },
+  未公開: { label: "この案件にはありません", tone: "slate", note: (kind) => `この案件には${kind}がありません` },
+  取得失敗: { label: "取得できていません", tone: "rose", note: (kind) => `${kind}を取得できていません` },
+  未確認: { label: "未確認", tone: "slate", note: (kind) => `${kind}はまだ確認できていません` },
 };
 
 export type TenderLotRow = {
@@ -77,7 +86,9 @@ const OFFICIAL_STATUS_TONE = { 未取得: "rose", 申請中: "amber", 取得済:
 const GEPS_PORTAL_TOP_URL = "https://www.p-portal.go.jp/";
 
 export function DocsTab({
+  availabilities,
   documents,
+  documentsFailureReason,
   lots,
   sourceUrl,
   connectorId,
@@ -85,7 +96,9 @@ export function DocsTab({
   acquireMethod,
   officialStatus,
 }: {
+  availabilities: DocumentAvailability[];
   documents: TenderDocumentRow[];
+  documentsFailureReason: string | null;
   lots: TenderLotRow[];
   sourceUrl: string | null;
   connectorId: string | null;
@@ -93,23 +106,47 @@ export function DocsTab({
   acquireMethod: string;
   officialStatus: "未取得" | "申請中" | "取得済";
 }) {
-  const got = DOC_KINDS.filter((kind) => documents.some((d) => d.kind === kind && d.fetched));
-  const missing = DOC_KINDS.length - got.length;
+  const fetched = availabilities.filter((a) => a.status === "取得済");
+  const notPublished = availabilities.filter((a) => a.status === "未公開");
+  const needsAction = availabilities.filter((a) => a.needsAction);
+  const unchecked = availabilities.filter((a) => a.status === "未確認");
   const stepGroups = OFFICIAL_STEP_GROUPS[acquireMethod] ?? [{ label: null, steps: ["公告記載の手順を確認する"] }];
 
   return (
     <div className="space-y-3">
       <Panel title="本部による取得">
         <div className="flex flex-wrap items-center gap-2">
-          {missing === 0 ? (
-            <Pill tone="green">取得できるものは揃っています</Pill>
+          {needsAction.length > 0 ? (
+            <Pill tone="rose">取得できていない資料が{needsAction.length}件</Pill>
+          ) : unchecked.length > 0 ? (
+            <Pill tone="slate">資料をまだ確認できていません</Pill>
           ) : (
-            <Pill tone="amber">取得できていない資料が{missing}件</Pill>
+            <Pill tone="green">取得できるものは揃っています</Pill>
           )}
         </div>
         <p className="mt-1.5 text-xs leading-relaxed text-slate-600">
-          取得済 {got.length}/{DOC_KINDS.length}件
+          取得済 {fetched.length}/{REQUIRED_DOC_KINDS.length}件
+          {notPublished.length > 0 && (
+            <>
+              {" "}
+              <span className="text-slate-500">
+                （{notPublished.map((a) => a.kind).join("・")}は、この案件にはありません）
+              </span>
+            </>
+          )}
         </p>
+        {needsAction.length > 0 && (
+          <ul className="mt-1.5 space-y-0.5">
+            {needsAction.map((a) => (
+              <li key={a.kind} className="text-xs text-rose-700">
+                ・{STATUS_VIEW[a.status].note(a.kind)}
+              </li>
+            ))}
+          </ul>
+        )}
+        {documentsFailureReason && (
+          <p className="mt-1.5 break-all text-xs text-rose-700">取得時のエラー：{documentsFailureReason}</p>
+        )}
         <p className="mt-1 text-xs text-slate-400">
           AI解析のための取得です。取得できた資料の原本はお渡ししていません。
         </p>
@@ -198,13 +235,14 @@ export function DocsTab({
               </tr>
             </thead>
             <tbody>
-              {DOC_KINDS.map((kind) => {
-                const doc = documents.find((d) => d.kind === kind && d.fetched);
+              {availabilities.map((a) => {
+                const doc = documents.find((d) => d.kind === a.kind && d.fetched);
+                const view = STATUS_VIEW[a.status];
                 return (
-                  <tr key={kind} className="border-t border-slate-100">
-                    <td className="px-3 py-2 font-medium">{kind}</td>
+                  <tr key={a.kind} className="border-t border-slate-100">
+                    <td className="px-3 py-2 font-medium">{a.kind}</td>
                     <td className="px-2 py-2">
-                      {doc ? <Pill tone="green">取得済</Pill> : <Pill tone="rose">未取得</Pill>}
+                      <Pill tone={view.tone}>{view.label}</Pill>
                     </td>
                     <td className="px-2 py-2 tabular-nums text-slate-600">
                       {doc?.fetched_at ? new Date(doc.fetched_at).toLocaleString("ja-JP") : "—"}
