@@ -11,6 +11,7 @@
 //   - tender_date_validation.ts  期限の前後関係・和暦変換ミスの検出（タスク2-3b）
 //   - fit.ts            適合判定（タスク3-1）
 //   - quote_request.ts  数量表の業種別切り出し・見積依頼メールの組み立て（タスク4-1）
+//   - quote_response.ts 協力会社の回答（資料送付・回答通知メール、署名付きURLの有効期限）（タスク4-2）
 // 実装予定（実装仕様書_v1.md §1 / ClaudeCode_実装指示書.md §4 参照）
 //   - costing.ts    原価集計・応札価格の検討（タスク4-5）
 //   - guide.ts       10ステップの状態導出
@@ -27,3 +28,4 @@ export * from "./lots_merge";
 export * from "./tender_date_validation";
 export * from "./fit";
 export * from "./quote_request";
+export * from "./quote_response";

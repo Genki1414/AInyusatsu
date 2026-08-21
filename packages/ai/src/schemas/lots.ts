@@ -26,7 +26,10 @@ export const lotsSchema = z.object({
       line_no: z.number(),
       item: z.string(),
       spec: z.string().nullable(),
-      qty: z.number(),
+      // 「一式」など数量が数値で書かれていない行・記載が無い行があるため null を許容する。
+      // 「分からない項目は null にする」（AI解析プロンプト集.md §全体ルール1）と
+      // tender_lots.qty が nullable であることに合わせる。
+      qty: z.number().nullable(),
       unit: z.string().nullable(),
       trade: z.enum(TRADES).nullable(),
       confidence: z.number().min(0).max(1),

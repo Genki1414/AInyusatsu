@@ -5,7 +5,7 @@ export type LotRow = {
   line_no: number;
   item: string;
   spec: string | null;
-  qty: number;
+  qty: number | null;
   unit: string | null;
   trade: string | null;
   confidence: number;

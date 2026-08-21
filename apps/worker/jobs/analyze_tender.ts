@@ -35,6 +35,7 @@ import {
   analyzeQualifications,
   callClaude,
   type PromptDocument,
+  type OnInvalid,
 } from "@ai-nyusatsu-bu/ai";
 
 const MODEL_NAME = "claude-sonnet-5";
@@ -97,12 +98,22 @@ export async function analyzeTender(tenderId: string): Promise<AnalyzeTenderResu
     procurement: tender.procurement ?? "",
   };
 
+  // スキーマ不一致の理由を捨てない（CLAUDE.md「エラーは握りつぶさない」）。
+  // 2回失敗するとParseInvalidErrorになるが、それだけでは「どの項目がなぜ弾かれたか」が
+  // 分からず調査できないため、試行ごとに理由を標準エラー出力へ残す。
+  const onInvalid: OnInvalid = ({ promptName, attempt, issue }) => {
+    console.error(
+      `[analyze_tender] スキーマ不一致（prompt=${promptName}, attempt=${attempt}）:`,
+      JSON.stringify(issue, null, 2),
+    );
+  };
+
   const [basicInfo, qualifications, lots, forms, notes] = await Promise.all([
-    analyzeBasicInfo({ meta, documents, callModel: callClaude }),
-    analyzeQualifications({ meta, documents, callModel: callClaude }),
-    analyzeLots({ meta, documents, callModel: callClaude }),
-    analyzeForms({ meta, documents, callModel: callClaude }),
-    analyzeNotes({ meta, documents, callModel: callClaude }),
+    analyzeBasicInfo({ meta, documents, callModel: callClaude, onInvalid }),
+    analyzeQualifications({ meta, documents, callModel: callClaude, onInvalid }),
+    analyzeLots({ meta, documents, callModel: callClaude, onInvalid }),
+    analyzeForms({ meta, documents, callModel: callClaude, onInvalid }),
+    analyzeNotes({ meta, documents, callModel: callClaude, onInvalid }),
   ]);
 
   // tenders：空欄の項目だけをAI解析の値で埋める（コネクタの確定値は上書きしない）。
