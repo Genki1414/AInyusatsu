@@ -73,7 +73,7 @@ export function buildQuoteRequestEmail(input: QuoteRequestEmailInput): { subject
     "【対象範囲】",
     ...input.lots.map(formatLotLine),
     "",
-    "下記の専用フォームから、お見積り金額のご入力をお願いいたします。",
+    "下記の専用フォームから、資料のご請求または見送りのご連絡をお願いいたします。",
     input.responseUrl,
     "",
     "お忙しいところ恐れ入りますが、ご都合が合わない場合も上記フォームから「今回は見送る」をお選びください。",

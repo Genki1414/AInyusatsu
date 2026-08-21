@@ -88,7 +88,7 @@ describe("buildQuoteRequestEmail", () => {
       lots: [],
       responseUrl: "https://example.com/q/abc123",
     });
-    expect(body).toContain("下記の専用フォームから、お見積り金額のご入力をお願いいたします。");
+    expect(body).toContain("下記の専用フォームから、資料のご請求または見送りのご連絡をお願いいたします。");
     expect(body).toContain("https://example.com/q/abc123");
     expect(body).toContain("「今回は見送る」をお選びください。");
   });
