@@ -16,3 +16,13 @@ crawl / fetch_documents / fetch_documents_ic / parse / match / notify / remind /
   回答期限の24時間前を切った未回答の見積へ1回だけ催促メールを送る（`quotes.reminded_at`
   で記録）。`RESEND_API_KEY` / `RESEND_FROM_ADDRESS` / `NEXT_PUBLIC_APP_URL` が必要。
   常駐（pg-boss）は未実装のため、いまは `pnpm --filter worker quotes:remind` で実行する
+- `analysis_shared.ts`：AI解析の共通部分。資料の読み込み（`loadTenderForAnalysis`）と
+  DBへの書き戻し（`persistAnalysis`）。同期実行とバッチ実行の両方が使う
+- `analyze_tenders_batch.ts`：Batch API での案件解析（コスト対策③の骨格）。
+  `submitAnalysisBatch(tenderIds, stage)` / `checkAnalysisBatch(batchId)` /
+  `applyAnalysisBatch(batchId)` / `cancelAnalysisBatch(batchId)`。
+  全トークンが50%引きになる代わりに、結果が出るまでたいてい1時間・最大24時間かかる。
+  プロンプトキャッシュを効かせるため2段階に分ける（第1段=基本情報のみ、第2段=残り4本）。
+  **バッチでキャッシュがどれだけ効くかは未検証**。`applyAnalysisBatch` が記録する
+  `analysis_batches.usage` で必ず実測すること。
+  定期実行は未実装で、いまは `pnpm --filter worker analyze:batch` から手で回す

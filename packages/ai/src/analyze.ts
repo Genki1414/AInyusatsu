@@ -29,10 +29,55 @@ type RunOptions = {
 };
 
 /**
+ * 案件解析に使う5本のプロンプト（§1〜§5）の定義。
+ * 同期実行（analyzeX）とバッチ実行（Batch API）の両方がここを参照するので、
+ * 「どのプロンプトがどのスキーマを使うか」の対応はこの1か所だけに置く。
+ * §6（質問案）は案件解析のパイプラインには含まないため入れていない。
+ */
+export const ANALYSIS_PROMPTS = {
+  basic_info: {
+    schemaDescription: BASIC_INFO_SCHEMA_DESCRIPTION,
+    instructions: BASIC_INFO_INSTRUCTIONS,
+    schema: basicInfoSchema,
+  },
+  qualifications: {
+    schemaDescription: QUALIFICATIONS_SCHEMA_DESCRIPTION,
+    instructions: QUALIFICATIONS_INSTRUCTIONS,
+    schema: qualificationsSchema,
+  },
+  lots: {
+    schemaDescription: LOTS_SCHEMA_DESCRIPTION,
+    instructions: LOTS_INSTRUCTIONS,
+    schema: lotsSchema,
+  },
+  forms: {
+    schemaDescription: FORMS_SCHEMA_DESCRIPTION,
+    instructions: FORMS_INSTRUCTIONS,
+    schema: formsSchema,
+  },
+  notes: {
+    schemaDescription: NOTES_SCHEMA_DESCRIPTION,
+    instructions: NOTES_INSTRUCTIONS,
+    schema: notesSchema,
+  },
+} as const;
+
+export type AnalysisPromptName = keyof typeof ANALYSIS_PROMPTS;
+
+/**
  * ユーザープロンプト＝共通テンプレート＋そのプロンプト固有の追加の指示。
- * 共通部分（案件の既知情報＋資料）と固有部分に分けて返す。共通部分は6本とも同じ文字列に
+ * 共通部分（案件の既知情報＋資料）と固有部分に分けて返す。共通部分は5本とも同じ文字列に
  * なるため、アダプタ側でここまでをキャッシュできる。
  */
+export function buildAnalysisPrompt(
+  promptName: AnalysisPromptName,
+  meta: TenderMeta,
+  documents: PromptDocument[],
+): UserPrompt {
+  const spec = ANALYSIS_PROMPTS[promptName];
+  return buildUserPrompt(meta, documents, spec.schemaDescription, spec.instructions);
+}
+
 function buildUser(
   meta: TenderMeta,
   documents: PromptDocument[],
