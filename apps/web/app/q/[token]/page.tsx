@@ -15,6 +15,7 @@ type QuoteRow = {
   amount: number | null;
   declined: boolean;
   documents_requested: boolean;
+  documents_sent_at: string | null;
   replied_at: string | null;
   memo: string | null;
   partners: { name: string } | { name: string }[] | null;
@@ -45,13 +46,27 @@ function one<T>(value: T | T[] | null | undefined): T | null {
   return Array.isArray(value) ? (value[0] ?? null) : value;
 }
 
+function dueLabel(iso: string | null): string {
+  if (!iso) return "未確認";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "未確認" : d.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+}
+
+// 期限を過ぎても回答自体は受け付ける（遅れた連絡でも依頼元には有用なため）。
+// ただし気づかずに送ってしまわないよう、画面には明示する。
+function isAfterDue(iso: string | null): boolean {
+  if (!iso) return false;
+  const d = new Date(iso);
+  return !Number.isNaN(d.getTime()) && d.getTime() < Date.now();
+}
+
 export default async function QuoteResponsePage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
   const supabase = createServiceClient();
 
   const { data: quote } = await supabase
     .from("quotes")
-    .select("id, request_id, amount, declined, documents_requested, replied_at, memo, partners(name)")
+    .select("id, request_id, amount, declined, documents_requested, documents_sent_at, replied_at, memo, partners(name)")
     .eq("response_token", token)
     .maybeSingle<QuoteRow>();
   if (!quote) notFound();
@@ -72,7 +87,8 @@ export default async function QuoteResponsePage({ params }: { params: Promise<{ 
   const tender = one(request.tenders);
   const agency = tender ? one(tender.agencies) : null;
   const org = one(request.organizations);
-  const dueAtLabel = request.due_at ? new Date(request.due_at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" }) : "未確認";
+  const dueAtLabel = dueLabel(request.due_at);
+  const afterDue = isAfterDue(request.due_at);
 
   return (
     <main className="mx-auto flex min-h-screen max-w-xl flex-col gap-4 p-6">
@@ -103,7 +119,10 @@ export default async function QuoteResponsePage({ params }: { params: Promise<{ 
           </div>
           <div className="flex gap-2">
             <dt className="w-24 shrink-0 text-slate-500">回答期限</dt>
-            <dd className="font-medium text-blue-800">{dueAtLabel}</dd>
+            <dd className={afterDue ? "font-medium text-rose-700" : "font-medium text-blue-800"}>
+              {dueAtLabel}
+              {afterDue && "（期限を過ぎています）"}
+            </dd>
           </div>
         </dl>
 
@@ -125,10 +144,12 @@ export default async function QuoteResponsePage({ params }: { params: Promise<{ 
       <QuoteResponseForm
         token={token}
         partnerName={partner?.name ?? null}
+        afterDue={afterDue}
         current={{
           amount: quote.amount,
           declined: quote.declined,
           documentsRequested: quote.documents_requested,
+          documentsSentAt: quote.documents_sent_at,
           memo: quote.memo,
           repliedAt: quote.replied_at,
         }}
