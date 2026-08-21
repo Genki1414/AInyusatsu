@@ -16,7 +16,13 @@ export class ParseInvalidError extends Error {
 /** モデル呼び出しの抽象。実運用では adapters/claude.ts の callClaude を渡す（テストではモックを渡す）。 */
 export type CallModel = (args: { system: string; user: string; temperature: number }) => Promise<string>;
 
-export type ExtractInvalidEvent = { promptName: string; attempt: number; issue: unknown };
+export type ExtractInvalidEvent = {
+  promptName: string;
+  attempt: number;
+  issue: unknown;
+  /** モデルの生出力。JSONとして壊れている場合、issueだけでは原因が分からないため添える */
+  raw: string;
+};
 export type OnInvalid = (event: ExtractInvalidEvent) => void;
 
 /**
@@ -48,9 +54,9 @@ export async function extract<T>(params: ExtractParams<T>): Promise<T> {
       const parsed = safeJsonParse(raw);
       const result = schema.safeParse(parsed);
       if (result.success) return result.data;
-      onInvalid?.({ promptName, attempt, issue: result.error.issues });
+      onInvalid?.({ promptName, attempt, issue: result.error.issues, raw });
     } catch (err) {
-      onInvalid?.({ promptName, attempt, issue: err });
+      onInvalid?.({ promptName, attempt, issue: err, raw });
     }
   }
 

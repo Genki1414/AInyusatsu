@@ -101,11 +101,13 @@ export async function analyzeTender(tenderId: string): Promise<AnalyzeTenderResu
   // スキーマ不一致の理由を捨てない（CLAUDE.md「エラーは握りつぶさない」）。
   // 2回失敗するとParseInvalidErrorになるが、それだけでは「どの項目がなぜ弾かれたか」が
   // 分からず調査できないため、試行ごとに理由を標準エラー出力へ残す。
-  const onInvalid: OnInvalid = ({ promptName, attempt, issue }) => {
-    console.error(
-      `[analyze_tender] スキーマ不一致（prompt=${promptName}, attempt=${attempt}）:`,
-      JSON.stringify(issue, null, 2),
-    );
+  const onInvalid: OnInvalid = ({ promptName, attempt, issue, raw }) => {
+    // ErrorはJSON.stringifyすると{}になり原因が分からなくなるため、messageを取り出す。
+    // JSONとして壊れている場合はissueだけでは判断できないので、生出力の末尾も添える
+    // （末尾を見るのは、出力が長すぎて途中で切れたかを判別するため）。
+    const detail = issue instanceof Error ? `${issue.name}: ${issue.message}` : JSON.stringify(issue, null, 2);
+    console.error(`[analyze_tender] スキーマ不一致（prompt=${promptName}, attempt=${attempt}）: ${detail}`);
+    console.error(`[analyze_tender] 生出力の末尾200文字: ${JSON.stringify(raw.slice(-200))}（全${raw.length}文字）`);
   };
 
   const [basicInfo, qualifications, lots, forms, notes] = await Promise.all([

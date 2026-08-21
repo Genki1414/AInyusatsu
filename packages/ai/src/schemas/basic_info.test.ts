@@ -78,4 +78,34 @@ describe("basicInfoSchema", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it("予定価格に触れていない資料では disclosed が null でも受理する", () => {
+    // 公表・非公表の別すら書かれていない資料では、推測せず null が返る
+    // （AI解析プロンプト集.md §全体ルール1「分からない項目は null にする」）。
+    // 「非公表」「事後公表」と明記されている場合は false が返る。
+    const emptyField = { value: null, quote: null, source: null };
+    const result = basicInfoSchema.safeParse({
+      name: emptyField,
+      agency: emptyField,
+      org_unit: emptyField,
+      notice_no: emptyField,
+      notice_date: emptyField,
+      submit_deadline: emptyField,
+      qa_deadline: emptyField,
+      bid_open_at: emptyField,
+      term_from: emptyField,
+      term_to: emptyField,
+      place: emptyField,
+      qual_category: emptyField,
+      item: emptyField,
+      grade: emptyField,
+      areas: { value: [], quote: null, source: null },
+      budget: { value: null, disclosed: null, quote: null, source: null },
+      jv_allowed: emptyField,
+      electronic_bidding: emptyField,
+      unknown_fields: ["budget"],
+    });
+    expect(result.success).toBe(true);
+  });
+
 });
