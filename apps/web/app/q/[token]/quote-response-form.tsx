@@ -36,7 +36,9 @@ export function QuoteResponseForm({
       {(alreadyReplied || state.saved) && (
         <p className="mt-1 rounded bg-emerald-50 px-2 py-1.5 text-sm text-emerald-800">
           {state.saved
-            ? "送信しました。ありがとうございます。"
+            ? choice === "request_documents"
+              ? "送信しました。資料をメールでお送りしましたのでご確認ください。"
+              : "送信しました。ありがとうございます。"
             : current.declined
               ? "「今回は見送る」として記録されています。内容を修正して再送信することもできます。"
               : "「資料をお願いする」として記録されています。内容を修正して再送信することもできます。"}

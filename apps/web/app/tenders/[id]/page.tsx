@@ -55,6 +55,7 @@ type SentQuoteRequestRow = {
     amount: number | null;
     declined: boolean;
     documents_requested: boolean;
+    documents_sent_at: string | null;
     replied_at: string | null;
     memo: string | null;
     partners: { name: string } | { name: string }[] | null;
@@ -152,7 +153,7 @@ export default async function TenderDetailPage({
     tab === "quote-status"
       ? await supabase
           .from("quote_requests")
-          .select("id, trade, due_at, sent_at, quotes(id, amount, declined, documents_requested, replied_at, memo, partners(name))")
+          .select("id, trade, due_at, sent_at, quotes(id, amount, declined, documents_requested, documents_sent_at, replied_at, memo, partners(name))")
           .eq("tender_id", id)
           .order("sent_at", { ascending: false })
           .returns<SentQuoteRequestRow[]>()
@@ -167,6 +168,7 @@ export default async function TenderDetailPage({
       amount: q.amount,
       declined: q.declined,
       documents_requested: q.documents_requested,
+      documents_sent_at: q.documents_sent_at,
       replied_at: q.replied_at,
       memo: q.memo,
       partner: Array.isArray(q.partners) ? (q.partners[0] ?? null) : q.partners,

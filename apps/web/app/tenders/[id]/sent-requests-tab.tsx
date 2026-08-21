@@ -13,6 +13,7 @@ export type SentQuoteRequest = {
     amount: number | null;
     declined: boolean;
     documents_requested: boolean;
+    documents_sent_at: string | null;
     replied_at: string | null;
     memo: string | null;
     partner: { name: string } | null;
@@ -52,6 +53,12 @@ export function SentRequestsTab({ sentRequests }: { sentRequests: SentQuoteReque
                   <li key={q.id} className="flex flex-wrap items-center gap-1.5 text-xs text-slate-700">
                     <span>{q.partner?.name ?? "（削除された協力会社）"}</span>
                     <Pill tone={status.tone}>{status.label}</Pill>
+                    {q.documents_requested && !q.documents_sent_at && <Pill tone="rose">資料の自動送付に失敗（要対応）</Pill>}
+                    {q.documents_sent_at && (
+                      <span className="text-slate-400">
+                        資料送付済み（{new Date(q.documents_sent_at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}）
+                      </span>
+                    )}
                     {q.memo && <span className="text-slate-400">備考：{q.memo}</span>}
                   </li>
                 );
