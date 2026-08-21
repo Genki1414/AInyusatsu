@@ -4,15 +4,19 @@
 // 提出書類／結果 の9つ。進め方・質問・見積比較・提出書類・結果は、原価集計（タスク4-5）や
 // 質問案生成など未着手の機能に依存するため、引き続き含めない。見積依頼（タスク4-1）は
 // tender_lots・partnersだけで実装できるためこのPRで追加する。
-import { AlertTriangle, FileText, ListChecks, Send, Sparkles, Target } from "lucide-react";
+import { AlertTriangle, ClipboardCheck, FileText, ListChecks, Send, Sparkles, Target } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
+  buildChecklist,
+  checklistProgress,
   documentAvailabilities,
   groupLotsByTrade,
   REQUIRED_DOC_KINDS,
   summarizeDocuments,
+  type ChecklistForm,
   type DocumentCheck,
+  type FormState,
 } from "@ai-nyusatsu-bu/domain";
 import { AppShell } from "@/components/AppShell";
 import { CopyButton } from "@/components/CopyButton";
@@ -20,6 +24,7 @@ import { CollectPill, Field, Panel, ProposePill } from "@/components/ui";
 import { requireOrgContext } from "@/lib/auth";
 import { AnalysisTab, type AnalysisTabAnalysis } from "./analysis-tab";
 import { DocsTab, type TenderDocumentRow, type TenderLotRow } from "./docs-tab";
+import { FormsTab } from "./forms-tab";
 import { FitTab, type FitTabProposal } from "./fit-tab";
 import { getPartnerRecommendations, type PartnerRecommendationResult } from "./recommend";
 import { RequestTab, type RequestTabPartner } from "./request-tab";
@@ -80,6 +85,7 @@ const TABS = [
   { key: "analysis", label: "公告の中身", icon: Sparkles },
   { key: "request", label: "見積依頼", icon: Send },
   { key: "quote-status", label: "見積状況", icon: ListChecks },
+  { key: "forms", label: "提出書類", icon: ClipboardCheck },
 ] as const;
 type TabKey = (typeof TABS)[number]["key"];
 
@@ -114,8 +120,17 @@ export default async function TenderDetailPage({
 
   const { supabase, orgId, orgName, userName, userEmail } = await requireOrgContext();
 
-  const [{ data: tender }, { data: documents }, { data: lots }, { data: analysis }, { data: proposal }, { data: partners }, { data: companyTender }] =
-    await Promise.all([
+  const [
+    { data: tender },
+    { data: documents },
+    { data: lots },
+    { data: analysis },
+    { data: proposal },
+    { data: partners },
+    { data: companyTender },
+    { data: forms },
+    { data: formStates },
+  ] = await Promise.all([
     supabase
       .from("tenders")
       .select(
@@ -144,7 +159,17 @@ export default async function TenderDetailPage({
       .limit(1)
       .maybeSingle<FitTabProposal & { status: string }>(),
     supabase.from("partners").select("id, name, base, email, trades, areas, rating, memo").eq("active", true).returns<RequestTabPartner[]>(),
-    supabase.from("company_tenders").select("official_status").eq("tender_id", id).maybeSingle<{ official_status: OfficialStatus }>(),
+    supabase
+      .from("company_tenders")
+      .select("official_status, work_status")
+      .eq("tender_id", id)
+      .maybeSingle<{ official_status: OfficialStatus; work_status: string }>(),
+    supabase.from("tender_forms").select("id, name, source, required, note").eq("tender_id", id).returns<ChecklistForm[]>(),
+    supabase
+      .from("company_tender_forms")
+      .select("form_id, state")
+      .eq("tender_id", id)
+      .returns<{ form_id: string; state: FormState }[]>(),
   ]);
 
   if (!tender) notFound();
@@ -158,6 +183,13 @@ export default async function TenderDetailPage({
   };
   const availabilities = documentAvailabilities(documents ?? [], documentCheck);
   const docSummary = summarizeDocuments(availabilities);
+
+  // 提出書類チェックリスト（タスク4-6）。進み具合は企業ごと（company_tender_forms）。
+  const checklist = buildChecklist(
+    forms ?? [],
+    Object.fromEntries((formStates ?? []).map((s) => [s.form_id, s.state])),
+  );
+  const checklistDone = checklistProgress(checklist);
 
   // 見積依頼先のAIおすすめ選定（ユーザーからの要望：タブを開いたら自動で推薦する）。
   // 正式取得が済んでいない・数量表が無い場合は送信自体ができないため計算しない。
@@ -269,7 +301,11 @@ export default async function TenderDetailPage({
             }`}
           >
             <Icon size={13} />
-            {label === "資料" ? `資料（${docSummary.fetched}/${REQUIRED_DOC_KINDS.length}）` : label}
+            {label === "資料"
+              ? `資料（${docSummary.fetched}/${REQUIRED_DOC_KINDS.length}）`
+              : label === "提出書類" && checklistDone.total > 0
+                ? `提出書類（${checklistDone.done}/${checklistDone.total}）`
+                : label}
           </Link>
         ))}
       </div>
@@ -310,6 +346,14 @@ export default async function TenderDetailPage({
         />
       )}
       {tab === "quote-status" && <SentRequestsTab sentRequests={sentRequests} />}
+      {tab === "forms" && (
+        <FormsTab
+          tenderId={id}
+          items={checklist}
+          submitDeadline={tender.submit_deadline}
+          workStatus={companyTender?.work_status ?? "募集開始"}
+        />
+      )}
     </AppShell>
   );
 }
