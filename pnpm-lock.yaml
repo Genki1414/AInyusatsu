@@ -87,6 +87,9 @@ importers:
       '@ai-nyusatsu-bu/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@ai-nyusatsu-bu/notifications':
+        specifier: workspace:*
+        version: link:../../packages/notifications
       adm-zip:
         specifier: ^0.5.16
         version: 0.5.18
