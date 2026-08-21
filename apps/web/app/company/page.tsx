@@ -4,11 +4,17 @@ import { requireOrgContext } from "@/lib/auth";
 import { CompanyForm } from "./company-form";
 
 export default async function CompanyPage() {
-  const { orgName } = await requireOrgContext();
+  const { supabase, orgId, orgName } = await requireOrgContext();
+
+  const { data: org } = await supabase
+    .from("organizations")
+    .select("overhead_rate, profit_rate")
+    .eq("id", orgId)
+    .maybeSingle<{ overhead_rate: number; profit_rate: number }>();
 
   return (
     <AppShell active="company" orgName={orgName}>
-      <CompanyForm orgName={orgName} />
+      <CompanyForm orgName={orgName} overheadRate={org?.overhead_rate ?? 0.12} profitRate={org?.profit_rate ?? 0.1} />
     </AppShell>
   );
 }

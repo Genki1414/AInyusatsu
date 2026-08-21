@@ -1,6 +1,6 @@
 "use client";
 
-// 会社名の設定。協力会社へ送るメール（挨拶・署名）と画面のヘッダーに使われるため、
+// 自社情報の設定。会社名は協力会社へ送るメール（挨拶・署名）と画面のヘッダーに使われるため、
 // 新規登録時の値をあとから直せるようにする。
 // 新規登録で会社名が入らなかった場合はメールアドレスが入っている（handle_new_userの
 // フォールバック）ので、そのままだと協力会社へのメールに「〇〇@〜でございます」と出てしまう。
@@ -11,7 +11,15 @@ import { saveCompanyName, type CompanyNameState } from "./actions";
 const initialState: CompanyNameState = { error: null, saved: false };
 const input = "rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-300";
 
-export function CompanyForm({ orgName }: { orgName: string }) {
+export function CompanyForm({
+  orgName,
+  overheadRate,
+  profitRate,
+}: {
+  orgName: string;
+  overheadRate: number;
+  profitRate: number;
+}) {
   const [state, formAction, pending] = useActionState(saveCompanyName, initialState);
 
   return (
@@ -23,6 +31,34 @@ export function CompanyForm({ orgName }: { orgName: string }) {
         </label>
         <p className="mt-1 text-xs text-slate-400">
           協力会社へ送る見積依頼・資料送付メールの挨拶と署名に使われます。
+        </p>
+
+        <label className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+          <span className="w-24 shrink-0 font-medium text-slate-700">一般管理費率</span>
+          <input
+            type="text"
+            name="overhead_rate"
+            defaultValue={String(Math.round(overheadRate * 10000) / 100)}
+            required
+            inputMode="decimal"
+            className={`${input} w-20 text-right tabular-nums`}
+          />
+          <span className="text-slate-500">%</span>
+        </label>
+        <label className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+          <span className="w-24 shrink-0 font-medium text-slate-700">目標利益率</span>
+          <input
+            type="text"
+            name="profit_rate"
+            defaultValue={String(Math.round(profitRate * 10000) / 100)}
+            required
+            inputMode="decimal"
+            className={`${input} w-20 text-right tabular-nums`}
+          />
+          <span className="text-slate-500">%</span>
+        </label>
+        <p className="mt-1 text-xs text-slate-400">
+          案件の「見積・原価」で、協力会社の原価から応札価格の案を出すのに使います。
         </p>
 
         {state.error && (
