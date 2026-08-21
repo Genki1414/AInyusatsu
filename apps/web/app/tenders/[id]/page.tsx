@@ -4,12 +4,14 @@
 // 提出書類／結果 の9つ。進め方・質問・見積比較・提出書類・結果は、原価集計（タスク4-5）や
 // 質問案生成など未着手の機能に依存するため、引き続き含めない。見積依頼（タスク4-1）は
 // tender_lots・partnersだけで実装できるためこのPRで追加する。
-import { AlertTriangle, ClipboardCheck, FileText, ListChecks, Send, Sparkles, Target } from "lucide-react";
+import { AlertTriangle, Calculator, ClipboardCheck, FileText, ListChecks, Send, Sparkles, Target } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
+  amountBand,
   buildChecklist,
   checklistProgress,
+  classifyAgencyClass,
   documentAvailabilities,
   groupLotsByTrade,
   REQUIRED_DOC_KINDS,
@@ -17,6 +19,7 @@ import {
   type ChecklistForm,
   type DocumentCheck,
   type FormState,
+  type MarketRate,
 } from "@ai-nyusatsu-bu/domain";
 import { AppShell } from "@/components/AppShell";
 import { CopyButton } from "@/components/CopyButton";
@@ -24,6 +27,7 @@ import { CollectPill, Field, Panel, ProposePill } from "@/components/ui";
 import { requireOrgContext } from "@/lib/auth";
 import { AnalysisTab, type AnalysisTabAnalysis } from "./analysis-tab";
 import { DocsTab, type TenderDocumentRow, type TenderLotRow } from "./docs-tab";
+import { CostTab, type CostTabQuote } from "./cost-tab";
 import { FormsTab } from "./forms-tab";
 import { FitTab, type FitTabProposal } from "./fit-tab";
 import { getPartnerRecommendations, type PartnerRecommendationResult } from "./recommend";
@@ -61,6 +65,44 @@ type TenderRow = {
 
 type OfficialStatus = "未取得" | "申請中" | "取得済";
 
+type OrgRates = { overhead_rate: number; profit_rate: number };
+
+type CostQuoteRow = {
+  id: string;
+  amount: number | null;
+  adopted: boolean;
+  declined: boolean;
+  replied_at: string | null;
+  memo: string | null;
+  partners: { name: string } | { name: string }[] | null;
+  quote_requests: { trade: string } | { trade: string }[] | null;
+};
+
+/**
+ * 同種案件の落札率を1件引く。market_rates は（営業品目・機関区分・金額帯・期間）で
+ * 集計してあるため、どれか1つでも決まらなければ目安は出せない（推測で代用しない）。
+ */
+async function loadMarketRate(
+  supabase: Awaited<ReturnType<typeof requireOrgContext>>["supabase"],
+  item: string | null,
+  agency: string,
+  budget: number | null,
+): Promise<MarketRate | null> {
+  const agencyClass = classifyAgencyClass(agency);
+  if (!item || !agencyClass || budget === null) return null;
+
+  const { data } = await supabase
+    .from("market_rates")
+    .select("n, rate_avg")
+    .eq("item", item)
+    .eq("agency_class", agencyClass)
+    .eq("amount_band", amountBand(budget))
+    .eq("period_months", 24)
+    .maybeSingle<{ n: number; rate_avg: number | null }>();
+  if (!data || data.rate_avg === null) return null;
+  return { rate: data.rate_avg, n: data.n };
+}
+
 type SentQuoteRequestRow = {
   id: string;
   trade: string;
@@ -85,6 +127,7 @@ const TABS = [
   { key: "analysis", label: "公告の中身", icon: Sparkles },
   { key: "request", label: "見積依頼", icon: Send },
   { key: "quote-status", label: "見積状況", icon: ListChecks },
+  { key: "cost", label: "見積・原価", icon: Calculator },
   { key: "forms", label: "提出書類", icon: ClipboardCheck },
 ] as const;
 type TabKey = (typeof TABS)[number]["key"];
@@ -161,9 +204,9 @@ export default async function TenderDetailPage({
     supabase.from("partners").select("id, name, base, email, trades, areas, rating, memo").eq("active", true).returns<RequestTabPartner[]>(),
     supabase
       .from("company_tenders")
-      .select("official_status, work_status")
+      .select("official_status, work_status, bid_price")
       .eq("tender_id", id)
-      .maybeSingle<{ official_status: OfficialStatus; work_status: string }>(),
+      .maybeSingle<{ official_status: OfficialStatus; work_status: string; bid_price: number | null }>(),
     supabase.from("tender_forms").select("id, name, source, required, note").eq("tender_id", id).returns<ChecklistForm[]>(),
     supabase
       .from("company_tender_forms")
@@ -226,6 +269,34 @@ export default async function TenderDetailPage({
       partner: Array.isArray(q.partners) ? (q.partners[0] ?? null) : q.partners,
     })),
   }));
+
+  // 原価集計（タスク4-5）。見積・原価タブでだけ引く。
+  const { data: costRows } =
+    tab === "cost"
+      ? await supabase
+          .from("quotes")
+          .select("id, amount, adopted, declined, replied_at, memo, partners(name), quote_requests!inner(trade, tender_id)")
+          .eq("quote_requests.tender_id", id)
+          .returns<CostQuoteRow[]>()
+      : { data: null };
+  const costQuotes: CostTabQuote[] = (costRows ?? []).map((q) => ({
+    id: q.id,
+    trade: (Array.isArray(q.quote_requests) ? q.quote_requests[0]?.trade : q.quote_requests?.trade) ?? "未判定",
+    partnerName: (Array.isArray(q.partners) ? q.partners[0]?.name : q.partners?.name) ?? "協力会社",
+    amount: q.amount,
+    adopted: q.adopted,
+    declined: q.declined,
+    repliedAt: q.replied_at,
+    memo: q.memo,
+  }));
+
+  // 同種案件の落札率（勝てそうかの目安）。営業品目・機関区分・金額帯がそろわないと引けない。
+  const marketRate = tab === "cost" ? await loadMarketRate(supabase, tender.item, agencyName(tender.agencies), tender.budget) : null;
+
+  const { data: org } =
+    tab === "cost"
+      ? await supabase.from("organizations").select("overhead_rate, profit_rate").eq("id", orgId).maybeSingle<OrgRates>()
+      : { data: null };
 
   // 見積依頼の回答期限の目安：提出期限の3日前（datetime-local用にAsia/Tokyoのローカル表記へ）。
   let suggestedDueAt: string | null = null;
@@ -346,6 +417,17 @@ export default async function TenderDetailPage({
         />
       )}
       {tab === "quote-status" && <SentRequestsTab sentRequests={sentRequests} />}
+      {tab === "cost" && (
+        <CostTab
+          tenderId={id}
+          quotes={costQuotes}
+          rates={{ overheadRate: org?.overhead_rate ?? 0.12, profitRate: org?.profit_rate ?? 0.1 }}
+          budget={tender.budget}
+          item={tender.item}
+          marketRate={marketRate}
+          decidedBidPrice={companyTender?.bid_price ?? null}
+        />
+      )}
       {tab === "forms" && (
         <FormsTab
           tenderId={id}
