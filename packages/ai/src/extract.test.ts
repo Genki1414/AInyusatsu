@@ -17,11 +17,12 @@ describe("safeJsonParse", () => {
 });
 
 const schema = z.object({ value: z.string() });
+const USER = { cachedPrefix: "資料の本文", body: "【出力するJSON】" };
 
 describe("extract", () => {
   it("1回目でスキーマに適合すれば、その結果を返す", async () => {
     const callModel = vi.fn().mockResolvedValue('{"value":"ok"}');
-    const result = await extract({ promptName: "test", system: "s", user: "u", schema, callModel });
+    const result = await extract({ promptName: "test", system: "s", user: USER, schema, callModel });
     expect(result).toEqual({ value: "ok" });
     expect(callModel).toHaveBeenCalledTimes(1);
   });
@@ -32,7 +33,7 @@ describe("extract", () => {
       .mockResolvedValueOnce("not json")
       .mockResolvedValueOnce('{"value":"ok"}');
     const onInvalid = vi.fn();
-    const result = await extract({ promptName: "test", system: "s", user: "u", schema, callModel, onInvalid });
+    const result = await extract({ promptName: "test", system: "s", user: USER, schema, callModel, onInvalid });
     expect(result).toEqual({ value: "ok" });
     expect(callModel).toHaveBeenCalledTimes(2);
     expect(onInvalid).toHaveBeenCalledTimes(1);
@@ -43,7 +44,7 @@ describe("extract", () => {
     const callModel = vi.fn().mockResolvedValue("not json");
     const onInvalid = vi.fn();
     await expect(
-      extract({ promptName: "test", system: "s", user: "u", schema, callModel, onInvalid }),
+      extract({ promptName: "test", system: "s", user: USER, schema, callModel, onInvalid }),
     ).rejects.toThrow(ParseInvalidError);
     expect(callModel).toHaveBeenCalledTimes(2);
     expect(onInvalid).toHaveBeenCalledTimes(2);
@@ -51,7 +52,7 @@ describe("extract", () => {
 
   it("JSONとしては妥当でもスキーマに違反していれば再試行する", async () => {
     const callModel = vi.fn().mockResolvedValue('{"value":123}'); // valueはstringのはずが数値
-    await expect(extract({ promptName: "test", system: "s", user: "u", schema, callModel })).rejects.toThrow(
+    await expect(extract({ promptName: "test", system: "s", user: USER, schema, callModel })).rejects.toThrow(
       ParseInvalidError,
     );
     expect(callModel).toHaveBeenCalledTimes(2);
@@ -90,5 +91,42 @@ describe("safeJsonParse（制御文字の混入）", () => {
 
   it("JSONとして壊れている場合は従来どおり例外になる", () => {
     expect(() => safeJsonParse('{"a": ')).toThrow();
+  });
+});
+
+describe("extract（トークン消費の受け渡し）", () => {
+  it("onUsageに、プロンプト名と試行回数を添えて渡す", async () => {
+    const usage = { inputTokens: 100, cacheCreationTokens: 7000, cacheReadTokens: 0, outputTokens: 50 };
+    const callModel = vi.fn().mockImplementation(async (args) => {
+      args.onUsage?.(usage);
+      return '{"value":"ok"}';
+    });
+    const onUsage = vi.fn();
+    await extract({ promptName: "basic_info", system: "s", user: USER, schema, callModel, onUsage });
+    expect(onUsage).toHaveBeenCalledWith({ ...usage, promptName: "basic_info", attempt: 1 });
+  });
+
+  it("再試行したぶんもトークン消費として渡す（2回分が課金される）", async () => {
+    const usage = { inputTokens: 100, cacheCreationTokens: 0, cacheReadTokens: 7000, outputTokens: 50 };
+    const callModel = vi
+      .fn()
+      .mockImplementationOnce(async (args) => {
+        args.onUsage?.(usage);
+        return "not json";
+      })
+      .mockImplementationOnce(async (args) => {
+        args.onUsage?.(usage);
+        return '{"value":"ok"}';
+      });
+    const onUsage = vi.fn();
+    await extract({ promptName: "lots", system: "s", user: USER, schema, callModel, onUsage });
+    expect(onUsage).toHaveBeenCalledTimes(2);
+    expect(onUsage).toHaveBeenLastCalledWith(expect.objectContaining({ attempt: 2 }));
+  });
+
+  it("onUsageを渡さなければ、callModelにも渡さない", async () => {
+    const callModel = vi.fn().mockResolvedValue('{"value":"ok"}');
+    await extract({ promptName: "test", system: "s", user: USER, schema, callModel });
+    expect(callModel).toHaveBeenCalledWith(expect.objectContaining({ onUsage: undefined }));
   });
 });

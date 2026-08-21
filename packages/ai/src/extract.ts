@@ -17,8 +17,44 @@ export class ParseInvalidError extends Error {
   }
 }
 
+/**
+ * ユーザープロンプト。前半と後半に分けて渡す。
+ *
+ * 同じ案件に対して6本のプロンプトを走らせるが、前半（案件の既知情報＋資料）は6本とも
+ * まったく同じで、違うのは後半（出力スキーマ＋追加の指示）だけになる。前半をプロンプト
+ * キャッシュの対象にすると、2本目以降はその分の入力が1/10の値段になる。
+ * 資料テキストは1案件で数万トークンあり、入力コストの大半を占めるため効き方が大きい。
+ *
+ * 共通の前半を持たない単発のプロンプト（協力会社のおすすめなど）は cachedPrefix を null にする。
+ */
+export type UserPrompt = {
+  /** 同じ案件の他のプロンプトと共通する前半。ここまでをキャッシュする */
+  cachedPrefix: string | null;
+  /** このプロンプト固有の後半 */
+  body: string;
+};
+
+/** モデルが実際に消費したトークン。キャッシュが効いているかの計測に使う。 */
+export type TokenUsage = {
+  /** キャッシュに当たらなかった入力 */
+  inputTokens: number;
+  /** キャッシュへの書き込み（1.25倍で課金される） */
+  cacheCreationTokens: number;
+  /** キャッシュからの読み出し（0.1倍で課金される） */
+  cacheReadTokens: number;
+  outputTokens: number;
+};
+
+export type ModelUsage = TokenUsage & { promptName: string; attempt: number };
+export type OnUsage = (usage: ModelUsage) => void;
+
 /** モデル呼び出しの抽象。実運用では adapters/claude.ts の callClaude を渡す（テストではモックを渡す）。 */
-export type CallModel = (args: { system: string; user: string; temperature: number }) => Promise<string>;
+export type CallModel = (args: {
+  system: string;
+  user: UserPrompt;
+  temperature: number;
+  onUsage?: (usage: TokenUsage) => void;
+}) => Promise<string>;
 
 export type ExtractInvalidEvent = {
   promptName: string;
@@ -88,18 +124,25 @@ export function safeJsonParse(raw: string): unknown {
 export type ExtractParams<T> = {
   promptName: string;
   system: string;
-  user: string;
+  user: UserPrompt;
   schema: OutputSchema<T>;
   callModel: CallModel;
   onInvalid?: OnInvalid;
+  /** 実際のトークン消費を受け取る。キャッシュが効いているかを測るために使う */
+  onUsage?: OnUsage;
 };
 
 /** プロンプトを実行し、Zodスキーマで検証する。失敗時は最大2回まで試行する。 */
 export async function extract<T>(params: ExtractParams<T>): Promise<T> {
-  const { promptName, system, user, schema, callModel, onInvalid } = params;
+  const { promptName, system, user, schema, callModel, onInvalid, onUsage } = params;
 
   for (let attempt = 1; attempt <= 2; attempt++) {
-    const raw = await callModel({ system, user, temperature: 0 });
+    const raw = await callModel({
+      system,
+      user,
+      temperature: 0,
+      onUsage: onUsage ? (usage) => onUsage({ ...usage, promptName, attempt }) : undefined,
+    });
     try {
       const parsed = safeJsonParse(raw);
       const result = schema.safeParse(parsed);

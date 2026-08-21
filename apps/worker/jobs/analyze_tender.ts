@@ -35,8 +35,13 @@ import {
   analyzeNotes,
   analyzeQualifications,
   callClaude,
+  formatUsageSummary,
+  summarizeUsage,
+  type ModelUsage,
   type PromptDocument,
   type OnInvalid,
+  type OnUsage,
+  type UsageSummary,
 } from "@ai-nyusatsu-bu/ai";
 
 const MODEL_NAME = "claude-sonnet-5";
@@ -51,6 +56,8 @@ export type AnalyzeTenderResult = {
   reviewReasons: string[];
   /** 失敗したプロンプト名。空なら5本すべて成功している */
   failedPrompts: string[];
+  /** トークン消費とプロンプトキャッシュの効き具合 */
+  usage: UsageSummary;
 };
 
 type TenderRow = TenderBasicFields & {
@@ -67,6 +74,15 @@ function resolveAgencyName(agencies: TenderRow["agencies"]): string {
 }
 
 type PromptFailure = { promptName: string; message: string };
+
+/** 1本だけ先に走らせるときに、allSettledと同じ形の結果に揃える。 */
+async function settle<T>(promise: Promise<T>): Promise<PromiseSettledResult<T>> {
+  try {
+    return { status: "fulfilled", value: await promise };
+  } catch (reason) {
+    return { status: "rejected", reason };
+  }
+}
 
 /** 成功した結果だけを取り出す。失敗した抽出は null（推測で埋めない）。 */
 function valueOr<T>(result: PromiseSettledResult<T>): T | null {
@@ -132,18 +148,30 @@ export async function analyzeTender(tenderId: string): Promise<AnalyzeTenderResu
     console.error(`[analyze_tender] 生出力の末尾200文字: ${JSON.stringify(raw.slice(-200))}（全${raw.length}文字）`);
   };
 
+  // 実際のトークン消費を集めて、プロンプトキャッシュが効いているかを残す。
+  // キャッシュは外れても失敗としては現れず、請求額に静かに出るだけなので計測する。
+  const usages: ModelUsage[] = [];
+  const onUsage: OnUsage = (usage) => usages.push(usage);
+  const run = { meta, documents, callModel: callClaude, onInvalid, onUsage };
+
   // 5本のうち1本が失敗しても、成功した分は保存する（CLAUDE.md 最重要の前提7
   // 「資料は揃わなくても、提案できる内容があれば提案する」）。Promise.allでは、たとえば
   // 注意事項の抽出が1回スキーマ不一致になっただけで、期限も数量表も丸ごと捨てていた。
   // 失敗は握りつぶさず、失敗したプロンプト名を tenders.failure_reason と要確認フラグに残す。
-  const settled = await Promise.allSettled([
-    analyzeBasicInfo({ meta, documents, callModel: callClaude, onInvalid }),
-    analyzeQualifications({ meta, documents, callModel: callClaude, onInvalid }),
-    analyzeLots({ meta, documents, callModel: callClaude, onInvalid }),
-    analyzeForms({ meta, documents, callModel: callClaude, onInvalid }),
-    analyzeNotes({ meta, documents, callModel: callClaude, onInvalid }),
+  //
+  // 【実行の順序】5本のプロンプトは前半（案件の既知情報＋資料）が完全に同じで、そこを
+  // プロンプトキャッシュの対象にしている。5本を同時に投げると、1本目の書き込みが終わる前に
+  // 残りが走ってしまい、全部がキャッシュミス＝満額になる。そのため基本情報を先に1本走らせて
+  // キャッシュを作り、残り4本はそれを読む形にする。
+  // 待ち時間は1本分（数十秒）増えるが、入力コストが約2/3下がる。
+  const basicInfoR = await settle(analyzeBasicInfo(run));
+  const [qualificationsR, lotsR, formsR, notesR] = await Promise.allSettled([
+    analyzeQualifications(run),
+    analyzeLots(run),
+    analyzeForms(run),
+    analyzeNotes(run),
   ]);
-  const [basicInfoR, qualificationsR, lotsR, formsR, notesR] = settled;
+  const settled = [basicInfoR, qualificationsR, lotsR, formsR, notesR];
   const failures = collectPromptFailures([
     ["基本情報と期限", basicInfoR],
     ["参加資格と参加条件", qualificationsR],
@@ -289,6 +317,14 @@ export async function analyzeTender(tenderId: string): Promise<AnalyzeTenderResu
     if (insertLotsError) throw new Error(`tender_lotsの保存に失敗しました: ${insertLotsError.message}`);
   }
 
+  const usage = summarizeUsage(usages);
+  console.log(`[analyze_tender] トークン消費（tender=${tenderId}）: ${formatUsageSummary(usage)}`);
+  if (usage.cacheReadTokens === 0 && usage.calls > 1) {
+    // 2本目以降が1つもキャッシュに当たっていない＝前半の文字列がぶれているか、
+    // 有効期間を過ぎている。放置すると入力コストが3倍のままになるので気づけるようにする。
+    console.warn("[analyze_tender] プロンプトキャッシュが1度も効いていません。共通部分の組み立てを確認してください");
+  }
+
   return {
     tenderId,
     analysisVersion: version,
@@ -298,5 +334,6 @@ export async function analyzeTender(tenderId: string): Promise<AnalyzeTenderResu
     needsReview,
     reviewReasons,
     failedPrompts: failures.map((f) => f.promptName),
+    usage,
   };
 }
