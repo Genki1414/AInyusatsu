@@ -57,3 +57,38 @@ describe("extract", () => {
     expect(callModel).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("safeJsonParse（制御文字の混入）", () => {
+  it("引用の中に生の改行が入っていても読める（内容は変えない）", () => {
+    // モデルは資料からの引用に改行をそのまま入れてくることがある（実機で発生）。
+    const raw = '{"quote": "1行目\n2行目", "source": "公告 1"}';
+    const parsed = safeJsonParse(raw) as { quote: string; source: string };
+    expect(parsed.quote).toBe("1行目\n2行目");
+    expect(parsed.source).toBe("公告 1");
+  });
+
+  it("タブ・復帰も読める", () => {
+    const parsed = safeJsonParse('{"quote": "列1\t列2\r次"}') as { quote: string };
+    expect(parsed.quote).toBe("列1\t列2\r次");
+  });
+
+  it("コードフェンス付きで、かつ制御文字が入っていても読める", () => {
+    const parsed = safeJsonParse('```json\n{"quote": "a\nb"}\n```') as { quote: string };
+    expect(parsed.quote).toBe("a\nb");
+  });
+
+  it("文字列の外にある改行（通常の整形）はこれまでどおり読める", () => {
+    const parsed = safeJsonParse('{\n  "a": 1,\n  "b": 2\n}') as { a: number; b: number };
+    expect(parsed).toEqual({ a: 1, b: 2 });
+  });
+
+  it("エスケープ済みの引用符を文字列の終わりと誤認しない", () => {
+    const parsed = safeJsonParse('{"quote": "彼は\\"はい\\"と言った", "n": 1}') as { quote: string; n: number };
+    expect(parsed.quote).toBe('彼は"はい"と言った');
+    expect(parsed.n).toBe(1);
+  });
+
+  it("JSONとして壊れている場合は従来どおり例外になる", () => {
+    expect(() => safeJsonParse('{"a": ')).toThrow();
+  });
+});

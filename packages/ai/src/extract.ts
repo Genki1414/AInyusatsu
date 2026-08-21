@@ -26,13 +26,59 @@ export type ExtractInvalidEvent = {
 export type OnInvalid = (event: ExtractInvalidEvent) => void;
 
 /**
+ * 文字列リテラルの中に生の制御文字（改行・タブなど）が含まれていればエスケープする。
+ * JSONの仕様では文字列中の制御文字は \n のようにエスケープする必要があるが、
+ * モデルは資料からの引用（quote）に改行をそのまま入れてくることがあり、
+ * その場合 JSON.parse が "Bad control character in string literal" で失敗する（実機で発生）。
+ * 引用の中身は変えず、JSONとして読める形に直すだけ。
+ */
+export function escapeControlCharsInStrings(json: string): string {
+  const ESCAPES: Record<string, string> = { "\n": "\\n", "\r": "\\r", "\t": "\\t", "\b": "\\b", "\f": "\\f" };
+  let out = "";
+  let inString = false;
+  let escaped = false;
+
+  for (const char of json) {
+    if (escaped) {
+      out += char;
+      escaped = false;
+      continue;
+    }
+    if (char === "\\" && inString) {
+      out += char;
+      escaped = true;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      out += char;
+      continue;
+    }
+    if (inString && char < " ") {
+      // 制御文字。既知のものは対応するエスケープに、それ以外は \u00XX にする
+      out += ESCAPES[char] ?? `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`;
+      continue;
+    }
+    out += char;
+  }
+  return out;
+}
+
+/**
  * ```json ... ``` のようなコードフェンスが付いていれば取り除いてからJSONとしてパースする。
  * モデルがCLAUDE.mdの指示（コードブロックの記号を付けない）に従わなかった場合の保険。
+ * 文字列中の生の制御文字も、そのままではパースできないためエスケープしてから読む。
  */
 export function safeJsonParse(raw: string): unknown {
   const trimmed = raw.trim();
   const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/.exec(trimmed);
-  return JSON.parse(fenced ? fenced[1] : trimmed);
+  const body = fenced ? fenced[1] : trimmed;
+  try {
+    return JSON.parse(body);
+  } catch {
+    // そのまま読めない場合だけ、制御文字を直して読み直す（正常な出力の挙動は変えない）
+    return JSON.parse(escapeControlCharsInStrings(body));
+  }
 }
 
 export type ExtractParams<T> = {

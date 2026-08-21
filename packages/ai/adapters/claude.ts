@@ -40,6 +40,16 @@ export const callClaude: CallModel = async ({ system, user, temperature: _temper
     messages: [{ role: "user", content: user }],
   });
 
+  // 出力上限で切れた場合、そのまま返すと「壊れたJSON」として扱われ原因が分からなくなるため、
+  // 理由を明示して失敗させる（CLAUDE.md「エラーは握りつぶさない」）。
+  // テキストの有無より先に判定する。上限に達すると本文が空のまま返ることがあり、
+  // 順序を逆にすると「テキストが含まれていません」という的外れな理由になる（実機で発生）。
+  if (res.stop_reason === "max_tokens") {
+    throw new Error(
+      `Claude APIの出力が上限（max_tokens=${MAX_TOKENS}）に達して途中で切れました。資料が大きい可能性があります。`,
+    );
+  }
+
   // 応答が複数のテキストブロックに分かれることがあるため、先頭だけでなく全て連結する
   // （先頭だけを見ると、JSONが途中で切れた文字列を受け取ってparseに失敗する）。
   const text = res.content
@@ -47,14 +57,10 @@ export const callClaude: CallModel = async ({ system, user, temperature: _temper
     .map((block) => block.text)
     .join("");
   if (text === "") {
-    throw new Error("Claude APIの応答にテキストが含まれていません");
-  }
-
-  // 出力上限で切れた場合、そのまま返すと「壊れたJSON」として扱われ原因が分からなくなるため、
-  // 理由を明示して失敗させる（CLAUDE.md「エラーは握りつぶさない」）。
-  if (res.stop_reason === "max_tokens") {
+    // 何が返ってきたのかが分からないと調査できないため、停止理由とブロック種別を添える。
+    const kinds = res.content.map((block) => block.type).join(", ") || "なし";
     throw new Error(
-      `Claude APIの出力が上限（max_tokens=${MAX_TOKENS}）に達して途中で切れました。資料が大きい可能性があります。`,
+      `Claude APIの応答にテキストが含まれていません（stop_reason=${res.stop_reason}, ブロック種別=${kinds}）`,
     );
   }
 
