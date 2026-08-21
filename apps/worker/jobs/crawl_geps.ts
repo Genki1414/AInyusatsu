@@ -120,11 +120,22 @@ async function saveDocuments(
 
       const { data: existing } = await client
         .from("tender_documents")
-        .select("id")
+        .select("id, filename")
         .eq("tender_id", tenderId)
         .eq("kind", doc.kind)
         .eq("sha256", sha256)
-        .maybeSingle();
+        .maybeSingle<{ id: string; filename: string | null }>();
+
+      // 既に同じ資料（同一ハッシュ）がある場合は再ダウンロードしないが、
+      // ファイル名を保存する前に取得した資料はfilenameが空のままなので、ここで補完する
+      // （そうしないと、再収集しても協力会社へ送る資料名が「その他」のままになる）。
+      if (existing && !existing.filename) {
+        const { error: backfillError } = await client
+          .from("tender_documents")
+          .update({ filename: doc.filename })
+          .eq("id", existing.id);
+        if (backfillError) throw new Error(backfillError.message);
+      }
 
       if (!existing) {
         const ext = doc.filename.includes(".") ? doc.filename.split(".").pop() : "bin";
