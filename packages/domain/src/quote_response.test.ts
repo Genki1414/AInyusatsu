@@ -1,21 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   buildDocumentsEmail,
-  buildResponseNotificationEmail,
-  choiceLabel,
   documentFilenames,
   signedUrlTtlSeconds,
   sortDocumentsByKind,
 } from "./quote_response";
 
 const DAY = 60 * 60 * 24;
-
-describe("choiceLabel", () => {
-  it("回答の種類を日本語のラベルにする", () => {
-    expect(choiceLabel("request_documents")).toBe("資料請求");
-    expect(choiceLabel("decline")).toBe("今回は見送る");
-  });
-});
 
 describe("signedUrlTtlSeconds", () => {
   const now = new Date("2026-08-21T00:00:00Z");
@@ -157,49 +148,5 @@ describe("buildDocumentsEmail", () => {
   it("回答期限が無ければその行を出さない", () => {
     const { body } = buildDocumentsEmail({ ...base, dueAtLabel: null });
     expect(body).not.toContain("お見積りの回答期限");
-  });
-});
-
-describe("buildResponseNotificationEmail", () => {
-  const base = {
-    partnerName: "東北三上機材株式会社",
-    tenderName: "須崎庁舎浄化槽排水ポンプ修繕",
-    trade: "設備保守",
-    choice: "request_documents" as const,
-    memo: null,
-    afterDue: false,
-    warning: null,
-    tenderUrl: "https://example.com/tenders/1?tab=quote-status",
-  };
-
-  it("件名に回答の種類と案件名が入る", () => {
-    expect(buildResponseNotificationEmail(base).subject).toBe("【見積依頼への回答】資料請求／須崎庁舎浄化槽排水ポンプ修繕");
-    expect(buildResponseNotificationEmail({ ...base, choice: "decline" }).subject).toContain("今回は見送る");
-  });
-
-  it("協力会社名・案件・業種・回答と、見積状況タブへのURLが入る", () => {
-    const { body } = buildResponseNotificationEmail(base);
-    expect(body).toContain("東北三上機材株式会社 から見積依頼への回答がありました。");
-    expect(body).toContain("案件：須崎庁舎浄化槽排水ポンプ修繕");
-    expect(body).toContain("業種：設備保守");
-    expect(body).toContain("回答：資料請求");
-    expect(body).toContain("https://example.com/tenders/1?tab=quote-status");
-  });
-
-  it("備考・期限後・警告は該当するときだけ入る", () => {
-    const plain = buildResponseNotificationEmail(base).body;
-    expect(plain).not.toContain("備考：");
-    expect(plain).not.toContain("回答期限を過ぎて");
-    expect(plain).not.toContain("※資料");
-
-    const full = buildResponseNotificationEmail({
-      ...base,
-      memo: "対応可能です",
-      afterDue: true,
-      warning: "資料の自動送付に失敗しました",
-    }).body;
-    expect(full).toContain("備考：対応可能です");
-    expect(full).toContain("※回答期限を過ぎてからの回答です");
-    expect(full).toContain("※資料の自動送付に失敗しました");
   });
 });

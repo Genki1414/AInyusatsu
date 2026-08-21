@@ -7,10 +7,6 @@ export const DOCUMENT_KIND_ORDER = ["公告", "入札説明書", "仕様書", "�
 
 export type QuoteResponseChoice = "request_documents" | "decline";
 
-export function choiceLabel(choice: QuoteResponseChoice): string {
-  return choice === "request_documents" ? "資料請求" : "今回は見送る";
-}
-
 /**
  * 署名付きURLの有効期限（秒）。回答期限まで確実に使えるよう、回答期限＋7日を確保する。
  * 回答期限が未設定・過去の場合や、極端に先の場合は下限7日・上限90日に収める。
@@ -85,35 +81,4 @@ export function buildDocumentsEmail(input: DocumentsEmailInput): { subject: stri
   lines.push("ご検討のほど、よろしくお願いいたします。", "", "--", input.senderOrgName);
   if (input.senderContactEmail) lines.push(input.senderContactEmail);
   return { subject: `【資料送付】${input.tenderName}`, body: lines.join("\n") };
-}
-
-export type ResponseNotificationInput = {
-  partnerName: string;
-  tenderName: string;
-  trade: string;
-  choice: QuoteResponseChoice;
-  memo: string | null;
-  /** 回答期限を過ぎてからの回答か（担当者が気づけるように明記する） */
-  afterDue: boolean;
-  /** 自動送付の失敗など、担当者の対応が必要な事情。無ければnull */
-  warning: string | null;
-  tenderUrl: string | null;
-};
-
-/** 依頼元の担当者へ送る、協力会社の回答通知メール。 */
-export function buildResponseNotificationEmail(input: ResponseNotificationInput): { subject: string; body: string } {
-  const label = choiceLabel(input.choice);
-  const lines: string[] = [
-    `${input.partnerName} から見積依頼への回答がありました。`,
-    "",
-    `案件：${input.tenderName}`,
-    `業種：${input.trade}`,
-    `回答：${label}`,
-  ];
-  if (input.memo) lines.push(`備考：${input.memo}`);
-  if (input.afterDue) lines.push("※回答期限を過ぎてからの回答です");
-  if (input.warning) lines.push(`※${input.warning}`);
-  lines.push("", "詳しくは案件詳細の「見積状況」タブをご確認ください。");
-  if (input.tenderUrl) lines.push(input.tenderUrl);
-  return { subject: `【見積依頼への回答】${label}／${input.tenderName}`, body: lines.join("\n") };
 }
