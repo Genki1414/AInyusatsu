@@ -176,6 +176,29 @@ async function saveDocuments(
   return { saved, failed };
 }
 
+/**
+ * 資料一覧の確認結果を案件へ書き戻す。
+ * 「行が無い＝取得失敗」ではないことを画面が判定できるようにするための記録
+ * （docs/資料取得方針_v3.md「資料が無い理由を2つに分ける」）。
+ */
+async function recordDocumentCheck(
+  client: ReturnType<typeof createServiceClient>,
+  tenderId: string,
+  patch: {
+    documents_checked_at?: string;
+    published_doc_kinds?: string[];
+    documents_failure_code: string | null;
+    documents_failure_reason: string | null;
+  },
+): Promise<void> {
+  const { error } = await client.from("tenders").update(patch).eq("id", tenderId);
+  if (error) {
+    // 記録できなくても巡回自体は続ける（資料そのものは取得できているため）。
+    // eslint-disable-next-line no-console
+    console.error(`資料の確認結果の記録に失敗しました（tender=${tenderId}）: ${error.message}`);
+  }
+}
+
 /** 1日ぶんを巡回し、tenders/tender_documentsへ反映する。crawl_runsに記録する。 */
 export async function runDailyGepsCrawl(dateIso: string): Promise<CrawlDateSummary> {
   const client = createServiceClient();
@@ -236,11 +259,40 @@ export async function runDailyGepsCrawl(dateIso: string): Promise<CrawlDateSumma
       const tenderId = await upsertTender(client, tender);
       merged++;
 
-      const docs = result.documentsByProcurementNo.get(tender.procurementNo) ?? [];
-      if (docs.length > 0) {
-        const { saved, failed } = await saveDocuments(client, tenderId, docs);
+      // 資料が無い理由を2つに分けて記録する（CLAUDE.md 最重要の前提7）。
+      // 「機関が出していない（正常）」はアラートにせず、「取得に失敗した（要対応）」だけを残す。
+      const docResult = result.documentsByProcurementNo.get(tender.procurementNo);
+      if (docResult?.status === "downloaded") {
+        const { saved, failed } = await saveDocuments(client, tenderId, docResult.documents);
         documents += saved;
         failedDocs += failed;
+        await recordDocumentCheck(client, tenderId, {
+          documents_checked_at: new Date().toISOString(),
+          // 機関が実際に出していた種別。ここに無い種別は「出していない」と判定できる
+          published_doc_kinds: [...new Set(docResult.documents.map((d) => d.kind))],
+          documents_failure_code: null,
+          documents_failure_reason: null,
+        });
+      } else if (docResult?.status === "no_download_url") {
+        // 資料ダウンロードURLが無い＝資料一式を出していない案件。確認済みだが公開種別は0件。
+        await recordDocumentCheck(client, tenderId, {
+          documents_checked_at: new Date().toISOString(),
+          published_doc_kinds: [],
+          documents_failure_code: null,
+          documents_failure_reason: null,
+        });
+      } else if (docResult?.status === "failed") {
+        // 取得に失敗した。機関が出しているかどうかは判断できないので確認済みにはしない。
+        await recordDocumentCheck(client, tenderId, {
+          documents_failure_code: "LAYOUT_CHANGED",
+          documents_failure_reason: docResult.message.slice(0, 500),
+        });
+        await client.from("crawl_errors").insert({
+          run_id: run.id,
+          code: "LAYOUT_CHANGED",
+          message: `資料のダウンロードに失敗しました: ${docResult.message}`,
+          payload: { dateIso, procurementNo: tender.procurementNo },
+        });
       }
     }
 

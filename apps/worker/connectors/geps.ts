@@ -313,9 +313,22 @@ export type GepsTenderError = {
   message: string;
 };
 
+/**
+ * 資料取得の結果。「機関が出していない（正常）」と「取得に失敗した（要対応）」を
+ * 呼び出し元が区別できるようにする（docs/資料取得方針_v3.md「資料が無い理由を2つに分ける」）。
+ * 以前は両方とも空配列で返していたため、区別が付かなかった。
+ */
+export type GepsDocumentResult =
+  /** 資料一覧を取得できた（0件だった場合も含む＝機関が出していない） */
+  | { status: "downloaded"; documents: GepsDocument[] }
+  /** 詳細画面に資料ダウンロードURLが無かった＝機関が資料一式を出していない */
+  | { status: "no_download_url" }
+  /** ダウンロードに失敗した＝要対応 */
+  | { status: "failed"; message: string };
+
 export type GepsCrawlResult = {
   tenders: NormalizedGepsTender[];
-  documentsByProcurementNo: Map<string, GepsDocument[]>;
+  documentsByProcurementNo: Map<string, GepsDocumentResult>;
   truncated: boolean;
   count: number;
   tenderErrors: GepsTenderError[];
@@ -330,7 +343,7 @@ export async function crawlDate(dateIso: string): Promise<GepsCrawlResult> {
 
     const search = await searchByDate(page, dateIso);
     const tenders: NormalizedGepsTender[] = [];
-    const documentsByProcurementNo = new Map<string, GepsDocument[]>();
+    const documentsByProcurementNo = new Map<string, GepsDocumentResult>();
     const tenderErrors: GepsTenderError[] = [];
 
     for (let i = 0; i < search.count; i++) {
@@ -349,14 +362,18 @@ export async function crawlDate(dateIso: string): Promise<GepsCrawlResult> {
         if (documentDownloadUrl) {
           try {
             const docs = await downloadDocuments(page, documentDownloadUrl);
-            documentsByProcurementNo.set(normalized.procurementNo, docs);
+            documentsByProcurementNo.set(normalized.procurementNo, { status: "downloaded", documents: docs });
           } catch (err) {
             // 資料が取れない案件があっても、案件自体の投入は止めない（資料取得方針_v3.md）。
-            // 失敗理由はジョブ側でtender_documentsのfailure相当として扱う。
-            documentsByProcurementNo.set(normalized.procurementNo, []);
+            // 「取得に失敗した（要対応）」として、機関が出していない場合と区別して記録する。
+            const message = err instanceof Error ? err.message : String(err);
+            documentsByProcurementNo.set(normalized.procurementNo, { status: "failed", message });
             // eslint-disable-next-line no-console
             console.error(`資料ダウンロード失敗: ${normalized.procurementNo}`, err);
           }
+        } else {
+          // 資料ダウンロードURLが無い＝機関が資料一式を出していない（公告のみの案件）。
+          documentsByProcurementNo.set(normalized.procurementNo, { status: "no_download_url" });
         }
       } catch (err) {
         // 実機確認済み（2026-08-03）：検索やり直しや詳細画面の取得も、サイト側の応答が

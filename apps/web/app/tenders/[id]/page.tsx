@@ -7,13 +7,19 @@
 import { AlertTriangle, FileText, ListChecks, Send, Sparkles, Target } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { groupLotsByTrade } from "@ai-nyusatsu-bu/domain";
+import {
+  documentAvailabilities,
+  groupLotsByTrade,
+  REQUIRED_DOC_KINDS,
+  summarizeDocuments,
+  type DocumentCheck,
+} from "@ai-nyusatsu-bu/domain";
 import { AppShell } from "@/components/AppShell";
 import { CopyButton } from "@/components/CopyButton";
 import { CollectPill, Field, Panel, ProposePill } from "@/components/ui";
 import { requireOrgContext } from "@/lib/auth";
 import { AnalysisTab, type AnalysisTabAnalysis } from "./analysis-tab";
-import { DOC_KINDS, DocsTab, type TenderDocumentRow, type TenderLotRow } from "./docs-tab";
+import { DocsTab, type TenderDocumentRow, type TenderLotRow } from "./docs-tab";
 import { FitTab, type FitTabProposal } from "./fit-tab";
 import { getPartnerRecommendations, type PartnerRecommendationResult } from "./recommend";
 import { RequestTab, type RequestTabPartner } from "./request-tab";
@@ -40,6 +46,11 @@ type TenderRow = {
   collect_status: string;
   needs_review: boolean;
   review_reasons: string[];
+  // 資料が無い理由の判定に使う（CLAUDE.md 最重要の前提7）
+  documents_checked_at: string | null;
+  published_doc_kinds: string[] | null;
+  documents_failure_code: string | null;
+  documents_failure_reason: string | null;
   agencies: { name: string } | { name: string }[] | null;
 };
 
@@ -108,13 +119,13 @@ export default async function TenderDetailPage({
     supabase
       .from("tenders")
       .select(
-        "id, name, org_unit, notice_no, item, grade, areas, budget, qa_deadline, submit_deadline, bid_open_at, place, term_from, term_to, source_url, connector_id, acquire_method, collect_status, needs_review, review_reasons, agencies(name)",
+        "id, name, org_unit, notice_no, item, grade, areas, budget, qa_deadline, submit_deadline, bid_open_at, place, term_from, term_to, source_url, connector_id, acquire_method, collect_status, needs_review, review_reasons, documents_checked_at, published_doc_kinds, documents_failure_code, documents_failure_reason, agencies(name)",
       )
       .eq("id", id)
       .maybeSingle<TenderRow>(),
     supabase
       .from("tender_documents")
-      .select("kind, fetched, fetched_at, page_count, ocr_used")
+      .select("kind, fetched, fetched_at, page_count, ocr_used, extract_error")
       .eq("tender_id", id)
       .returns<TenderDocumentRow[]>(),
     supabase.from("tender_lots").select("line_no, item, spec, qty, unit, trade").eq("tender_id", id).order("line_no").returns<TenderLotRow[]>(),
@@ -139,7 +150,14 @@ export default async function TenderDetailPage({
   if (!tender) notFound();
 
   const officialStatus: OfficialStatus = companyTender?.official_status ?? "未取得";
-  const gotDocs = DOC_KINDS.filter((kind) => (documents ?? []).some((d) => d.kind === kind && d.fetched)).length;
+  // 資料が無い理由（機関が出していない／取得失敗）を分けて判定する（CLAUDE.md 最重要の前提7）
+  const documentCheck: DocumentCheck = {
+    checkedAt: tender.documents_checked_at,
+    publishedKinds: tender.published_doc_kinds ?? [],
+    failureCode: tender.documents_failure_code,
+  };
+  const availabilities = documentAvailabilities(documents ?? [], documentCheck);
+  const docSummary = summarizeDocuments(availabilities);
 
   // 見積依頼先のAIおすすめ選定（ユーザーからの要望：タブを開いたら自動で推薦する）。
   // 正式取得が済んでいない・数量表が無い場合は送信自体ができないため計算しない。
@@ -251,7 +269,7 @@ export default async function TenderDetailPage({
             }`}
           >
             <Icon size={13} />
-            {label === "資料" ? `資料（${gotDocs}/${DOC_KINDS.length}）` : label}
+            {label === "資料" ? `資料（${docSummary.fetched}/${REQUIRED_DOC_KINDS.length}）` : label}
           </Link>
         ))}
       </div>
@@ -259,7 +277,9 @@ export default async function TenderDetailPage({
       {tab === "fit" && <FitTab proposal={proposal} />}
       {tab === "docs" && (
         <DocsTab
+          availabilities={availabilities}
           documents={documents ?? []}
+          documentsFailureReason={tender.documents_failure_reason}
           lots={lots ?? []}
           sourceUrl={tender.source_url}
           connectorId={tender.connector_id}
