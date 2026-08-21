@@ -12,3 +12,7 @@ crawl / fetch_documents / fetch_documents_ic / parse / match / notify / remind /
 - `kkj_sync.ts`：官公需情報ポータル（KKJ検索API）の同期（タスク1-5）。`runKkjSync(dateIso)`。
   資料のダウンロードは行わない（tendersへのupsertのみ）。`KKJ_API_URL`環境変数で
   エンドポイントを上書き可能（既定 `http://www.kkj.go.jp/api/`）
+- `remind_quotes.ts`：見積依頼の自動催促（タスク4-4）。`runQuoteReminders(now?)`。
+  回答期限の24時間前を切った未回答の見積へ1回だけ催促メールを送る（`quotes.reminded_at`
+  で記録）。`RESEND_API_KEY` / `RESEND_FROM_ADDRESS` / `NEXT_PUBLIC_APP_URL` が必要。
+  常駐（pg-boss）は未実装のため、いまは `pnpm --filter worker quotes:remind` で実行する
