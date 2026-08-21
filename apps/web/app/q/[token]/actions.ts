@@ -2,6 +2,10 @@
 
 // 協力会社の回答（タスク4-2）。ログイン不要のため、tokenの一致だけを根拠にservice_roleで
 // 該当のquotes行を更新する（他の経路と違い、認証済みユーザーのセッションが存在しない）。
+//
+// このページでは見積金額は受け付けない（正式な見積書として弱いため）。「見送る」「資料請求」の
+// どちらかを記録するだけで、資料そのものの配布や実際の見積金額のやり取りは従来どおり
+// メール等で行う（実際の金額はタスク4-3のメール返信取込で記録する想定）。
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
@@ -13,8 +17,7 @@ function toNullableString(value: FormDataEntryValue | null): string | null {
   return value.trim();
 }
 
-const quoteSchema = z.object({ amount: z.number().int().min(1, "見積金額を入力してください"), memo: z.string().nullable() });
-const declineSchema = z.object({ memo: z.string().nullable() });
+const responseSchema = z.object({ memo: z.string().nullable() });
 
 export async function submitQuoteResponse(
   token: string,
@@ -22,20 +25,20 @@ export async function submitQuoteResponse(
   formData: FormData,
 ): Promise<QuoteResponseState> {
   const memo = toNullableString(formData.get("memo"));
-  const declined = formData.get("choice") === "decline";
-
-  let update: { declined: boolean; amount: number | null; memo: string | null };
-  if (declined) {
-    const parsed = declineSchema.safeParse({ memo });
-    if (!parsed.success) return { error: "入力内容を確認してください", saved: false };
-    update = { declined: true, amount: null, memo: parsed.data.memo };
-  } else {
-    const amountRaw = formData.get("amount");
-    const amount = typeof amountRaw === "string" && amountRaw.trim() !== "" ? Number(amountRaw) : Number.NaN;
-    const parsed = quoteSchema.safeParse({ amount, memo });
-    if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "入力内容を確認してください", saved: false };
-    update = { declined: false, amount: parsed.data.amount, memo: parsed.data.memo };
+  const parsed = responseSchema.safeParse({ memo });
+  if (!parsed.success) {
+    return { error: "入力内容を確認してください", saved: false };
   }
+
+  const choice = formData.get("choice");
+  if (choice !== "decline" && choice !== "request_documents") {
+    return { error: "「今回は見送る」「資料をお願いする」のいずれかを選んでください", saved: false };
+  }
+  const update = {
+    declined: choice === "decline",
+    documents_requested: choice === "request_documents",
+    memo: parsed.data.memo,
+  };
 
   const supabase = createServiceClient();
   const { data: quote } = await supabase.from("quotes").select("id").eq("response_token", token).maybeSingle<{ id: string }>();

@@ -14,6 +14,7 @@ type QuoteRow = {
   request_id: string;
   amount: number | null;
   declined: boolean;
+  documents_requested: boolean;
   replied_at: string | null;
   memo: string | null;
   partners: { name: string } | { name: string }[] | null;
@@ -50,7 +51,7 @@ export default async function QuoteResponsePage({ params }: { params: Promise<{ 
 
   const { data: quote } = await supabase
     .from("quotes")
-    .select("id, request_id, amount, declined, replied_at, memo, partners(name)")
+    .select("id, request_id, amount, declined, documents_requested, replied_at, memo, partners(name)")
     .eq("response_token", token)
     .maybeSingle<QuoteRow>();
   if (!quote) notFound();
@@ -124,7 +125,13 @@ export default async function QuoteResponsePage({ params }: { params: Promise<{ 
       <QuoteResponseForm
         token={token}
         partnerName={partner?.name ?? null}
-        current={{ amount: quote.amount, declined: quote.declined, memo: quote.memo, repliedAt: quote.replied_at }}
+        current={{
+          amount: quote.amount,
+          declined: quote.declined,
+          documentsRequested: quote.documents_requested,
+          memo: quote.memo,
+          repliedAt: quote.replied_at,
+        }}
       />
     </main>
   );
