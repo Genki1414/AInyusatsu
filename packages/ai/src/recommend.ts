@@ -68,7 +68,8 @@ export async function analyzePartnerRecommendation(
   return extract({
     promptName: "partner_recommend",
     system: PARTNER_RECOMMEND_SYSTEM_PROMPT,
-    user: buildPartnerRecommendUserPrompt(input),
+    // 他のプロンプトと共通する前半が無いため、キャッシュ対象は持たせない
+    user: { cachedPrefix: null, body: buildPartnerRecommendUserPrompt(input) },
     schema: partnerRecommendSchema,
     callModel,
     onInvalid,

@@ -2,6 +2,7 @@
 // プロンプト本文は docs/AI解析プロンプト集.md を正とする（書き換えない）。
 export * from "./extract";
 export * from "./analyze";
+export * from "./usage";
 export * from "./recommend";
 export * from "./schemas/basic_info";
 export * from "./schemas/qualifications";
@@ -10,4 +11,5 @@ export * from "./schemas/forms";
 export * from "./schemas/notes";
 export * from "./schemas/questions";
 export * from "./schemas/partner_recommend";
+export * from "../prompts/user_template";
 export * from "../adapters/claude";

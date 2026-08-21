@@ -9,7 +9,7 @@ import { LOTS_INSTRUCTIONS, LOTS_SCHEMA_DESCRIPTION } from "../prompts/lots";
 import { FORMS_INSTRUCTIONS, FORMS_SCHEMA_DESCRIPTION } from "../prompts/forms";
 import { NOTES_INSTRUCTIONS, NOTES_SCHEMA_DESCRIPTION } from "../prompts/notes";
 import { QUESTIONS_INSTRUCTIONS, QUESTIONS_SCHEMA_DESCRIPTION } from "../prompts/questions";
-import { extract, type CallModel, type OnInvalid } from "./extract";
+import { extract, type CallModel, type OnInvalid, type OnUsage, type UserPrompt } from "./extract";
 import { basicInfoSchema, type BasicInfo } from "./schemas/basic_info";
 import { qualificationsSchema, type Qualifications } from "./schemas/qualifications";
 import { lotsSchema, type Lots } from "./schemas/lots";
@@ -24,11 +24,22 @@ type RunOptions = {
   documents: PromptDocument[];
   callModel: CallModel;
   onInvalid?: OnInvalid;
+  /** 実際のトークン消費。プロンプトキャッシュが効いているかの計測に使う */
+  onUsage?: OnUsage;
 };
 
-/** ユーザープロンプト＝共通テンプレート＋そのプロンプト固有の追加の指示。 */
-function buildUser(meta: TenderMeta, documents: PromptDocument[], schemaDescription: string, instructions: string): string {
-  return `${buildUserPrompt(meta, documents, schemaDescription)}\n\n${instructions}`;
+/**
+ * ユーザープロンプト＝共通テンプレート＋そのプロンプト固有の追加の指示。
+ * 共通部分（案件の既知情報＋資料）と固有部分に分けて返す。共通部分は6本とも同じ文字列に
+ * なるため、アダプタ側でここまでをキャッシュできる。
+ */
+function buildUser(
+  meta: TenderMeta,
+  documents: PromptDocument[],
+  schemaDescription: string,
+  instructions: string,
+): UserPrompt {
+  return buildUserPrompt(meta, documents, schemaDescription, instructions);
 }
 
 /** §1 基本情報と期限。合格ライン100%（期限を誤ると失格・機会損失に直結する）。 */
@@ -40,6 +51,7 @@ export async function analyzeBasicInfo(opts: RunOptions): Promise<BasicInfo> {
     schema: basicInfoSchema,
     callModel: opts.callModel,
     onInvalid: opts.onInvalid,
+    onUsage: opts.onUsage,
   });
 }
 
@@ -52,6 +64,7 @@ export async function analyzeQualifications(opts: RunOptions): Promise<Qualifica
     schema: qualificationsSchema,
     callModel: opts.callModel,
     onInvalid: opts.onInvalid,
+    onUsage: opts.onUsage,
   });
 }
 
@@ -64,6 +77,7 @@ export async function analyzeLots(opts: RunOptions): Promise<Lots> {
     schema: lotsSchema,
     callModel: opts.callModel,
     onInvalid: opts.onInvalid,
+    onUsage: opts.onUsage,
   });
 }
 
@@ -76,6 +90,7 @@ export async function analyzeForms(opts: RunOptions): Promise<Forms> {
     schema: formsSchema,
     callModel: opts.callModel,
     onInvalid: opts.onInvalid,
+    onUsage: opts.onUsage,
   });
 }
 
@@ -88,6 +103,7 @@ export async function analyzeNotes(opts: RunOptions): Promise<Notes> {
     schema: notesSchema,
     callModel: opts.callModel,
     onInvalid: opts.onInvalid,
+    onUsage: opts.onUsage,
   });
 }
 
@@ -100,5 +116,6 @@ export async function analyzeQuestions(opts: RunOptions): Promise<Questions> {
     schema: questionsSchema,
     callModel: opts.callModel,
     onInvalid: opts.onInvalid,
+    onUsage: opts.onUsage,
   });
 }

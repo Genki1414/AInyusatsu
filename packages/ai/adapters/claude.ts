@@ -13,7 +13,7 @@
 // そのままにしているが、実際にAPIへ渡すのはこのアダプタの責務なので、ここで無視する。
 
 import Anthropic from "@anthropic-ai/sdk";
-import type { CallModel } from "../src/extract";
+import type { CallModel, UserPrompt } from "../src/extract";
 
 const MODEL = "claude-sonnet-5";
 // 数量表（プロンプト3）は行ごとに item / spec / qty / unit / trade に加えて
@@ -22,6 +22,13 @@ const MODEL = "claude-sonnet-5";
 // （実機で確認：大阪空港事務所庁舎等消防用設備点検業務。stop_reason=max_tokens）。
 // max_tokensは上限であって使い切るわけではないので、引き上げても通常時のコストは変わらない。
 const MAX_TOKENS = 32768;
+
+/**
+ * プロンプトキャッシュの有効期間。
+ * 同じ案件の6本のプロンプトは数秒〜数十秒の間に走るので、既定の5分で足りる。
+ * バッチ実行（Batch API）では処理の間隔が読めないため、そちらは別途 1h を指定する。
+ */
+const CACHE_TTL = "5m" as const;
 
 let client: Anthropic | null = null;
 
@@ -35,9 +42,26 @@ function getClient(): Anthropic {
   return client;
 }
 
+/**
+ * ユーザープロンプトを content ブロックに組み立てる。
+ *
+ * 共通の前半に cache_control を付けると、そこまで（tools → system → この前半）が
+ * キャッシュされる。同じ案件の2本目以降のプロンプトは、資料テキストの分が
+ * 0.1倍の値段で読み出される（書き込みは1.25倍）。
+ * キャッシュの最小サイズは約1024トークンで、それ未満の資料では黙って効かないだけなので、
+ * 前半の大きさで分岐はしない。
+ */
+function userContent(user: UserPrompt) {
+  if (user.cachedPrefix === null) return user.body;
+  return [
+    { type: "text" as const, text: user.cachedPrefix, cache_control: { type: "ephemeral" as const, ttl: CACHE_TTL } },
+    { type: "text" as const, text: user.body },
+  ];
+}
+
 /** Claude APIを呼び出し、応答のテキスト部分を返す。extract()のcallModelとして渡す。 */
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-export const callClaude: CallModel = async ({ system, user, temperature: _temperature }) => {
+export const callClaude: CallModel = async ({ system, user, temperature: _temperature, onUsage }) => {
   // ストリーミングで受け取る。max_tokensが大きいと1回の応答が10分を超えうるため、
   // SDKが非ストリーミングの呼び出しを拒否する（実機で確認：
   // "Streaming is required for operations that may take longer than 10 minutes"）。
@@ -47,9 +71,18 @@ export const callClaude: CallModel = async ({ system, user, temperature: _temper
       model: MODEL,
       max_tokens: MAX_TOKENS,
       system,
-      messages: [{ role: "user", content: user }],
+      messages: [{ role: "user", content: userContent(user) }],
     })
     .finalMessage();
+
+  if (onUsage) {
+    onUsage({
+      inputTokens: res.usage.input_tokens,
+      cacheCreationTokens: res.usage.cache_creation_input_tokens ?? 0,
+      cacheReadTokens: res.usage.cache_read_input_tokens ?? 0,
+      outputTokens: res.usage.output_tokens,
+    });
+  }
 
   // 出力上限で切れた場合、そのまま返すと「壊れたJSON」として扱われ原因が分からなくなるため、
   // 理由を明示して失敗させる（CLAUDE.md「エラーは握りつぶさない」）。
