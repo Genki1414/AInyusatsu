@@ -4,7 +4,8 @@ import { useActionState, useState } from "react";
 import { submitQuoteResponse, type QuoteResponseState } from "./actions";
 
 const initialState: QuoteResponseState = { error: null, saved: false };
-const input = "mt-1 block w-full rounded border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300";
+const input =
+  "mt-1 block w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-300";
 
 export function QuoteResponseForm({
   token,
