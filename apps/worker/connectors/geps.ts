@@ -17,6 +17,7 @@ import { chromium, type Page } from "playwright";
 import AdmZip from "adm-zip";
 import {
   classifyDocumentKind,
+  decodeZipEntryName,
   isSearchTruncated,
   normalizeGepsTender,
   type DocKind,
@@ -273,7 +274,14 @@ export async function downloadDocuments(page: Page, documentDownloadUrl: string)
   const documents: GepsDocument[] = [];
   for (const entry of zip.getEntries()) {
     if (entry.isDirectory) continue;
-    const filename = entry.entryName.split("/").pop() ?? entry.entryName;
+    // 資料zipのファイル名はCP932で入っており、UTF-8として読むと文字化けする。
+    // ZIPのgeneral purpose bit 11（0x800）でUTF-8かどうかを判別する。
+    const decodedName = decodeZipEntryName(
+      entry.rawEntryName,
+      (entry.header.flags & 0x800) !== 0,
+      entry.entryName,
+    );
+    const filename = decodedName.split("/").pop() ?? decodedName;
     const portalCategory = portalCategories.get(filename) ?? "その他";
     documents.push({
       kind: classifyDocumentKind(portalCategory, filename),

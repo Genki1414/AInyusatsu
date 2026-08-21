@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   classifyDocumentKind,
   classifyDocumentKindByFilename,
+  decodeZipEntryName,
   isSearchTruncated,
   normalizeGepsNoticeDate,
   normalizeGepsTender,
@@ -135,3 +136,41 @@ describe("normalizeGepsTender", () => {
     expect(a.dedupeKey).toBe(b.dedupeKey);
   });
 });
+
+describe("decodeZipEntryName", () => {
+  // 調達ポータルの資料zipはファイル名がCP932で入っており、UTF-8として読むと文字化けする
+  // （実機で確認：協力会社へ送った資料名が「3.\ufffdd\ufffdl\ufffd\ufffd.pdf」になった）。
+  const cp932 = (text: string): Uint8Array => {
+    // テスト用に、代表的なファイル名のCP932バイト列を直接持つ
+    const table: Record<string, number[]> = {
+      // 「仕様書.pdf」
+      "仕様書.pdf": [0x8e, 0x64, 0x97, 0x6c, 0x8f, 0x91, 0x2e, 0x70, 0x64, 0x66],
+      // 「入札公告.pdf」
+      "入札公告.pdf": [0x93, 0xfc, 0x8e, 0x44, 0x8c, 0xf6, 0x8d, 0x90, 0x2e, 0x70, 0x64, 0x66],
+    };
+    const bytes = table[text];
+    if (!bytes) throw new Error(`テストデータにありません: ${text}`);
+    return Uint8Array.from(bytes);
+  };
+
+  it("UTF-8フラグが立っていなければCP932として読む", () => {
+    expect(decodeZipEntryName(cp932("仕様書.pdf"), false, "壊れた名前.pdf")).toBe("仕様書.pdf");
+    expect(decodeZipEntryName(cp932("入札公告.pdf"), false, "壊れた名前.pdf")).toBe("入札公告.pdf");
+  });
+
+  it("UTF-8フラグが立っていれば、そのまま（AdmZipの解釈）を使う", () => {
+    const utf8 = new TextEncoder().encode("仕様書.pdf");
+    expect(decodeZipEntryName(utf8, true, "仕様書.pdf")).toBe("仕様書.pdf");
+  });
+
+  it("CP932として読めないバイト列は、推測せず元の解釈のまま使う", () => {
+    const invalid = Uint8Array.from([0x80, 0xff, 0xfe]);
+    expect(decodeZipEntryName(invalid, false, "そのまま.pdf")).toBe("そのまま.pdf");
+  });
+
+  it("ASCIIだけのファイル名はどちらでも同じ結果になる", () => {
+    const ascii = new TextEncoder().encode("readme.txt");
+    expect(decodeZipEntryName(ascii, false, "readme.txt")).toBe("readme.txt");
+  });
+});
+

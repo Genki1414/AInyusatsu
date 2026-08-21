@@ -152,3 +152,25 @@ export function normalizeGepsTender(detail: GepsDetail, portalDetailUrl: string)
     dedupeKey: key,
   };
 }
+
+/**
+ * ZIP内のファイル名をデコードする。
+ * 調達ポータルの資料zipはファイル名がShift_JIS(CP932)で入っており、UTF-8として読むと
+ * 文字化けする（実機で確認：協力会社へ送った資料名が「3.�d�l��.pdf」になった）。
+ * ZIPのgeneral purpose bit 11（0x800）が立っていればUTF-8、立っていなければCP932として読む。
+ *
+ * @param rawName ZIPヘッダに入っている生のファイル名（バイト列）
+ * @param utf8Flag general purpose bit 11 が立っているか
+ * @param fallback デコードに失敗した場合に使う名前（AdmZipがUTF-8として解釈した文字列）
+ */
+export function decodeZipEntryName(rawName: Uint8Array, utf8Flag: boolean, fallback: string): string {
+  if (utf8Flag) return fallback;
+  try {
+    // Node.jsのTextDecoderはICU同梱ビルドでshift_jisを扱える。
+    // 扱えない環境では例外になるので、その場合はUTF-8解釈のまま使う（推測で壊さない）。
+    const decoded = new TextDecoder("shift_jis", { fatal: true }).decode(rawName);
+    return decoded;
+  } catch {
+    return fallback;
+  }
+}
