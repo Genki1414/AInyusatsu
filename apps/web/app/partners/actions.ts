@@ -50,7 +50,7 @@ export async function savePartner(_prevState: PartnerState, formData: FormData):
     email: emailRaw ?? "",
     base: toNullableString(formData.get("base")),
     trades: formData.getAll("trades"),
-    areas: linesToList(formData.get("areas")),
+    areas: Array.from(new Set([...formData.getAll("areas").map(String), ...linesToList(formData.get("areas_other"))])),
     rating: toNullableNumber(formData.get("rating")),
     memo: toNullableString(formData.get("memo")),
     active: formData.get("active") === "on",
