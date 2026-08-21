@@ -16,7 +16,12 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { CallModel } from "../src/extract";
 
 const MODEL = "claude-sonnet-5";
-const MAX_TOKENS = 8192;
+// 数量表（プロンプト3）は行ごとに item / spec / qty / unit / trade に加えて
+// evidence（原文の引用）と source を返すため、行数が多い案件では出力が長くなる。
+// 8192では実データで上限に達して途中で切れることを確認したため引き上げた
+// （実機で確認：大阪空港事務所庁舎等消防用設備点検業務。stop_reason=max_tokens）。
+// max_tokensは上限であって使い切るわけではないので、引き上げても通常時のコストは変わらない。
+const MAX_TOKENS = 32768;
 
 let client: Anthropic | null = null;
 
