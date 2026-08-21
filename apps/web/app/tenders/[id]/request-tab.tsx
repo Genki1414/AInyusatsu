@@ -205,6 +205,63 @@ function PartnerPicker({
   );
 }
 
+export type SentQuoteRequest = {
+  id: string;
+  trade: string;
+  due_at: string | null;
+  sent_at: string | null;
+  quotes: {
+    id: string;
+    amount: number | null;
+    declined: boolean;
+    documents_requested: boolean;
+    replied_at: string | null;
+    memo: string | null;
+    partner: { name: string } | null;
+  }[];
+};
+
+function quoteStatus(q: SentQuoteRequest["quotes"][number]): { label: string; tone: "slate" | "amber" | "rose" | "green" } {
+  if (!q.replied_at) return { label: "未回答", tone: "slate" };
+  if (q.declined) return { label: "見送り", tone: "rose" };
+  if (q.documents_requested) return { label: "資料請求", tone: "amber" };
+  if (q.amount != null) return { label: `見積あり（${q.amount.toLocaleString("ja-JP")}円）`, tone: "green" };
+  return { label: "回答あり", tone: "green" };
+}
+
+// 過去に送信した見積依頼と、協力会社からの回答状況（未回答／見送り／資料請求）の一覧。
+// 送信フォームとは別に、送信済みぶんを振り返るための読み取り専用の表示。
+function SentRequestsPanel({ sentRequests }: { sentRequests: SentQuoteRequest[] }) {
+  if (sentRequests.length === 0) return null;
+  return (
+    <Panel title="送信済みの見積依頼">
+      <div className="space-y-3">
+        {sentRequests.map((req) => (
+          <div key={req.id} className="rounded border border-slate-100 p-2">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+              <span className="font-medium text-slate-800">{req.trade}</span>
+              <span>送信：{req.sent_at ? new Date(req.sent_at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" }) : "未確認"}</span>
+              <span>回答期限：{req.due_at ? new Date(req.due_at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" }) : "未確認"}</span>
+            </div>
+            <ul className="mt-1.5 space-y-1">
+              {req.quotes.map((q) => {
+                const status = quoteStatus(q);
+                return (
+                  <li key={q.id} className="flex flex-wrap items-center gap-1.5 text-xs text-slate-700">
+                    <span>{q.partner?.name ?? "（削除された協力会社）"}</span>
+                    <Pill tone={status.tone}>{status.label}</Pill>
+                    {q.memo && <span className="text-slate-400">備考：{q.memo}</span>}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
 export function RequestTab({
   tenderId,
   senderOrgName,
@@ -220,6 +277,7 @@ export function RequestTab({
   suggestedDueAt,
   officialStatus,
   recommendations,
+  sentRequests,
 }: {
   tenderId: string;
   senderOrgName: string;
@@ -235,6 +293,7 @@ export function RequestTab({
   suggestedDueAt: string | null;
   officialStatus: "未取得" | "申請中" | "取得済";
   recommendations: Record<string, PartnerRecommendationResult | null>;
+  sentRequests: SentQuoteRequest[];
 }) {
   const boundAction = sendQuoteRequests.bind(null, tenderId);
   const [state, formAction, pending] = useActionState(boundAction, initialState);
@@ -258,99 +317,105 @@ export function RequestTab({
 
   if (tradeGroups.length === 0) {
     return (
-      <Panel title="見積依頼">
-        <p className="text-xs text-slate-500">数量表が無いため、見積依頼を作成できません。</p>
-      </Panel>
+      <div className="space-y-3">
+        <SentRequestsPanel sentRequests={sentRequests} />
+        <Panel title="見積依頼">
+          <p className="text-xs text-slate-500">数量表が無いため、見積依頼を作成できません。</p>
+        </Panel>
+      </div>
     );
   }
 
   return (
-    <form action={formAction} className="space-y-3">
-      {tradeGroups.map((group) => {
-        const candidates = partners.filter((p) => p.email);
-        const rec = recommendations[group.trade] ?? null;
-        const recommendedMap = Object.fromEntries((rec?.recommendations ?? []).map((r) => [r.partner_id, r.reason]));
-        const { body } = buildQuoteRequestEmail({
-          senderOrgName,
-          senderContactName,
-          senderContactEmail,
-          tenderName,
-          agencyName,
-          place,
-          termFrom,
-          termTo,
-          dueAtLabel: DUE_AT_PLACEHOLDER,
-          trade: group.trade,
-          lots: group.lots,
-          responseUrl: RESPONSE_URL_PLACEHOLDER,
-        });
-        return (
-          <Panel key={group.trade} title={`${group.trade}（数量表 ${group.lots.length}行）`}>
-            {rec && rec.recommendations.length > 0 && (
-              <div className="mb-2 rounded border border-violet-200 bg-violet-50 px-2 py-1.5">
-                <p className="text-xs font-medium text-violet-800">AIのおすすめ</p>
-                <ul className="mt-1 space-y-0.5">
-                  {rec.recommendations.map((r) => {
-                    const partner = partners.find((p) => p.id === r.partner_id);
-                    if (!partner) return null;
-                    return (
-                      <li key={r.partner_id} className="text-xs text-violet-900">
-                        ・{partner.name}：<TruncatedText text={r.reason} />
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            )}
-            {rec?.unavailableReason && (
-              <p className="mb-2 text-xs text-slate-400">AIによるおすすめは取得できませんでした（{rec.unavailableReason}）</p>
-            )}
-            {rec && rec.recommendations.length === 0 && !rec.unavailableReason && rec.note && (
-              <p className="mb-2 text-xs text-slate-400">
-                AIのおすすめ：<TruncatedText text={rec.note} limit={50} />
-              </p>
-            )}
-            <div className="text-xs font-medium text-slate-700">依頼先</div>
-            {candidates.length === 0 ? (
-              <p className="mt-1 text-xs text-slate-500">
-                この業種に対応するメール登録済みの協力会社がありません。「協力会社」画面から登録してください。
-              </p>
-            ) : (
-              <PartnerPicker trade={group.trade} candidates={candidates} recommended={recommendedMap} />
-            )}
+    <div className="space-y-3">
+      <SentRequestsPanel sentRequests={sentRequests} />
+      <form action={formAction} className="space-y-3">
+        {tradeGroups.map((group) => {
+          const candidates = partners.filter((p) => p.email);
+          const rec = recommendations[group.trade] ?? null;
+          const recommendedMap = Object.fromEntries((rec?.recommendations ?? []).map((r) => [r.partner_id, r.reason]));
+          const { body } = buildQuoteRequestEmail({
+            senderOrgName,
+            senderContactName,
+            senderContactEmail,
+            tenderName,
+            agencyName,
+            place,
+            termFrom,
+            termTo,
+            dueAtLabel: DUE_AT_PLACEHOLDER,
+            trade: group.trade,
+            lots: group.lots,
+            responseUrl: RESPONSE_URL_PLACEHOLDER,
+          });
+          return (
+            <Panel key={group.trade} title={`${group.trade}（数量表 ${group.lots.length}行）`}>
+              {rec && rec.recommendations.length > 0 && (
+                <div className="mb-2 rounded border border-violet-200 bg-violet-50 px-2 py-1.5">
+                  <p className="text-xs font-medium text-violet-800">AIのおすすめ</p>
+                  <ul className="mt-1 space-y-0.5">
+                    {rec.recommendations.map((r) => {
+                      const partner = partners.find((p) => p.id === r.partner_id);
+                      if (!partner) return null;
+                      return (
+                        <li key={r.partner_id} className="text-xs text-violet-900">
+                          ・{partner.name}：<TruncatedText text={r.reason} />
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
+              {rec?.unavailableReason && (
+                <p className="mb-2 text-xs text-slate-400">AIによるおすすめは取得できませんでした（{rec.unavailableReason}）</p>
+              )}
+              {rec && rec.recommendations.length === 0 && !rec.unavailableReason && rec.note && (
+                <p className="mb-2 text-xs text-slate-400">
+                  AIのおすすめ：<TruncatedText text={rec.note} limit={50} />
+                </p>
+              )}
+              <div className="text-xs font-medium text-slate-700">依頼先</div>
+              {candidates.length === 0 ? (
+                <p className="mt-1 text-xs text-slate-500">
+                  この業種に対応するメール登録済みの協力会社がありません。「協力会社」画面から登録してください。
+                </p>
+              ) : (
+                <PartnerPicker trade={group.trade} candidates={candidates} recommended={recommendedMap} />
+              )}
 
-            <label className="mt-3 block text-xs">
-              <span className="font-medium text-slate-700">依頼文（編集できます）</span>
-              <textarea name={`body_${group.trade}`} defaultValue={body} rows={8} className={`${input} mt-1 block w-full font-mono`} />
-            </label>
-          </Panel>
-        );
-      })}
+              <label className="mt-3 block text-xs">
+                <span className="font-medium text-slate-700">依頼文（編集できます）</span>
+                <textarea name={`body_${group.trade}`} defaultValue={body} rows={8} className={`${input} mt-1 block w-full font-mono`} />
+              </label>
+            </Panel>
+          );
+        })}
 
-      <Panel title="回答期限">
-        <label className="flex flex-wrap items-center gap-2 text-xs">
-          <input type="datetime-local" name="due_at" defaultValue={suggestedDueAt ?? ""} required className={input} />
-          <span className="text-slate-500">期限の24時間前に未回答の会社へ自動で催促します（タスク4-4で実装予定）。</span>
-        </label>
-      </Panel>
+        <Panel title="回答期限">
+          <label className="flex flex-wrap items-center gap-2 text-xs">
+            <input type="datetime-local" name="due_at" defaultValue={suggestedDueAt ?? ""} required className={input} />
+            <span className="text-slate-500">期限の24時間前に未回答の会社へ自動で催促します（タスク4-4で実装予定）。</span>
+          </label>
+        </Panel>
 
-      {state.error && (
-        <p role="alert" className="text-xs text-rose-700">
-          {state.error}
-        </p>
-      )}
-      {state.summary && <p className="text-xs text-emerald-700">{state.summary}</p>}
+        {state.error && (
+          <p role="alert" className="text-xs text-rose-700">
+            {state.error}
+          </p>
+        )}
+        {state.summary && <p className="text-xs text-emerald-700">{state.summary}</p>}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <ConfirmSubmitButton
-          confirmMessage="選択した協力会社へ本当にメールを送信します。よろしいですか？"
-          disabled={pending}
-          className="rounded border border-blue-800 bg-blue-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-900 disabled:opacity-40"
-        >
-          {pending ? "送信中..." : "見積依頼を送信する"}
-        </ConfirmSubmitButton>
-        <Pill tone="amber">実際にメールが送信されます</Pill>
-      </div>
-    </form>
+        <div className="flex flex-wrap items-center gap-2">
+          <ConfirmSubmitButton
+            confirmMessage="選択した協力会社へ本当にメールを送信します。よろしいですか？"
+            disabled={pending}
+            className="rounded border border-blue-800 bg-blue-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-900 disabled:opacity-40"
+          >
+            {pending ? "送信中..." : "見積依頼を送信する"}
+          </ConfirmSubmitButton>
+          <Pill tone="amber">実際にメールが送信されます</Pill>
+        </div>
+      </form>
+    </div>
   );
 }

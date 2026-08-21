@@ -16,7 +16,7 @@ import { AnalysisTab, type AnalysisTabAnalysis } from "./analysis-tab";
 import { DOC_KINDS, DocsTab, type TenderDocumentRow, type TenderLotRow } from "./docs-tab";
 import { FitTab, type FitTabProposal } from "./fit-tab";
 import { getPartnerRecommendations, type PartnerRecommendationResult } from "./recommend";
-import { RequestTab, type RequestTabPartner } from "./request-tab";
+import { RequestTab, type RequestTabPartner, type SentQuoteRequest } from "./request-tab";
 
 type TenderRow = {
   id: string;
@@ -43,6 +43,22 @@ type TenderRow = {
 };
 
 type OfficialStatus = "未取得" | "申請中" | "取得済";
+
+type SentQuoteRequestRow = {
+  id: string;
+  trade: string;
+  due_at: string | null;
+  sent_at: string | null;
+  quotes: {
+    id: string;
+    amount: number | null;
+    declined: boolean;
+    documents_requested: boolean;
+    replied_at: string | null;
+    memo: string | null;
+    partners: { name: string } | { name: string }[] | null;
+  }[];
+};
 
 const TABS = [
   { key: "fit", label: "参加判断", icon: Target },
@@ -128,6 +144,32 @@ export default async function TenderDetailPage({
     tab === "request" && officialStatus === "取得済" && tradeGroups.length > 0
       ? await getPartnerRecommendations(supabase, orgId, id, tender.item, tender.place, tradeGroups, partners ?? [])
       : {};
+
+  // 送信済みの見積依頼と、協力会社からの回答状況（見積依頼タブに一覧表示する）。
+  const { data: sentRequestRows } =
+    tab === "request"
+      ? await supabase
+          .from("quote_requests")
+          .select("id, trade, due_at, sent_at, quotes(id, amount, declined, documents_requested, replied_at, memo, partners(name))")
+          .eq("tender_id", id)
+          .order("sent_at", { ascending: false })
+          .returns<SentQuoteRequestRow[]>()
+      : { data: null };
+  const sentRequests: SentQuoteRequest[] = (sentRequestRows ?? []).map((r) => ({
+    id: r.id,
+    trade: r.trade,
+    due_at: r.due_at,
+    sent_at: r.sent_at,
+    quotes: r.quotes.map((q) => ({
+      id: q.id,
+      amount: q.amount,
+      declined: q.declined,
+      documents_requested: q.documents_requested,
+      replied_at: q.replied_at,
+      memo: q.memo,
+      partner: Array.isArray(q.partners) ? (q.partners[0] ?? null) : q.partners,
+    })),
+  }));
 
   // 見積依頼の回答期限の目安：提出期限の3日前（datetime-local用にAsia/Tokyoのローカル表記へ）。
   let suggestedDueAt: string | null = null;
@@ -239,6 +281,7 @@ export default async function TenderDetailPage({
           suggestedDueAt={suggestedDueAt}
           officialStatus={officialStatus}
           recommendations={recommendations}
+          sentRequests={sentRequests}
         />
       )}
     </AppShell>
