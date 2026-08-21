@@ -38,12 +38,18 @@ function getClient(): Anthropic {
 /** Claude APIを呼び出し、応答のテキスト部分を返す。extract()のcallModelとして渡す。 */
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export const callClaude: CallModel = async ({ system, user, temperature: _temperature }) => {
-  const res = await getClient().messages.create({
-    model: MODEL,
-    max_tokens: MAX_TOKENS,
-    system,
-    messages: [{ role: "user", content: user }],
-  });
+  // ストリーミングで受け取る。max_tokensが大きいと1回の応答が10分を超えうるため、
+  // SDKが非ストリーミングの呼び出しを拒否する（実機で確認：
+  // "Streaming is required for operations that may take longer than 10 minutes"）。
+  // finalMessage()で最後まで受け取れば、扱う形は非ストリーミングと同じMessageになる。
+  const res = await getClient()
+    .messages.stream({
+      model: MODEL,
+      max_tokens: MAX_TOKENS,
+      system,
+      messages: [{ role: "user", content: user }],
+    })
+    .finalMessage();
 
   // 出力上限で切れた場合、そのまま返すと「壊れたJSON」として扱われ原因が分からなくなるため、
   // 理由を明示して失敗させる（CLAUDE.md「エラーは握りつぶさない」）。
