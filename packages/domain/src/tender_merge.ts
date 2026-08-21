@@ -20,6 +20,12 @@ export type TenderBasicFields = {
   budget: number | null;
 };
 
+/**
+ * AI解析から渡ってくる値。areasは「判定できない」場合にnullになるため、
+ * tendersの現在値（必ず配列）とは型が異なる。
+ */
+export type ExtractedTenderBasicFields = Omit<TenderBasicFields, "areas"> & { areas: string[] | null };
+
 const UNDETERMINED_QUAL_CATEGORY = "未判定";
 
 /**
@@ -29,7 +35,7 @@ const UNDETERMINED_QUAL_CATEGORY = "未判定";
  */
 export function mergeBasicInfoIntoTender(
   current: TenderBasicFields,
-  extracted: Partial<TenderBasicFields>,
+  extracted: Partial<ExtractedTenderBasicFields>,
 ): Partial<TenderBasicFields> {
   const patch: Partial<TenderBasicFields> = {};
 

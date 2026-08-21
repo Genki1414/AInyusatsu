@@ -26,6 +26,7 @@ import {
   validateTenderDates,
   type LotRow,
   type TenderBasicFields,
+  type ExtractedTenderBasicFields,
 } from "@ai-nyusatsu-bu/domain";
 import {
   analyzeBasicInfo,
@@ -133,7 +134,7 @@ export async function analyzeTender(tenderId: string): Promise<AnalyzeTenderResu
     areas: tender.areas ?? [],
     budget: tender.budget,
   };
-  const extractedFields: Partial<TenderBasicFields> = {
+  const extractedFields: Partial<ExtractedTenderBasicFields> = {
     org_unit: basicInfo.org_unit.value,
     submit_deadline: basicInfo.submit_deadline.value,
     qa_deadline: basicInfo.qa_deadline.value,

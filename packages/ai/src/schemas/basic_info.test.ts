@@ -108,4 +108,32 @@ describe("basicInfoSchema", () => {
     expect(result.success).toBe(true);
   });
 
+
+  it("競争参加地域の記載が無い資料では areas.value が null でも受理する", () => {
+    // 「判定できない（null）」と「地域の指定が無い（空配列）」は意味が違うため、
+    // 空配列に丸めず null のまま受け取る（fit.tsは空配列を『指定なし』として満点にする）。
+    const emptyField = { value: null, quote: null, source: null };
+    const result = basicInfoSchema.safeParse({
+      name: emptyField,
+      agency: emptyField,
+      org_unit: emptyField,
+      notice_no: emptyField,
+      notice_date: emptyField,
+      submit_deadline: emptyField,
+      qa_deadline: emptyField,
+      bid_open_at: emptyField,
+      term_from: emptyField,
+      term_to: emptyField,
+      place: emptyField,
+      qual_category: emptyField,
+      item: emptyField,
+      grade: emptyField,
+      areas: { value: null, quote: null, source: null },
+      budget: { value: null, disclosed: null, quote: null, source: null },
+      jv_allowed: emptyField,
+      electronic_bidding: emptyField,
+      unknown_fields: ["areas", "budget"],
+    });
+    expect(result.success).toBe(true);
+  });
 });

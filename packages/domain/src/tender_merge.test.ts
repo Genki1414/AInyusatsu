@@ -62,4 +62,12 @@ describe("mergeBasicInfoIntoTender", () => {
     const patch = mergeBasicInfoIntoTender(emptyCurrent, { areas: [] });
     expect(patch).toEqual({});
   });
+
+  it("areasがnull（判定できない）のときはパッチしない", () => {
+    // 空配列（地域の指定なし）に丸めてしまうと、fit.tsが『地域の指定はありません』として
+    // 満点を付けてしまい誤判定になる。判定できない場合は列を触らない。
+    const current: TenderBasicFields = { ...emptyCurrent, areas: [] };
+    const patch = mergeBasicInfoIntoTender(current, { areas: null });
+    expect(patch.areas).toBeUndefined();
+  });
 });
