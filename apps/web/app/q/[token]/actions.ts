@@ -158,11 +158,11 @@ async function sendDocuments(supabase: Supabase, ctx: QuoteContext): Promise<str
 
   const { data: documents, error: docsError } = await supabase
     .from("tender_documents")
-    .select("kind, storage_key")
+    .select("kind, storage_key, filename")
     .eq("tender_id", ctx.request.tenderId)
     .eq("fetched", true)
     .not("storage_key", "is", null)
-    .returns<{ kind: string; storage_key: string }[]>();
+    .returns<{ kind: string; storage_key: string; filename: string | null }[]>();
   if (docsError) {
     console.error("[quote-response] 資料の取得に失敗しました", docsError);
     return `資料の取得に失敗したため自動送付できませんでした：${docsError.message}`;
@@ -180,18 +180,18 @@ async function sendDocuments(supabase: Supabase, ctx: QuoteContext): Promise<str
   // downloadを付けてContent-Disposition: attachmentにする。付けないと、保存時のcontent-typeに
   // よってはブラウザがPDFを開かずに中身をそのまま表示してしまう（実機で確認）。
   const targets = documentFilenames(sortDocumentsByKind(documents));
-  const links: { kind: string; url: string }[] = [];
+  const links: { kind: string; label: string; url: string }[] = [];
   const failed: string[] = [];
   for (const doc of targets) {
     const { data: signed, error } = await supabase.storage
       .from(BUCKET)
-      .createSignedUrl(doc.storage_key, ttl, { download: doc.filename });
+      .createSignedUrl(doc.storage_key, ttl, { download: doc.label });
     if (error || !signed?.signedUrl) {
       console.error(`[quote-response] 署名付きURLの発行に失敗しました（${doc.storage_key}）`, error);
-      failed.push(doc.kind);
+      failed.push(doc.label);
       continue;
     }
-    links.push({ kind: doc.kind, url: signed.signedUrl });
+    links.push({ kind: doc.kind, label: doc.label, url: signed.signedUrl });
   }
   if (links.length === 0) {
     return "資料のダウンロードURLを発行できなかったため自動送付できませんでした。手動での対応が必要です";
@@ -282,5 +282,22 @@ async function notifyOrg(
     } catch (err) {
       console.error(`[quote-response] 担当者への通知に失敗しました（${address}）`, err);
     }
+  }
+}
+
+/**
+ * 回答ページが開かれたことを記録する（開封確認）。
+ * 初回の開封だけを記録し、以後の再訪では上書きしない（is("opened_at", null) で絞る）。
+ * 失敗しても協力会社の操作は妨げない（ログに残すだけ）。
+ */
+export async function recordQuoteOpened(token: string): Promise<void> {
+  const supabase = createServiceClient();
+  const { error } = await supabase
+    .from("quotes")
+    .update({ opened_at: new Date().toISOString() })
+    .eq("response_token", token)
+    .is("opened_at", null);
+  if (error) {
+    console.error("[quote-response] 開封の記録に失敗しました", error);
   }
 }

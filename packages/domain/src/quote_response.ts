@@ -24,7 +24,7 @@ export function signedUrlTtlSeconds(dueAt: Date | null, now: Date): number {
   return Math.min(max, Math.max(min, untilDue + min));
 }
 
-export type DocumentRef = { kind: string; storage_key: string };
+export type DocumentRef = { kind: string; storage_key: string; filename?: string | null };
 
 /** 資料を種別の既定順（公告→入札説明書→…）に並べる。一覧に無い種別は末尾に回す。 */
 export function sortDocumentsByKind<T extends DocumentRef>(documents: T[]): T[] {
@@ -36,18 +36,23 @@ export function sortDocumentsByKind<T extends DocumentRef>(documents: T[]): T[] 
 }
 
 /**
- * ダウンロード時のファイル名を種別から作る（Storage上のハッシュ名では中身が分からないため）。
- * 同じ種別が複数ある場合は連番を付ける。
+ * ダウンロード時の表示名を決める（Storage上のハッシュ名では中身が分からないため）。
+ * 収集時に保存した元のファイル名（例：06_数量総括表.pdf）があればそれを使う。
+ * 無い場合（収集がファイル名の保存に対応する前のデータ）は種別で代替し、
+ * 同じ種別が複数あれば連番を付ける。
  */
-export function documentFilenames(documents: DocumentRef[]): { kind: string; storage_key: string; filename: string }[] {
+export function documentFilenames(documents: DocumentRef[]): { kind: string; storage_key: string; label: string }[] {
   const seen = new Map<string, number>();
   return documents.map((doc) => {
+    const original = doc.filename?.trim();
+    if (original) return { kind: doc.kind, storage_key: doc.storage_key, label: original };
+
     const dot = doc.storage_key.lastIndexOf(".");
     const slash = doc.storage_key.lastIndexOf("/");
     const ext = dot > slash && dot !== -1 ? doc.storage_key.slice(dot) : "";
     const n = seen.get(doc.kind) ?? 0;
     seen.set(doc.kind, n + 1);
-    return { ...doc, filename: n === 0 ? `${doc.kind}${ext}` : `${doc.kind}_${n + 1}${ext}` };
+    return { kind: doc.kind, storage_key: doc.storage_key, label: n === 0 ? `${doc.kind}${ext}` : `${doc.kind}_${n + 1}${ext}` };
   });
 }
 
@@ -59,7 +64,7 @@ export type DocumentsEmailInput = {
   trade: string;
   dueAtLabel: string | null; // 表示用に整形済み（timezone変換は呼び出し側の責務）
   expiresAtLabel: string; // 署名付きURLの失効日時（同上）
-  links: { kind: string; url: string }[];
+  links: { kind: string; label: string; url: string }[];
 };
 
 /** 資料請求への自動送付メール。 */
@@ -73,7 +78,7 @@ export function buildDocumentsEmail(input: DocumentsEmailInput): { subject: stri
     `ご請求いただきました「${input.tenderName}」（${input.trade}）の資料をお送りいたします。`,
     `下記のリンクからダウンロードしてください（${input.expiresAtLabel} まで有効です）。`,
     "",
-    ...input.links.map((l) => `【${l.kind}】${l.url}`),
+    ...input.links.flatMap((l) => [`【${l.kind}】${l.label}`, l.url]),
     "",
   ];
   if (input.dueAtLabel) lines.push(`お見積りの回答期限：${input.dueAtLabel}`, "");

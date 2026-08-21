@@ -14,6 +14,7 @@ export type SentQuoteRequest = {
     declined: boolean;
     documents_requested: boolean;
     documents_sent_at: string | null;
+    opened_at: string | null;
     replied_at: string | null;
     memo: string | null;
     partner: { name: string } | null;
@@ -21,7 +22,9 @@ export type SentQuoteRequest = {
 };
 
 function quoteStatus(q: SentQuoteRequest["quotes"][number]): { label: string; tone: "slate" | "amber" | "rose" | "green" } {
-  if (!q.replied_at) return { label: "未回答", tone: "slate" };
+  // 未回答でも、回答ページを開いたかどうかで打ち手が変わる
+  // （届いていない／見られていない のか、見たうえで返事が無いのか）。
+  if (!q.replied_at) return q.opened_at ? { label: "開封済み・未回答", tone: "amber" } : { label: "未開封", tone: "slate" };
   if (q.declined) return { label: "見送り", tone: "rose" };
   if (q.documents_requested) return { label: "資料請求", tone: "amber" };
   if (q.amount != null) return { label: `見積あり（${q.amount.toLocaleString("ja-JP")}円）`, tone: "green" };
@@ -57,6 +60,11 @@ export function SentRequestsTab({ sentRequests }: { sentRequests: SentQuoteReque
                     {q.documents_sent_at && (
                       <span className="text-slate-400">
                         資料送付済み（{new Date(q.documents_sent_at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}）
+                      </span>
+                    )}
+                    {q.opened_at && (
+                      <span className="text-slate-400">
+                        開封：{new Date(q.opened_at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}
                       </span>
                     )}
                     {q.memo && <span className="text-slate-400">備考：{q.memo}</span>}

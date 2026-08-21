@@ -27,6 +27,28 @@ export function classifyDocumentKind(portalCategory: string, filename: string): 
   if (category === "仕様書関連") {
     return /数量|内訳/.test(name) ? "数量表" : "仕様書";
   }
+  // ポータルが明示的に「その他」と分類している資料は、その判断を尊重してファイル名で
+  // 上書きしない（例：「電子調達システムによる入札説明書等資料交付について.pdf」は
+  // 入札説明書そのものではない）。資料種別が取れなかった場合だけファイル名で補う。
+  if (category === "その他") return "その他";
+  return classifyDocumentKindByFilename(name);
+}
+
+/**
+ * 資料種別が取れなかった場合に、ファイル名だけで分類する。
+ * 添付一覧のスクレイピングに失敗すると資料種別が空になり、全ての資料が「その他」に
+ * 落ちてしまうため（実機で確認：高田河川国道事務所縁石等修繕作業）、ファイル名からの
+ * 判定を併用する。参照：docs/資料取得方針_v3.md §0-1「ファイル名からの判定と併用すれば精度が上がる」
+ * 判断できない場合は推測せず「その他」のままにする。
+ */
+export function classifyDocumentKindByFilename(filename: string): DocKind {
+  const name = filename.trim();
+  // 数量表は仕様書より先に判定する（「数量総括表」は仕様書関連の資料でもあるため）
+  if (/数量|内訳/.test(name)) return "数量表";
+  if (/様式|提出書類/.test(name)) return "様式";
+  if (/入札説明書|入札説明|説明書/.test(name)) return "入札説明書";
+  if (/公告|公示/.test(name)) return "公告";
+  if (/仕様書|仕様/.test(name)) return "仕様書";
   return "その他";
 }
 
