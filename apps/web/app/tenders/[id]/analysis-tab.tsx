@@ -23,16 +23,25 @@ type EvidencedValue<T> = { value: T; quote: string | null; source: string | null
 type RawBasicInfo = {
   item?: EvidencedValue<string | null>;
   grade?: EvidencedValue<string | null>;
-  areas?: EvidencedValue<string[]>;
+  areas?: EvidencedValue<string[] | null>;
   place?: EvidencedValue<string | null>;
   unknown_fields?: string[];
 };
 
+// 引用・出典・重要度・確からしさは、AIが判定できなかった場合にnullになる
+// （AI解析プロンプト集.md §全体ルール1）。出典のない抽出は「未確認」として表示する（CLAUDE.md 前提3）。
 export type AnalysisTabAnalysis = {
-  qualifications: { text: string; category: string; quote: string; source: string }[];
-  conditions: { text: string; quote: string; source: string }[];
-  notes: { text: string; importance: "critical" | "normal"; reason: string; quote: string; source: string }[];
-  trades: { trade: string; confidence: number; evidence: string; source: string; excluded: boolean; excluded_reason: string | null }[];
+  qualifications: { text: string; category: string | null; quote: string | null; source: string | null }[];
+  conditions: { text: string; quote: string | null; source: string | null }[];
+  notes: { text: string; importance: "critical" | "normal" | null; reason: string | null; quote: string | null; source: string | null }[];
+  trades: {
+    trade: string;
+    confidence: number | null;
+    evidence: string | null;
+    source: string | null;
+    excluded: boolean;
+    excluded_reason: string | null;
+  }[];
   raw: { basicInfo?: RawBasicInfo; qualifications?: { unknown_reason: string | null } } | null;
 } | null;
 
@@ -90,7 +99,11 @@ export function AnalysisTab({ tender, analysis }: { tender: AnalysisTabTender; a
   // コネクタの確定値が採用された（AIの抽出値と食い違う）場合は根拠を出さない。
   const itemEvidence = basicInfo?.item && basicInfo.item.value === tender.item ? basicInfo.item : null;
   const gradeEvidence = basicInfo?.grade && basicInfo.grade.value === tender.grade ? basicInfo.grade : null;
-  const areasEvidence = basicInfo?.areas && sameStrings(basicInfo.areas.value, tender.areas) ? basicInfo.areas : null;
+  // areas.value は判定できなかった場合 null になるため、その場合は根拠を出さない
+  const areasEvidence =
+    basicInfo?.areas && basicInfo.areas.value !== null && sameStrings(basicInfo.areas.value, tender.areas)
+      ? basicInfo.areas
+      : null;
   const placeEvidence = basicInfo?.place && basicInfo.place.value === tender.place ? basicInfo.place : null;
   const unknownFieldLabels = (basicInfo?.unknown_fields ?? []).map((k) => FIELD_LABELS[k] ?? k);
   const qualUnknownReason = analysis.raw?.qualifications?.unknown_reason ?? null;
@@ -197,13 +210,15 @@ export function AnalysisTab({ tender, analysis }: { tender: AnalysisTabTender; a
                 <li key={x.trade}>
                   <div className="flex items-center gap-2">
                     <span className={`text-xs font-semibold ${x.excluded ? "text-slate-400 line-through" : ""}`}>{x.trade}</span>
-                    <span className="ml-auto text-xs tabular-nums text-slate-400">確度 {Math.round(x.confidence * 100)}%</span>
+                    <span className="ml-auto text-xs tabular-nums text-slate-400">
+                      {x.confidence === null ? "確度 未判定" : `確度 ${Math.round(x.confidence * 100)}%`}
+                    </span>
                   </div>
                   <div className="mt-1">
-                    <Bar value={x.confidence * 100} tone={x.excluded ? "bg-slate-300" : "bg-blue-700"} />
+                    <Bar value={(x.confidence ?? 0) * 100} tone={x.excluded ? "bg-slate-300" : "bg-blue-700"} />
                   </div>
                   <p className="mt-1 text-xs leading-relaxed text-slate-500">
-                    根拠：{x.evidence}（{x.source}）
+                    根拠：{x.evidence ?? "未確認"}（{x.source ?? "出典なし"}）
                   </p>
                   {x.excluded && x.excluded_reason && <p className="mt-0.5 text-xs text-slate-400">除外理由：{x.excluded_reason}</p>}
                 </li>

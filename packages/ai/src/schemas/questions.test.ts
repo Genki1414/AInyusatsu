@@ -33,3 +33,14 @@ describe("questionsSchema", () => {
     expect(result.success).toBe(false);
   });
 });
+
+describe("questionsSchema（判定できない項目のnull許容）", () => {
+  it("impact・引用・出典がnullでも質問案を捨てない", () => {
+    const result = questionsSchema.safeParse({
+      questions: [{ text: "範囲をご教示ください。", basis: "記載が無いため", quote: null, source: null, impact: null }],
+      qa_deadline: null,
+      unknown_reason: null,
+    });
+    expect(result.success).toBe(true);
+  });
+});

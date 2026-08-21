@@ -103,3 +103,34 @@ describe("lotsSchema", () => {
     expect(result.success).toBe(false);
   });
 });
+
+describe("lotsSchema（判定できない項目のnull許容）", () => {
+  it("確からしさ・根拠・出典がnullでも行を捨てない", () => {
+    const result = lotsSchema.safeParse({
+      lots: [
+        { line_no: 1, item: "日常清掃", spec: null, qty: 1, unit: "式", trade: "清掃", confidence: null, evidence: null, source: null },
+      ],
+      trades_summary: [],
+      no_quantity_table: false,
+      unknown_reason: null,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("trades_summaryのtradeがnullでも受理する（保存時に取り除く）", () => {
+    const result = lotsSchema.safeParse({
+      lots: [],
+      trades_summary: [{ trade: null, confidence: 0.2, evidence: "判断できず", source: "仕様書" }],
+      no_quantity_table: true,
+      unknown_reason: null,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.trades_summary[0].excluded).toBe(false);
+  });
+
+  it("no_quantity_tableが省略されたらfalseとして扱う", () => {
+    const result = lotsSchema.safeParse({ lots: [], trades_summary: [] });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.no_quantity_table).toBe(false);
+  });
+});

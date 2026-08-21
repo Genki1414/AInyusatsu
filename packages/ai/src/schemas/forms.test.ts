@@ -23,3 +23,21 @@ describe("formsSchema", () => {
     expect(result.success).toBe(true);
   });
 });
+
+describe("formsSchema（判定できない項目のnull許容）", () => {
+  it("必須かどうかが判定できない書類（required: null）でも受理する", () => {
+    const result = formsSchema.safeParse({
+      forms: [{ name: "入札書", form_no: null, required: null, note: null, quote: null, source: null }],
+      submission_method: { value: null, quote: null, source: null },
+      unknown_reason: null,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.forms[0].required).toBeNull();
+  });
+
+  it("formsごと省略されても空配列として受理する", () => {
+    const result = formsSchema.safeParse({ submission_method: { value: null } });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.forms).toEqual([]);
+  });
+});

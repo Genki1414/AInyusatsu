@@ -49,6 +49,8 @@ export type AnalyzeTenderResult = {
   lotsCount: number;
   needsReview: boolean;
   reviewReasons: string[];
+  /** 失敗したプロンプト名。空なら5本すべて成功している */
+  failedPrompts: string[];
 };
 
 type TenderRow = TenderBasicFields & {
@@ -62,6 +64,25 @@ function resolveAgencyName(agencies: TenderRow["agencies"]): string {
   if (!agencies) return "";
   const row = Array.isArray(agencies) ? agencies[0] : agencies;
   return row?.name ?? "";
+}
+
+type PromptFailure = { promptName: string; message: string };
+
+/** 成功した結果だけを取り出す。失敗した抽出は null（推測で埋めない）。 */
+function valueOr<T>(result: PromiseSettledResult<T>): T | null {
+  return result.status === "fulfilled" ? result.value : null;
+}
+
+/** 失敗したプロンプトの名前と理由を集める。理由はそのまま画面の「要確認」に出す。 */
+function collectPromptFailures(entries: [string, PromiseSettledResult<unknown>][]): PromptFailure[] {
+  const failures: PromptFailure[] = [];
+  for (const [promptName, result] of entries) {
+    if (result.status !== "rejected") continue;
+    const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
+    console.error(`[analyze_tender] ${promptName}の抽出に失敗しました: ${reason}`);
+    failures.push({ promptName, message: `${promptName}の抽出に失敗しました（${reason}）` });
+  }
+  return failures;
 }
 
 /** 1案件を解析し、tenders/tender_analyses/tender_formsへ保存する。 */
@@ -111,13 +132,36 @@ export async function analyzeTender(tenderId: string): Promise<AnalyzeTenderResu
     console.error(`[analyze_tender] 生出力の末尾200文字: ${JSON.stringify(raw.slice(-200))}（全${raw.length}文字）`);
   };
 
-  const [basicInfo, qualifications, lots, forms, notes] = await Promise.all([
+  // 5本のうち1本が失敗しても、成功した分は保存する（CLAUDE.md 最重要の前提7
+  // 「資料は揃わなくても、提案できる内容があれば提案する」）。Promise.allでは、たとえば
+  // 注意事項の抽出が1回スキーマ不一致になっただけで、期限も数量表も丸ごと捨てていた。
+  // 失敗は握りつぶさず、失敗したプロンプト名を tenders.failure_reason と要確認フラグに残す。
+  const settled = await Promise.allSettled([
     analyzeBasicInfo({ meta, documents, callModel: callClaude, onInvalid }),
     analyzeQualifications({ meta, documents, callModel: callClaude, onInvalid }),
     analyzeLots({ meta, documents, callModel: callClaude, onInvalid }),
     analyzeForms({ meta, documents, callModel: callClaude, onInvalid }),
     analyzeNotes({ meta, documents, callModel: callClaude, onInvalid }),
   ]);
+  const [basicInfoR, qualificationsR, lotsR, formsR, notesR] = settled;
+  const failures = collectPromptFailures([
+    ["基本情報と期限", basicInfoR],
+    ["参加資格と参加条件", qualificationsR],
+    ["数量表の構造化と業種割当", lotsR],
+    ["提出書類", formsR],
+    ["注意事項", notesR],
+  ]);
+  if (failures.length === settled.length) {
+    // 1本も成功していないなら保存できるものが無い。理由を添えて失敗として扱う。
+    throw new Error(`AI解析がすべて失敗しました: ${failures.map((f) => f.message).join(" / ")}`);
+  }
+
+  // 失敗した分は「抽出できなかった」として空で進める（推測で埋めない）。
+  const basicInfo = valueOr(basicInfoR);
+  const qualifications = valueOr(qualificationsR);
+  const lots = valueOr(lotsR);
+  const forms = valueOr(formsR);
+  const notes = valueOr(notesR);
 
   // tenders：空欄の項目だけをAI解析の値で埋める（コネクタの確定値は上書きしない）。
   const currentFields: TenderBasicFields = {
@@ -134,20 +178,23 @@ export async function analyzeTender(tenderId: string): Promise<AnalyzeTenderResu
     areas: tender.areas ?? [],
     budget: tender.budget,
   };
-  const extractedFields: Partial<ExtractedTenderBasicFields> = {
-    org_unit: basicInfo.org_unit.value,
-    submit_deadline: basicInfo.submit_deadline.value,
-    qa_deadline: basicInfo.qa_deadline.value,
-    bid_open_at: basicInfo.bid_open_at.value,
-    term_from: basicInfo.term_from.value,
-    term_to: basicInfo.term_to.value,
-    place: basicInfo.place.value,
-    qual_category: basicInfo.qual_category.value,
-    item: basicInfo.item.value,
-    grade: basicInfo.grade.value,
-    areas: basicInfo.areas.value,
-    budget: basicInfo.budget.value,
-  };
+  // 基本情報の抽出が失敗した場合は何も埋めない（他の抽出結果の保存は続ける）。
+  const extractedFields: Partial<ExtractedTenderBasicFields> = basicInfo
+    ? {
+        org_unit: basicInfo.org_unit.value,
+        submit_deadline: basicInfo.submit_deadline.value,
+        qa_deadline: basicInfo.qa_deadline.value,
+        bid_open_at: basicInfo.bid_open_at.value,
+        term_from: basicInfo.term_from.value,
+        term_to: basicInfo.term_to.value,
+        place: basicInfo.place.value,
+        qual_category: basicInfo.qual_category.value,
+        item: basicInfo.item.value,
+        grade: basicInfo.grade.value,
+        areas: basicInfo.areas.value,
+        budget: basicInfo.budget.value,
+      }
+    : {};
   const patch = mergeBasicInfoIntoTender(currentFields, extractedFields);
 
   // タスク2-3b：期限の前後関係・和暦変換ミスの検出。コネクタの確定値とAI解析で新たに
@@ -159,12 +206,21 @@ export async function analyzeTender(tenderId: string): Promise<AnalyzeTenderResu
     qaDeadline: effectiveDates.qa_deadline,
     bidOpenAt: effectiveDates.bid_open_at,
   });
-  const needsReview = dateIssues.length > 0;
-  const reviewReasons = dateIssues.map((i) => i.message);
+  // 一部のプロンプトが失敗した案件も「要確認」にする。画面から抜けている項目に気づけるようにするため。
+  const reviewReasons = [...dateIssues.map((i) => i.message), ...failures.map((f) => f.message)];
+  const needsReview = reviewReasons.length > 0;
 
   const { error: updateError } = await client
     .from("tenders")
-    .update({ ...patch, needs_review: needsReview, review_reasons: reviewReasons, collect_status: "解析完了" })
+    .update({
+      ...patch,
+      needs_review: needsReview,
+      review_reasons: reviewReasons,
+      collect_status: "解析完了",
+      // 失敗を握りつぶさない（CLAUDE.md）。全部成功したときは前回の失敗記録を消す。
+      failure_code: failures.length > 0 ? "PARSE_INVALID" : null,
+      failure_reason: failures.length > 0 ? failures.map((f) => f.message).join(" / ") : null,
+    })
     .eq("id", tenderId);
   if (updateError) throw new Error(`tendersの更新に失敗しました: ${updateError.message}`);
 
@@ -182,11 +238,12 @@ export async function analyzeTender(tenderId: string): Promise<AnalyzeTenderResu
     tender_id: tenderId,
     version,
     model: MODEL_NAME,
-    qualifications: qualifications.qualifications,
-    conditions: qualifications.conditions,
-    trades: lots.trades_summary,
-    notes: notes.notes,
-    raw: { basicInfo, qualifications, lots, forms, notes },
+    qualifications: qualifications?.qualifications ?? [],
+    conditions: qualifications?.conditions ?? [],
+    // 業種名の付かないまとめ行は見積依頼に使えないため除く（元の出力は raw に残る）。
+    trades: (lots?.trades_summary ?? []).filter((t) => t.trade !== null),
+    notes: notes?.notes ?? [],
+    raw: { basicInfo, qualifications, lots, forms, notes, failures },
   });
   if (analysisError) throw new Error(`tender_analysesの保存に失敗しました: ${analysisError.message}`);
 
@@ -194,13 +251,16 @@ export async function analyzeTender(tenderId: string): Promise<AnalyzeTenderResu
   const { error: deleteFormsError } = await client.from("tender_forms").delete().eq("tender_id", tenderId);
   if (deleteFormsError) throw new Error(`tender_formsの削除に失敗しました: ${deleteFormsError.message}`);
 
-  if (forms.forms.length > 0) {
+  const formRows = forms?.forms ?? [];
+  if (formRows.length > 0) {
     const { error: insertFormsError } = await client.from("tender_forms").insert(
-      forms.forms.map((f) => ({
+      formRows.map((f) => ({
         tender_id: tenderId,
         name: f.name,
         source: f.form_no,
-        required: f.required,
+        // 必須かどうかを判断できなかった書類は必須として残す。§4は再現率優先で
+        // 「人が消す方が、漏れて失格になるより安全」としており、列も not null default true。
+        required: f.required ?? true,
         note: f.note,
       })),
     );
@@ -212,7 +272,7 @@ export async function analyzeTender(tenderId: string): Promise<AnalyzeTenderResu
   if (deleteLotsError) throw new Error(`tender_lotsの削除に失敗しました: ${deleteLotsError.message}`);
 
   const lotRows: LotRow[] = dedupeLotsByLineNo(
-    lots.lots.map((l) => ({
+    (lots?.lots ?? []).map((l) => ({
       line_no: l.line_no,
       item: l.item,
       spec: l.spec,
@@ -233,9 +293,10 @@ export async function analyzeTender(tenderId: string): Promise<AnalyzeTenderResu
     tenderId,
     analysisVersion: version,
     tenderFieldsFilled: Object.keys(patch),
-    formsCount: forms.forms.length,
+    formsCount: formRows.length,
     lotsCount: lotRows.length,
     needsReview,
     reviewReasons,
+    failedPrompts: failures.map((f) => f.promptName),
   };
 }

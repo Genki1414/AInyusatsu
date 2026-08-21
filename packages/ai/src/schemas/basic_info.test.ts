@@ -137,3 +137,48 @@ describe("basicInfoSchema", () => {
     expect(result.success).toBe(true);
   });
 });
+
+describe("basicInfoSchema（受け取り側の寛容さ）", () => {
+  const emptyField = { value: null, quote: null, source: null };
+  const minimal = {
+    name: emptyField,
+    agency: emptyField,
+    org_unit: emptyField,
+    notice_no: emptyField,
+    notice_date: emptyField,
+    submit_deadline: emptyField,
+    qa_deadline: emptyField,
+    bid_open_at: emptyField,
+    term_from: emptyField,
+    term_to: emptyField,
+    place: emptyField,
+    qual_category: emptyField,
+    item: emptyField,
+    grade: emptyField,
+    areas: emptyField,
+    budget: { value: null, disclosed: null, quote: null, source: null },
+    jv_allowed: emptyField,
+    electronic_bidding: emptyField,
+  };
+
+  it("unknown_fieldsが省略されても空配列として受理する", () => {
+    const result = basicInfoSchema.safeParse(minimal);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.unknown_fields).toEqual([]);
+  });
+
+  it("引用・出典のキーが省略されてもnullとして受理する", () => {
+    const result = basicInfoSchema.safeParse({ ...minimal, place: { value: "静岡県" } });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.place.source).toBeNull();
+  });
+
+  it("予定価格に小数が付いていても円単位の整数に丸める（budgetはbigint）", () => {
+    const result = basicInfoSchema.safeParse({
+      ...minimal,
+      budget: { value: 1234567.4, disclosed: true, quote: "1,234,567円", source: "公告 3" },
+    });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.budget.value).toBe(1234567);
+  });
+});
