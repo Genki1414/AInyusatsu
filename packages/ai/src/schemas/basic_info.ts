@@ -19,7 +19,10 @@ export const basicInfoSchema = z.object({
   qual_category: evidencedField(z.enum(QUAL_CATEGORIES).nullable()),
   item: evidencedField(z.string().nullable()),
   grade: evidencedField(z.string().nullable()),
-  areas: evidencedField(z.array(z.string())),
+  // 競争参加地域の記載が無い資料ではnullが返る（AI解析プロンプト集.md §全体ルール1）。
+  // 「判定できない（null）」と「地域の指定が無い（空配列）」は意味が違うので区別する
+  // （fit.tsは空配列を『地域の指定はありません』として満点にするため、混同すると誤判定になる）。
+  areas: evidencedField(z.array(z.string()).nullable()),
   budget: z.object({
     value: z.number().nullable(),
     // 予定価格に一切触れていない資料では、公表・非公表の別も判断できないためnullが返る
