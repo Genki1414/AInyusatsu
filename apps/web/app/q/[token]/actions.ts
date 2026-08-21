@@ -138,9 +138,20 @@ async function sendDocumentsAndNotify(supabase: Supabase, ctx: QuoteContext): Pr
     .not("storage_key", "is", null)
     .returns<{ kind: string; storage_key: string }[]>();
 
+  // downloadを付けてContent-Disposition: attachmentにする。付けないと、保存時のcontent-typeに
+  // よってはブラウザがPDFを開かずに中身をそのまま表示してしまう（実機で確認）。
+  // ファイル名はStorage上のハッシュ名ではなく、資料の種別が分かる名前にする。
+  const usedNames = new Map<string, number>();
   const links: string[] = [];
   for (const doc of documents ?? []) {
-    const { data: signed } = await supabase.storage.from(BUCKET).createSignedUrl(doc.storage_key, SIGNED_URL_TTL_SECONDS);
+    const ext = doc.storage_key.includes(".") ? `.${doc.storage_key.split(".").pop()}` : "";
+    const seen = usedNames.get(doc.kind) ?? 0;
+    usedNames.set(doc.kind, seen + 1);
+    const filename = seen === 0 ? `${doc.kind}${ext}` : `${doc.kind}_${seen + 1}${ext}`;
+
+    const { data: signed } = await supabase.storage
+      .from(BUCKET)
+      .createSignedUrl(doc.storage_key, SIGNED_URL_TTL_SECONDS, { download: filename });
     if (signed?.signedUrl) links.push(`【${doc.kind}】${signed.signedUrl}`);
   }
 
