@@ -4,6 +4,7 @@
 import { AppShell } from "@/components/AppShell";
 import { Panel } from "@/components/ui";
 import { requireOrgContext } from "@/lib/auth";
+import { CompanyForm } from "./company-form";
 import { QualificationsForm, type QualificationsFormProfile } from "./qualifications-form";
 
 const EMPTY_PROFILE: QualificationsFormProfile = { qual_categories: [], grades: {}, items: [], areas: [], qual_valid_to: null };
@@ -19,6 +20,8 @@ export default async function QualificationsPage() {
 
   return (
     <AppShell active="qualifications" orgName={orgName}>
+      <CompanyForm orgName={orgName} />
+
       <Panel title="これから資格を取る方へ">
         <ol className="space-y-2">
           {[
