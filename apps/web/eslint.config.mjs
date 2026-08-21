@@ -13,6 +13,13 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  {
+    rules: {
+      // useActionState のサーバーアクションは (prevState, formData) の形が決まっており、
+      // 使わない引数も省略できない。_ 始まりの名前は「使わないことを明示している」ものとして扱う。
+      "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrorsIgnorePattern: "^_" }],
+    },
+  },
 ]);
 
 export default eslintConfig;
