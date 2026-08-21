@@ -141,6 +141,8 @@ async function saveDocuments(
           kind: doc.kind,
           fetched: true,
           storage_key: storageKey,
+          // 協力会社へ資料を送るときの表示名に使う（種別だけでは中身が分からないため）。
+          filename: doc.filename,
           sha256,
           fetched_at: new Date().toISOString(),
         });

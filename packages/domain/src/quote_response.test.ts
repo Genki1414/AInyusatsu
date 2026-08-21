@@ -73,23 +73,43 @@ describe("sortDocumentsByKind", () => {
 });
 
 describe("documentFilenames", () => {
-  it("種別＋拡張子のファイル名にする", () => {
-    const result = documentFilenames([{ kind: "仕様書", storage_key: "tenders/abc/spec_9f8e.pdf" }]);
-    expect(result[0].filename).toBe("仕様書.pdf");
+  it("元のファイル名があればそれを表示名にする", () => {
+    const result = documentFilenames([
+      { kind: "その他", storage_key: "tenders/abc/other_9f8e.pdf", filename: "06_数量総括表.pdf" },
+    ]);
+    expect(result[0].label).toBe("06_数量総括表.pdf");
   });
 
-  it("同じ種別が複数あれば連番を付ける", () => {
+  it("元のファイル名が無ければ種別＋拡張子で代替する", () => {
+    const result = documentFilenames([{ kind: "仕様書", storage_key: "tenders/abc/spec_9f8e.pdf" }]);
+    expect(result[0].label).toBe("仕様書.pdf");
+  });
+
+  it("空文字のファイル名は無いものとして扱う", () => {
+    const result = documentFilenames([{ kind: "仕様書", storage_key: "tenders/abc/spec_9f8e.pdf", filename: "   " }]);
+    expect(result[0].label).toBe("仕様書.pdf");
+  });
+
+  it("種別で代替するとき、同じ種別が複数あれば連番を付ける", () => {
     const result = documentFilenames([
       { kind: "仕様書", storage_key: "tenders/abc/spec_1.pdf" },
       { kind: "仕様書", storage_key: "tenders/abc/spec_2.pdf" },
       { kind: "様式", storage_key: "tenders/abc/form_1.docx" },
     ]);
-    expect(result.map((r) => r.filename)).toEqual(["仕様書.pdf", "仕様書_2.pdf", "様式.docx"]);
+    expect(result.map((r) => r.label)).toEqual(["仕様書.pdf", "仕様書_2.pdf", "様式.docx"]);
+  });
+
+  it("元のファイル名がある行は連番の対象にしない", () => {
+    const result = documentFilenames([
+      { kind: "その他", storage_key: "tenders/abc/a.pdf", filename: "02_入札公告.pdf" },
+      { kind: "その他", storage_key: "tenders/abc/b.pdf" },
+    ]);
+    expect(result.map((r) => r.label)).toEqual(["02_入札公告.pdf", "その他.pdf"]);
   });
 
   it("拡張子が無ければ種別だけにする（パス中のドットを拡張子と誤認しない）", () => {
     const result = documentFilenames([{ kind: "公告", storage_key: "tenders/a.b/notice" }]);
-    expect(result[0].filename).toBe("公告");
+    expect(result[0].label).toBe("公告");
   });
 });
 
@@ -103,8 +123,8 @@ describe("buildDocumentsEmail", () => {
     dueAtLabel: "2026/8/28 11:17",
     expiresAtLabel: "2026/9/4 11:17",
     links: [
-      { kind: "公告", url: "https://example.com/a" },
-      { kind: "仕様書", url: "https://example.com/b" },
+      { kind: "公告", label: "02_入札公告.pdf", url: "https://example.com/a" },
+      { kind: "仕様書", label: "05_特記仕様書.pdf", url: "https://example.com/b" },
     ],
   };
 
@@ -117,8 +137,10 @@ describe("buildDocumentsEmail", () => {
     expect(body).toContain("東北三上機材株式会社 様");
     expect(body).toContain("「須崎庁舎浄化槽排水ポンプ修繕」（設備保守）の資料をお送りいたします。");
     expect(body).toContain("2026/9/4 11:17 まで有効です");
-    expect(body).toContain("【公告】https://example.com/a");
-    expect(body).toContain("【仕様書】https://example.com/b");
+    expect(body).toContain("【公告】02_入札公告.pdf");
+    expect(body).toContain("https://example.com/a");
+    expect(body).toContain("【仕様書】05_特記仕様書.pdf");
+    expect(body).toContain("https://example.com/b");
     expect(body).toContain("お見積りの回答期限：2026/8/28 11:17");
   });
 

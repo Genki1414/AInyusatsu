@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   classifyDocumentKind,
+  classifyDocumentKindByFilename,
   isSearchTruncated,
   normalizeGepsNoticeDate,
   normalizeGepsTender,
@@ -32,8 +33,33 @@ describe("classifyDocumentKind", () => {
     expect(classifyDocumentKind("仕様書関連", "内訳書.pdf")).toBe("数量表");
   });
 
-  it("未知の資料種別はその他になる", () => {
+  it("未知の資料種別で、ファイル名からも判断できなければその他になる", () => {
     expect(classifyDocumentKind("謎の分類", "何か.pdf")).toBe("その他");
+  });
+
+  // 添付一覧のスクレイピングに失敗すると資料種別が空になり、全ての資料が「その他」に
+  // 落ちてしまうため、ファイル名からの判定を併用する（実機で発生）。
+  it("資料種別が取れない場合はファイル名から判定する", () => {
+    const cases: [string, string][] = [
+      ["02_入札公告.pdf", "公告"],
+      ["03_入札説明書.pdf", "入札説明書"],
+      ["05_特記仕様書.pdf", "仕様書"],
+      ["06_数量総括表.pdf", "数量表"],
+      ["04_提出様式.docx", "様式"],
+    ];
+    for (const [filename, expected] of cases) {
+      expect(classifyDocumentKindByFilename(filename)).toBe(expected);
+      expect(classifyDocumentKind("", filename)).toBe(expected);
+    }
+  });
+
+  it("ファイル名判定でも、数量表は仕様書より先に判定する", () => {
+    expect(classifyDocumentKindByFilename("仕様書別紙_数量内訳.pdf")).toBe("数量表");
+  });
+
+  it("ファイル名から判断できなければ推測せずその他にする", () => {
+    expect(classifyDocumentKindByFilename("01_配布目録.pdf")).toBe("その他");
+    expect(classifyDocumentKindByFilename("08_契約書案.docx")).toBe("その他");
   });
 });
 

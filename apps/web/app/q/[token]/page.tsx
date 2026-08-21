@@ -6,6 +6,7 @@
 import { notFound } from "next/navigation";
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
 import { QuoteResponseForm } from "./quote-response-form";
+import { RecordOpened } from "./opened";
 
 export const metadata = { robots: { index: false, follow: false } };
 
@@ -92,6 +93,7 @@ export default async function QuoteResponsePage({ params }: { params: Promise<{ 
 
   return (
     <main className="mx-auto flex min-h-screen max-w-xl flex-col gap-4 p-6">
+      <RecordOpened token={token} />
       <div>
         <p className="text-sm text-slate-500">{org?.name ?? "発注元企業"}からの見積依頼</p>
         <h1 className="mt-1 text-xl font-semibold text-slate-800">{tender?.name ?? "案件名未確認"}</h1>
