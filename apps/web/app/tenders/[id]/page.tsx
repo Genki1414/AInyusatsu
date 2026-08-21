@@ -4,7 +4,7 @@
 // 提出書類／結果 の9つ。進め方・質問・見積比較・提出書類・結果は、原価集計（タスク4-5）や
 // 質問案生成など未着手の機能に依存するため、引き続き含めない。見積依頼（タスク4-1）は
 // tender_lots・partnersだけで実装できるためこのPRで追加する。
-import { AlertTriangle, FileText, Send, Sparkles, Target } from "lucide-react";
+import { AlertTriangle, FileText, ListChecks, Send, Sparkles, Target } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { groupLotsByTrade } from "@ai-nyusatsu-bu/domain";
@@ -16,7 +16,8 @@ import { AnalysisTab, type AnalysisTabAnalysis } from "./analysis-tab";
 import { DOC_KINDS, DocsTab, type TenderDocumentRow, type TenderLotRow } from "./docs-tab";
 import { FitTab, type FitTabProposal } from "./fit-tab";
 import { getPartnerRecommendations, type PartnerRecommendationResult } from "./recommend";
-import { RequestTab, type RequestTabPartner, type SentQuoteRequest } from "./request-tab";
+import { RequestTab, type RequestTabPartner } from "./request-tab";
+import { SentRequestsTab, type SentQuoteRequest } from "./sent-requests-tab";
 
 type TenderRow = {
   id: string;
@@ -65,6 +66,7 @@ const TABS = [
   { key: "docs", label: "資料", icon: FileText },
   { key: "analysis", label: "公告の中身", icon: Sparkles },
   { key: "request", label: "見積依頼", icon: Send },
+  { key: "quote-status", label: "見積状況", icon: ListChecks },
 ] as const;
 type TabKey = (typeof TABS)[number]["key"];
 
@@ -145,9 +147,9 @@ export default async function TenderDetailPage({
       ? await getPartnerRecommendations(supabase, orgId, id, tender.item, tender.place, tradeGroups, partners ?? [])
       : {};
 
-  // 送信済みの見積依頼と、協力会社からの回答状況（見積依頼タブに一覧表示する）。
+  // 送信済みの見積依頼と、協力会社からの回答状況（見積状況タブに一覧表示する）。
   const { data: sentRequestRows } =
-    tab === "request"
+    tab === "quote-status"
       ? await supabase
           .from("quote_requests")
           .select("id, trade, due_at, sent_at, quotes(id, amount, declined, documents_requested, replied_at, memo, partners(name))")
@@ -281,9 +283,9 @@ export default async function TenderDetailPage({
           suggestedDueAt={suggestedDueAt}
           officialStatus={officialStatus}
           recommendations={recommendations}
-          sentRequests={sentRequests}
         />
       )}
+      {tab === "quote-status" && <SentRequestsTab sentRequests={sentRequests} />}
     </AppShell>
   );
 }

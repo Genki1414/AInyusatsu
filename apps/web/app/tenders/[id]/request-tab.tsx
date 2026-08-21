@@ -205,63 +205,6 @@ function PartnerPicker({
   );
 }
 
-export type SentQuoteRequest = {
-  id: string;
-  trade: string;
-  due_at: string | null;
-  sent_at: string | null;
-  quotes: {
-    id: string;
-    amount: number | null;
-    declined: boolean;
-    documents_requested: boolean;
-    replied_at: string | null;
-    memo: string | null;
-    partner: { name: string } | null;
-  }[];
-};
-
-function quoteStatus(q: SentQuoteRequest["quotes"][number]): { label: string; tone: "slate" | "amber" | "rose" | "green" } {
-  if (!q.replied_at) return { label: "未回答", tone: "slate" };
-  if (q.declined) return { label: "見送り", tone: "rose" };
-  if (q.documents_requested) return { label: "資料請求", tone: "amber" };
-  if (q.amount != null) return { label: `見積あり（${q.amount.toLocaleString("ja-JP")}円）`, tone: "green" };
-  return { label: "回答あり", tone: "green" };
-}
-
-// 過去に送信した見積依頼と、協力会社からの回答状況（未回答／見送り／資料請求）の一覧。
-// 送信フォームとは別に、送信済みぶんを振り返るための読み取り専用の表示。
-function SentRequestsPanel({ sentRequests }: { sentRequests: SentQuoteRequest[] }) {
-  if (sentRequests.length === 0) return null;
-  return (
-    <Panel title="送信済みの見積依頼">
-      <div className="space-y-3">
-        {sentRequests.map((req) => (
-          <div key={req.id} className="rounded border border-slate-100 p-2">
-            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-              <span className="font-medium text-slate-800">{req.trade}</span>
-              <span>送信：{req.sent_at ? new Date(req.sent_at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" }) : "未確認"}</span>
-              <span>回答期限：{req.due_at ? new Date(req.due_at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" }) : "未確認"}</span>
-            </div>
-            <ul className="mt-1.5 space-y-1">
-              {req.quotes.map((q) => {
-                const status = quoteStatus(q);
-                return (
-                  <li key={q.id} className="flex flex-wrap items-center gap-1.5 text-xs text-slate-700">
-                    <span>{q.partner?.name ?? "（削除された協力会社）"}</span>
-                    <Pill tone={status.tone}>{status.label}</Pill>
-                    {q.memo && <span className="text-slate-400">備考：{q.memo}</span>}
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        ))}
-      </div>
-    </Panel>
-  );
-}
-
 export function RequestTab({
   tenderId,
   senderOrgName,
@@ -277,7 +220,6 @@ export function RequestTab({
   suggestedDueAt,
   officialStatus,
   recommendations,
-  sentRequests,
 }: {
   tenderId: string;
   senderOrgName: string;
@@ -293,7 +235,6 @@ export function RequestTab({
   suggestedDueAt: string | null;
   officialStatus: "未取得" | "申請中" | "取得済";
   recommendations: Record<string, PartnerRecommendationResult | null>;
-  sentRequests: SentQuoteRequest[];
 }) {
   const boundAction = sendQuoteRequests.bind(null, tenderId);
   const [state, formAction, pending] = useActionState(boundAction, initialState);
@@ -317,19 +258,14 @@ export function RequestTab({
 
   if (tradeGroups.length === 0) {
     return (
-      <div className="space-y-3">
-        <SentRequestsPanel sentRequests={sentRequests} />
-        <Panel title="見積依頼">
-          <p className="text-xs text-slate-500">数量表が無いため、見積依頼を作成できません。</p>
-        </Panel>
-      </div>
+      <Panel title="見積依頼">
+        <p className="text-xs text-slate-500">数量表が無いため、見積依頼を作成できません。</p>
+      </Panel>
     );
   }
 
   return (
-    <div className="space-y-3">
-      <SentRequestsPanel sentRequests={sentRequests} />
-      <form action={formAction} className="space-y-3">
+    <form action={formAction} className="space-y-3">
         {tradeGroups.map((group) => {
           const candidates = partners.filter((p) => p.email);
           const rec = recommendations[group.trade] ?? null;
@@ -416,6 +352,5 @@ export function RequestTab({
           <Pill tone="amber">実際にメールが送信されます</Pill>
         </div>
       </form>
-    </div>
   );
 }
