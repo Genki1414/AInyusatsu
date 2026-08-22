@@ -1,0 +1,117 @@
+// 解析待ちの案件をまとめて解析する（常駐ワーカー用）。
+//
+// 手で1件ずつ叩いていた analyzeTender を、自動実行のために束ねたもの。
+// 対象は「資料が取得済みで、テキスト抽出も済んでいる案件」（collect_status = 取得済）。
+// analyzeTender が成功すると 解析完了 に進むので、次回は拾われない。
+//
+// 【日次の上限について】
+// 実測で1案件あたり約69円（プロンプトキャッシュ実装後・平均サイズ）。自動で回すと
+// 請求が見えにくくなるため、1回の実行で処理する件数に上限を設ける。
+// 上限に達した分は次回に回すだけで、失われはしない。
+// 全件を解析したい場合は ANALYZE_DAILY_LIMIT を引き上げる（0 にすると解析を止められる）。
+
+import { createServiceClient } from "@ai-nyusatsu-bu/db";
+import { estimateCostYen, summarizeUsage, type UsageSummary } from "@ai-nyusatsu-bu/ai";
+import { analyzeTender } from "./analyze_tender";
+
+/** 1回の実行で解析する件数の既定値。実測 約69円/件 なので、50件で約3,500円。 */
+export const DEFAULT_ANALYZE_LIMIT = 50;
+
+export type AnalyzePendingSummary = {
+  /** 解析できた件数 */
+  analyzed: number;
+  /** 解析に失敗した件数（理由は案件側に記録済み） */
+  failed: number;
+  /** 上限に達して次回に回した件数 */
+  deferred: number;
+  /** 今回の推定費用（円） */
+  estimatedYen: number;
+};
+
+type PendingRow = { id: string; name: string };
+
+/** 環境変数から1回あたりの上限を読む。数値でなければ既定値に落とす。 */
+export function analyzeLimitFromEnv(raw: string | undefined = process.env.ANALYZE_DAILY_LIMIT): number {
+  if (raw === undefined || raw.trim() === "") return DEFAULT_ANALYZE_LIMIT;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    console.warn(`[analyze_pending] ANALYZE_DAILY_LIMIT が不正です（${raw}）。既定の${DEFAULT_ANALYZE_LIMIT}件を使います`);
+    return DEFAULT_ANALYZE_LIMIT;
+  }
+  return parsed;
+}
+
+/**
+ * 解析待ちの案件を、提出期限が近い順に解析する。
+ * 1件の失敗で全体を止めない（理由は analyzeTender 側で案件に記録される）。
+ */
+export async function runAnalyzePending(limit: number = analyzeLimitFromEnv()): Promise<AnalyzePendingSummary> {
+  const client = createServiceClient();
+
+  if (limit === 0) {
+    console.warn("[analyze_pending] ANALYZE_DAILY_LIMIT=0 のため解析を行いません");
+    return { analyzed: 0, failed: 0, deferred: 0, estimatedYen: 0 };
+  }
+
+  // 上限より1件多く引いて、次回に回した分があるかを知る。
+  const { data: pending, error } = await client
+    .from("tenders")
+    .select("id, name, tender_documents!inner(id)")
+    .eq("collect_status", "取得済")
+    .not("tender_documents.extracted_text", "is", null)
+    // 提出期限が近いものから。期限の無い案件は後回しにする
+    .order("submit_deadline", { ascending: true, nullsFirst: false })
+    .limit(limit + 1)
+    .returns<PendingRow[]>();
+  if (error) throw new Error(`解析待ちの案件の取得に失敗しました: ${error.message}`);
+
+  // inner join のぶん同じ案件が重複しうるので、ここで一意にする。
+  const unique = [...new Map((pending ?? []).map((t) => [t.id, t])).values()];
+  const targets = unique.slice(0, limit);
+  const deferred = Math.max(0, unique.length - targets.length);
+
+  console.log(`[analyze_pending] 解析待ち ${unique.length}件のうち ${targets.length}件を処理します（上限${limit}件）`);
+
+  const usages: UsageSummary[] = [];
+  let analyzed = 0;
+  let failed = 0;
+
+  for (const tender of targets) {
+    try {
+      const result = await analyzeTender(tender.id);
+      usages.push(result.usage);
+      analyzed++;
+    } catch (err) {
+      // 1件の失敗で残りを止めない。理由は analyzeTender が案件へ記録済み。
+      failed++;
+      console.error(
+        `[analyze_pending] 解析に失敗しました（tender=${tender.id} ${tender.name}）: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  const estimatedYen = usages.reduce((total, usage) => total + estimateCostYen(usage), 0);
+  console.log(
+    `[analyze_pending] 完了：解析${analyzed}件 / 失敗${failed}件 / 次回へ${deferred}件 / 推定費用 ${estimatedYen.toLocaleString("ja-JP")}円`,
+  );
+  if (deferred > 0) {
+    // 黙って積み残さない。上限が実態に合っていないなら気づけるようにする。
+    console.warn(
+      `[analyze_pending] 上限に達したため${deferred}件を次回に回しました。全件を処理するには ANALYZE_DAILY_LIMIT を引き上げてください`,
+    );
+  }
+
+  return { analyzed, failed, deferred, estimatedYen };
+}
+
+/** 複数案件ぶんのトークン消費をまとめた集計（ログ用）。 */
+export function totalUsage(usages: UsageSummary[]): UsageSummary {
+  return summarizeUsage(
+    usages.map((u) => ({
+      inputTokens: u.inputTokens,
+      cacheCreationTokens: u.cacheCreationTokens,
+      cacheReadTokens: u.cacheReadTokens,
+      outputTokens: u.outputTokens,
+    })),
+  );
+}

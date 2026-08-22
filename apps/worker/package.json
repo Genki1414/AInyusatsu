@@ -2,11 +2,13 @@
   "name": "worker",
   "version": "0.0.0",
   "private": true,
-  "description": "常駐ワーカー（Railway）。pg-bossでジョブキューを実行する。connectors/jobs はタスク1-5以降で実装。",
+  "description": "常駐ワーカー（Railway）。pg-bossでジョブを定時実行する。",
   "type": "module",
   "main": "./src/index.ts",
   "scripts": {
-    "start": "echo \"(未実装) pg-bossの起動はタスク1-5以降で実装\" && exit 0",
+    "start": "tsx src/index.ts",
+    "start:local": "tsx --env-file=.env.local src/index.ts",
+    "test": "vitest run",
     "kkj:sync": "tsx --env-file=.env.local scripts/run-kkj-sync.ts",
     "geps:crawl": "tsx --env-file=.env.local scripts/run-geps-crawl.ts",
     "awards:import": "tsx --env-file=.env.local scripts/run-import-awards.ts",
@@ -26,6 +28,7 @@
     "adm-zip": "^0.5.16",
     "fast-xml-parser": "^4.5.1",
     "pdf-parse": "^2.4.5",
+    "pg-boss": "^12.27.0",
     "playwright": "^1.49.1",
     "tesseract.js": "^7.0.0"
   },
@@ -33,6 +36,7 @@
     "@types/adm-zip": "^0.5.7",
     "@types/node": "^20",
     "tsx": "^4.19.2",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.11"
   }
 }
