@@ -4,6 +4,7 @@ export * from "./extract";
 export * from "./analyze";
 export * from "./usage";
 export * from "./batch_plan";
+export * from "./document_budget";
 export * from "./recommend";
 export * from "./schemas/basic_info";
 export * from "./schemas/qualifications";
