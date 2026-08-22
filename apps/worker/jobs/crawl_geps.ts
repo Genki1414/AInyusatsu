@@ -11,6 +11,7 @@
 
 import { createHash } from "node:crypto";
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
+import { recordAgencySuccess } from "./coverage_check";
 import type { DocKind, NormalizedGepsTender } from "@ai-nyusatsu-bu/domain";
 import { crawlDate, type GepsDocument } from "../connectors/geps";
 
@@ -215,6 +216,8 @@ export async function runDailyGepsCrawl(dateIso: string): Promise<CrawlDateSumma
   let documents = 0;
   let failedDocs = 0;
   let skipped = 0;
+  // 取得できた機関。欠測検知（coverage_check）の基準になる last_success_at を更新する
+  const succeededAgencies = new Set<string>();
   let truncated = false;
   let status: CrawlDateSummary["status"] = "completed";
 
@@ -257,6 +260,7 @@ export async function runDailyGepsCrawl(dateIso: string): Promise<CrawlDateSumma
 
       await ensureAgency(client, tender);
       const tenderId = await upsertTender(client, tender);
+      succeededAgencies.add(tender.agencyId);
       merged++;
 
       // 資料が無い理由を2つに分けて記録する（CLAUDE.md 最重要の前提7）。
@@ -295,6 +299,9 @@ export async function runDailyGepsCrawl(dateIso: string): Promise<CrawlDateSumma
         });
       }
     }
+
+    // 取れたことを記録する。ここが無いと「取れていない」と区別がつかない
+    await recordAgencySuccess(client, succeededAgencies);
 
     // 打ち切り（500件到達）は§6の既定コードのどれにも該当しないため、crawl_errorsには
     // 積まずcrawl_runs.status="truncated"のみで表現する（要対応の記録として残す）。
