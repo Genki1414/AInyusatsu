@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CACHE_WRITE_MULTIPLIER_1H,
+  estimateCostYen,
   formatUsageSummary,
   summarizeUsage,
   type UsageSummary,
@@ -73,5 +74,28 @@ describe("formatUsageSummary", () => {
     expect(line).toContain("入力コスト削減 65.6%");
     expect(line).toContain("126,300");
     expect(line).toContain("367,500");
+  });
+});
+
+describe("estimateCostYen", () => {
+  it("キャッシュの重みを織り込んだ入力と、出力から円の概算を出す", () => {
+    // 課金相当 126,300 × $3/1M ＋ 出力 15,000 × $15/1M ＝ $0.6039 → 約91円
+    expect(estimateCostYen(summarizeUsage(CACHED_RUN))).toBe(91);
+  });
+
+  it("キャッシュが効いていないと同じ内容でも高くなる", () => {
+    const uncached = summarizeUsage([
+      { inputTokens: 367_500, cacheCreationTokens: 0, cacheReadTokens: 0, outputTokens: 15_000 },
+    ]);
+    expect(estimateCostYen(uncached)).toBeGreaterThan(estimateCostYen(summarizeUsage(CACHED_RUN)));
+  });
+
+  it("為替を変えられる（丸めのぶん厳密な倍にはならない）", () => {
+    const s = summarizeUsage(CACHED_RUN);
+    expect(estimateCostYen(s, 300)).toBeCloseTo(estimateCostYen(s, 150) * 2, -1);
+  });
+
+  it("消費が無ければ0円", () => {
+    expect(estimateCostYen(summarizeUsage([]))).toBe(0);
   });
 });

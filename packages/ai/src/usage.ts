@@ -73,3 +73,25 @@ export function formatUsageSummary(summary: UsageSummary): string {
     `＜ キャッシュ無し ${summary.uncachedInputEquivalent.toLocaleString("ja-JP")}）`
   );
 }
+
+/**
+ * claude-sonnet-5 の料金（USD / 100万トークン）。
+ * 自動実行では請求が見えにくくなるため、実行のたびに概算を出せるようにしておく。
+ * 料金改定があればここを直す（導入価格は2026-08-31まで 入力$2.00 / 出力$10.00 だった）。
+ */
+export const INPUT_USD_PER_MTOK = 3;
+export const OUTPUT_USD_PER_MTOK = 15;
+
+/** 概算に使う為替。厳密さは要らないので既定値を持たせる。 */
+export const DEFAULT_USD_JPY = 150;
+
+/**
+ * トークン消費から日本円の概算を出す。
+ * キャッシュの重みは billableInputEquivalent に織り込み済み。
+ */
+export function estimateCostYen(summary: UsageSummary, usdJpy: number = DEFAULT_USD_JPY): number {
+  const usd =
+    (summary.billableInputEquivalent * INPUT_USD_PER_MTOK) / 1_000_000 +
+    (summary.outputTokens * OUTPUT_USD_PER_MTOK) / 1_000_000;
+  return Math.round(usd * usdJpy);
+}
