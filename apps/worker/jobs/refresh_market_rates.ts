@@ -4,6 +4,14 @@
 // awards から直近 periodMonths（既定24か月）ぶんの行を読み、packages/domain の
 // computeMarketRates（純関数・単体テスト済み）で品目×機関区分×金額帯ごとに
 // 中央値・平均・25%点・75%点を算出し、market_rates へ upsert する。
+//
+// 【現状 0件になる】
+// 落札実績オープンデータには予定価格・品目分類・調達機関名称の列が無い
+// （docs/reference/落札実績オープンデータ_列定義（推定）.md §1、2026-08-01にユーザーと合意）。
+// そのため awards.item / agency_class / rate は常に null で、集計対象が1件も残らない。
+// これは不具合ではなく、このデータソースの限界。黙って 0 を返すと原因が分からないので、
+// どの条件で何件落ちたかを出す。予定価格・品目を持つ別のデータソースを
+// procurement_no で突き合わせられるようになったら再開する。
 
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
 import { computeMarketRates, type NormalizedAward } from "@ai-nyusatsu-bu/domain";
@@ -48,6 +56,34 @@ export type RefreshOutcome = {
   awardsConsidered: number;
 };
 
+/**
+ * 集計対象が0件だった理由を、条件ごとの件数で示す。
+ * 「awards が空なのか」「列が埋まっていないのか」を切り分けられるようにする。
+ */
+async function explainEmptyResult(client: ReturnType<typeof createServiceClient>, cutoffIso: string): Promise<void> {
+  const countWhere = async (label: string, build: (q: ReturnType<typeof baseQuery>) => ReturnType<typeof baseQuery>) => {
+    const { count } = await build(baseQuery(client));
+    return `${label}=${count ?? 0}`;
+  };
+  const baseQuery = (c: ReturnType<typeof createServiceClient>) =>
+    c.from("awards").select("id", { count: "exact", head: true });
+
+  const parts = await Promise.all([
+    countWhere("全件", (q) => q),
+    countWhere("直近期間内", (q) => q.gte("opened_at", cutoffIso)),
+    countWhere("品目あり", (q) => q.not("item", "is", null)),
+    countWhere("機関区分あり", (q) => q.not("agency_class", "is", null)),
+    countWhere("落札率あり", (q) => q.not("rate", "is", null)),
+  ]);
+
+  console.warn(`[refresh_market_rates] 集計対象が0件です（${parts.join(" / ")}）`);
+  console.warn(
+    "[refresh_market_rates] 落札実績オープンデータには予定価格・品目分類・調達機関名称の列が無いため、" +
+      "このデータソースだけでは落札率の相場を算出できません" +
+      "（docs/reference/落札実績オープンデータ_列定義（推定）.md §1）",
+  );
+}
+
 export async function refreshMarketRates(periodMonths = DEFAULT_PERIOD_MONTHS): Promise<RefreshOutcome> {
   const client = createServiceClient();
   const asOfDate = new Date().toISOString().slice(0, 10);
@@ -69,6 +105,10 @@ export async function refreshMarketRates(periodMonths = DEFAULT_PERIOD_MONTHS): 
   }
 
   const awards = (data ?? []).map(toNormalizedAward);
+  if (awards.length === 0) {
+    // なぜ0件なのかを、条件ごとの件数で示す（握りつぶさない）
+    await explainEmptyResult(client, cutoffIso);
+  }
   const rows = computeMarketRates(awards, { periodMonths, asOfDate });
 
   if (rows.length > 0) {

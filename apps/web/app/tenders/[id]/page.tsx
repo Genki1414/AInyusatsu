@@ -14,14 +14,15 @@ import {
   classifyAgencyClass,
   documentAvailabilities,
   groupLotsByTrade,
-  pickAwardScale,
+  matchAwardsByName,
+  nameSearchNeedle,
   REQUIRED_DOC_KINDS,
   summarizeDocuments,
-  type AwardScale,
   type ChecklistForm,
   type DocumentCheck,
   type FormState,
   type MarketRate,
+  type MatchedAward,
 } from "@ai-nyusatsu-bu/domain";
 import { AppShell } from "@/components/AppShell";
 import { CopyButton } from "@/components/CopyButton";
@@ -107,41 +108,40 @@ async function loadMarketRate(
 }
 
 /**
- * 過去の落札額から規模感を出す（適合タブ）。
+ * 過去の落札実績を案件名で探す（適合タブ）。
  *
  * 国の入札は予定価格を原則として事前公表しないため tenders.budget はほとんど null。
- * 「いくらくらいの案件か」が分からないと参加を判断できないので、落札実績オープンデータ
- * （awards）の過去の落札額を代わりの目安にする。予定価格そのものではない点は画面で断る。
+ * 「いくらくらいの案件か」が分からないと参加を判断できない。
  *
- * 直近24か月ぶん（market_rates の period_months と揃える）。外れ値は除く。
- * 機関と品目の両方に一度で当てるため、条件をORで引いてから domain 側で絞り込む。
+ * 落札実績オープンデータには予定価格・品目分類・調達機関名称の列が無く
+ * （docs/reference/落札実績オープンデータ_列定義（推定）.md §1）、awards.item / agency_id は
+ * 常に null。そのため機関や品目では照合できない。代わりに案件名で照合する。
+ * 役務の案件は毎年度くり返されることが多く、年度の表記を外せば前年度の同じ案件が見つかる。
  */
-async function loadAwardScale(
+async function loadPastAwards(
   supabase: Awaited<ReturnType<typeof requireOrgContext>>["supabase"],
-  agencyId: string | null,
-  item: string | null,
-  now: Date,
-): Promise<AwardScale | null> {
-  if (agencyId === null && item === null) return null;
-
-  const since = new Date(now.getTime() - 730 * 86_400_000).toISOString().slice(0, 10);
-  const conditions = [
-    ...(agencyId === null ? [] : [`agency_id.eq.${agencyId}`]),
-    ...(item === null ? [] : [`item.eq.${item}`]),
-  ];
+  tenderName: string,
+): Promise<MatchedAward[]> {
+  const needle = nameSearchNeedle(tenderName);
+  // 短い名称で ilike をかけると関係ない案件を大量に拾うため、そのときは探さない
+  if (needle === null) return [];
 
   const { data } = await supabase
     .from("awards")
-    .select("amount, agency_id, item")
-    .or(conditions.join(","))
-    .eq("outlier", false)
-    .gte("opened_at", since)
-    .limit(2000)
-    .returns<{ amount: number; agency_id: string | null; item: string | null }[]>();
+    .select("name, amount, opened_at, winner_name")
+    .ilike("name", `%${needle.replace(/[%_,]/g, " ")}%`)
+    .order("opened_at", { ascending: false })
+    .limit(200)
+    .returns<{ name: string | null; amount: number; opened_at: string | null; winner_name: string | null }[]>();
 
-  return pickAwardScale(
-    (data ?? []).map((a) => ({ amount: a.amount, agencyId: a.agency_id, item: a.item })),
-    { agencyId, item },
+  return matchAwardsByName(
+    (data ?? []).map((a) => ({
+      name: a.name,
+      amount: a.amount,
+      openedAt: a.opened_at,
+      winnerName: a.winner_name,
+    })),
+    tenderName,
   );
 }
 
@@ -334,7 +334,7 @@ export default async function TenderDetailPage({
 
   // 同種案件の落札率（勝てそうかの目安）。営業品目・機関区分・金額帯がそろわないと引けない。
   const marketRate = tab === "cost" ? await loadMarketRate(supabase, tender.item, agencyName(tender.agencies), tender.budget) : null;
-  const awardScale = tab === "fit" ? await loadAwardScale(supabase, tender.agency_id, tender.item, new Date()) : null;
+  const pastAwards = tab === "fit" ? await loadPastAwards(supabase, tender.name) : [];
 
   const { data: org } =
     tab === "cost"
@@ -424,7 +424,7 @@ export default async function TenderDetailPage({
         ))}
       </div>
 
-      {tab === "fit" && <FitTab proposal={proposal} awardScale={awardScale} />}
+      {tab === "fit" && <FitTab proposal={proposal} pastAwards={pastAwards} />}
       {tab === "docs" && (
         <DocsTab
           availabilities={availabilities}
