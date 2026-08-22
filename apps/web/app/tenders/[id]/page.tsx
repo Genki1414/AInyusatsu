@@ -14,8 +14,10 @@ import {
   classifyAgencyClass,
   documentAvailabilities,
   groupLotsByTrade,
+  pickAwardScale,
   REQUIRED_DOC_KINDS,
   summarizeDocuments,
+  type AwardScale,
   type ChecklistForm,
   type DocumentCheck,
   type FormState,
@@ -36,6 +38,7 @@ import { SentRequestsTab, type SentQuoteRequest } from "./sent-requests-tab";
 
 type TenderRow = {
   id: string;
+  agency_id: string | null;
   name: string;
   org_unit: string | null;
   notice_no: string | null;
@@ -101,6 +104,45 @@ async function loadMarketRate(
     .maybeSingle<{ n: number; rate_avg: number | null }>();
   if (!data || data.rate_avg === null) return null;
   return { rate: data.rate_avg, n: data.n };
+}
+
+/**
+ * 過去の落札額から規模感を出す（適合タブ）。
+ *
+ * 国の入札は予定価格を原則として事前公表しないため tenders.budget はほとんど null。
+ * 「いくらくらいの案件か」が分からないと参加を判断できないので、落札実績オープンデータ
+ * （awards）の過去の落札額を代わりの目安にする。予定価格そのものではない点は画面で断る。
+ *
+ * 直近24か月ぶん（market_rates の period_months と揃える）。外れ値は除く。
+ * 機関と品目の両方に一度で当てるため、条件をORで引いてから domain 側で絞り込む。
+ */
+async function loadAwardScale(
+  supabase: Awaited<ReturnType<typeof requireOrgContext>>["supabase"],
+  agencyId: string | null,
+  item: string | null,
+  now: Date,
+): Promise<AwardScale | null> {
+  if (agencyId === null && item === null) return null;
+
+  const since = new Date(now.getTime() - 730 * 86_400_000).toISOString().slice(0, 10);
+  const conditions = [
+    ...(agencyId === null ? [] : [`agency_id.eq.${agencyId}`]),
+    ...(item === null ? [] : [`item.eq.${item}`]),
+  ];
+
+  const { data } = await supabase
+    .from("awards")
+    .select("amount, agency_id, item")
+    .or(conditions.join(","))
+    .eq("outlier", false)
+    .gte("opened_at", since)
+    .limit(2000)
+    .returns<{ amount: number; agency_id: string | null; item: string | null }[]>();
+
+  return pickAwardScale(
+    (data ?? []).map((a) => ({ amount: a.amount, agencyId: a.agency_id, item: a.item })),
+    { agencyId, item },
+  );
 }
 
 type SentQuoteRequestRow = {
@@ -177,7 +219,7 @@ export default async function TenderDetailPage({
     supabase
       .from("tenders")
       .select(
-        "id, name, org_unit, notice_no, item, grade, areas, budget, qa_deadline, submit_deadline, bid_open_at, place, term_from, term_to, source_url, connector_id, acquire_method, collect_status, needs_review, review_reasons, documents_checked_at, published_doc_kinds, documents_failure_code, documents_failure_reason, agencies(name)",
+        "id, agency_id, name, org_unit, notice_no, item, grade, areas, budget, qa_deadline, submit_deadline, bid_open_at, place, term_from, term_to, source_url, connector_id, acquire_method, collect_status, needs_review, review_reasons, documents_checked_at, published_doc_kinds, documents_failure_code, documents_failure_reason, agencies(name)",
       )
       .eq("id", id)
       .maybeSingle<TenderRow>(),
@@ -292,6 +334,7 @@ export default async function TenderDetailPage({
 
   // 同種案件の落札率（勝てそうかの目安）。営業品目・機関区分・金額帯がそろわないと引けない。
   const marketRate = tab === "cost" ? await loadMarketRate(supabase, tender.item, agencyName(tender.agencies), tender.budget) : null;
+  const awardScale = tab === "fit" ? await loadAwardScale(supabase, tender.agency_id, tender.item, new Date()) : null;
 
   const { data: org } =
     tab === "cost"
@@ -381,7 +424,7 @@ export default async function TenderDetailPage({
         ))}
       </div>
 
-      {tab === "fit" && <FitTab proposal={proposal} />}
+      {tab === "fit" && <FitTab proposal={proposal} awardScale={awardScale} />}
       {tab === "docs" && (
         <DocsTab
           availabilities={availabilities}
