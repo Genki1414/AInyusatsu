@@ -15,8 +15,9 @@ import {
   documentAvailabilities,
   groupLotsByTrade,
   matchAwardsByName,
-  nameSearchNeedle,
+  MIN_PARTIAL_MATCH_LENGTH,
   REQUIRED_DOC_KINDS,
+  stripFiscalYear,
   summarizeDocuments,
   type ChecklistForm,
   type DocumentCheck,
@@ -107,6 +108,9 @@ async function loadMarketRate(
   return { rate: data.rate_avg, n: data.n };
 }
 
+/** 落札実績の候補を取る件数。多すぎると画面が読めないので、近い順に絞る。 */
+const SIMILAR_AWARDS_LIMIT = 20;
+
 /**
  * 過去の落札実績を案件名で探す（適合タブ）。
  *
@@ -115,31 +119,45 @@ async function loadMarketRate(
  *
  * 落札実績オープンデータには予定価格・品目分類・調達機関名称の列が無く
  * （docs/reference/落札実績オープンデータ_列定義（推定）.md §1）、awards.item / agency_id は
- * 常に null。そのため機関や品目では照合できない。代わりに案件名で照合する。
- * 役務の案件は毎年度くり返されることが多く、年度の表記を外せば前年度の同じ案件が見つかる。
+ * 常に null。そのため機関や品目では照合できず、案件名で引くしかない。
+ *
+ * 実データの名称は揺れが大きい（施設名が毎回違い、「等」「外」「ほか」の有無も揺れる）ため、
+ * 近さの判定は Postgres の trigram 検索（find_similar_awards）に任せる。
+ * 年度の表記は毎年変わるので、外してから渡す。
  */
 async function loadPastAwards(
   supabase: Awaited<ReturnType<typeof requireOrgContext>>["supabase"],
   tenderName: string,
 ): Promise<MatchedAward[]> {
-  const needle = nameSearchNeedle(tenderName);
-  // 短い名称で ilike をかけると関係ない案件を大量に拾うため、そのときは探さない
-  if (needle === null) return [];
+  const query = stripFiscalYear(tenderName).trim();
+  // 短すぎる名称で引くと関係ない案件を大量に拾う
+  if (query.length < MIN_PARTIAL_MATCH_LENGTH) return [];
 
-  const { data } = await supabase
-    .from("awards")
-    .select("name, amount, opened_at, winner_name")
-    .ilike("name", `%${needle.replace(/[%_,]/g, " ")}%`)
-    .order("opened_at", { ascending: false })
-    .limit(200)
-    .returns<{ name: string | null; amount: number; opened_at: string | null; winner_name: string | null }[]>();
+  const { data, error } = await supabase.rpc("find_similar_awards", {
+    p_name: query,
+    p_limit: SIMILAR_AWARDS_LIMIT,
+  });
+  if (error) {
+    // 実績が出ないだけで案件画面は使える。握りつぶさずログには残す
+    console.error(`[tenders] 落札実績の検索に失敗しました: ${error.message}`);
+    return [];
+  }
+
+  const rows = (data ?? []) as {
+    name: string | null;
+    amount: number;
+    opened_at: string | null;
+    winner_name: string | null;
+    similarity: number | null;
+  }[];
 
   return matchAwardsByName(
-    (data ?? []).map((a) => ({
+    rows.map((a) => ({
       name: a.name,
       amount: a.amount,
       openedAt: a.opened_at,
       winnerName: a.winner_name,
+      similarity: a.similarity,
     })),
     tenderName,
   );

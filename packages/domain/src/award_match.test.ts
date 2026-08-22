@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   matchAwardsByName,
-  nameSearchNeedle,
   normalizeAwardName,
   stripFiscalYear,
   type NameMatchableAward,
@@ -81,8 +80,37 @@ describe("matchAwardsByName", () => {
     expect(results.map((r) => r.amount)).toEqual([300, 200, 100]);
   });
 
-  it("関係ない案件は拾わない", () => {
+  it("完全一致でも部分一致でもない候補は「類似」として残す", () => {
+    // trigram検索が候補として返した時点で近い。実際の名称を見せて利用者に判断してもらう
+    const results = matchAwardsByName([award({ name: "令和７年度大阪空港庁舎外消防用設備等点検業務", similarity: 0.7 })], tender);
+    expect(results[0]?.match).toBe("類似");
+  });
+
+  it("近さが分からない候補は「類似」に入れない（名称で引いていないため）", () => {
     expect(matchAwardsByName([award({ name: "令和７年度庁舎清掃業務" })], tender)).toEqual([]);
+  });
+
+  it("完全一致 → 部分一致 → 類似 の順に並べる", () => {
+    const results = matchAwardsByName(
+      [
+        award({ name: "令和５年度大阪空港庁舎外消防用設備等点検業務", similarity: 0.6 }),
+        award({ name: "令和６年度大阪空港庁舎等消防用設備点検業務ほか" }),
+        award({ name: "令和７年度大阪空港庁舎等消防用設備点検業務" }),
+      ],
+      tender,
+    );
+    expect(results.map((r) => r.match)).toEqual(["完全一致", "部分一致", "類似"]);
+  });
+
+  it("類似は近い順に並べる（新しさより名称の近さを優先する）", () => {
+    const results = matchAwardsByName(
+      [
+        award({ name: "令和７年度大阪空港消防設備業務", openedAt: "2026-04-01", similarity: 0.4, amount: 100 }),
+        award({ name: "令和５年度大阪空港庁舎外消防用設備等点検業務", openedAt: "2024-04-01", similarity: 0.8, amount: 200 }),
+      ],
+      tender,
+    );
+    expect(results.map((r) => r.amount)).toEqual([200, 100]);
   });
 
   it("名称が短すぎるときは部分一致で探さない（関係ない案件まで拾うため）", () => {
@@ -97,20 +125,5 @@ describe("matchAwardsByName", () => {
   it("空の一覧・空の案件名でも落ちない", () => {
     expect(matchAwardsByName([], tender)).toEqual([]);
     expect(matchAwardsByName([award()], "令和８年度")).toEqual([]);
-  });
-});
-
-describe("nameSearchNeedle", () => {
-  it("年度を外した一番長い部分を返す", () => {
-    expect(nameSearchNeedle("令和８年度大阪空港庁舎等消防用設備点検業務")).toBe("大阪空港庁舎等消防用設備点検業務");
-  });
-
-  it("括弧で分かれていれば長いほうを使う", () => {
-    expect(nameSearchNeedle("令和８年度消防用設備点検業務（単価契約）")).toBe("消防用設備点検業務");
-  });
-
-  it("短すぎる名称では検索しない", () => {
-    expect(nameSearchNeedle("令和８年度清掃")).toBeNull();
-    expect(nameSearchNeedle("令和８年度")).toBeNull();
   });
 });

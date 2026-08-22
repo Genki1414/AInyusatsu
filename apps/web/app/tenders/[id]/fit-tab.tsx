@@ -18,15 +18,18 @@ function openedOn(iso: string | null): string {
   return Number.isNaN(d.getTime()) ? "落札日不明" : d.toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo" });
 }
 
-/** 一覧に出す件数。多すぎると読めないので、新しいものから絞る。 */
+/** 一覧に出す件数。多すぎると読めないので、確からしい順に絞る。 */
 const SHOWN = 5;
+
+/** 照合の確からしさを色で示す。「類似」は参考程度なので目立たせない。 */
+const MATCH_TONE = { 完全一致: "green", 部分一致: "amber", 類似: "slate" } as const;
 
 function PastAwardsPanel({ awards }: { awards: MatchedAward[] }) {
   if (awards.length === 0) {
     return (
       <Panel title="過去の落札実績">
         <p className="text-xs leading-relaxed text-slate-600">
-          同じ名称の過去の落札が見つかりませんでした。新規の案件か、名称が変わっている可能性があります。
+          名称の近い過去の落札が見つかりませんでした。新規の案件か、名称の付け方が大きく違う可能性があります。
         </p>
         <p className="mt-2 text-xs leading-relaxed text-slate-500">
           落札実績オープンデータには予定価格・品目分類・調達機関名称の列が無いため、
@@ -46,7 +49,7 @@ function PastAwardsPanel({ awards }: { awards: MatchedAward[] }) {
         <span className="text-xs text-slate-500">直近の落札額</span>
       </div>
       <div className="mt-2 flex flex-wrap gap-1">
-        <Pill tone={latest.match === "完全一致" ? "green" : "amber"}>名称が{latest.match}</Pill>
+        <Pill tone={MATCH_TONE[latest.match]}>名称が{latest.match}</Pill>
         <Pill>{openedOn(latest.openedAt)}</Pill>
         {exact.length > 1 && <Pill>同名の落札{exact.length}件</Pill>}
       </div>
@@ -58,7 +61,10 @@ function PastAwardsPanel({ awards }: { awards: MatchedAward[] }) {
               <span className="text-xs text-slate-500">{openedOn(a.openedAt)}</span>
               <span className="text-xs font-semibold tabular-nums">{yen(a.amount)}</span>
             </div>
-            <div className="text-xs text-slate-700">{a.name}</div>
+            <div className="text-xs text-slate-700">
+              <span className="mr-1 text-slate-400">[{a.match}]</span>
+              {a.name}
+            </div>
             {a.winnerName && <div className="text-xs text-slate-500">落札者：{a.winnerName}</div>}
           </li>
         ))}
@@ -67,8 +73,8 @@ function PastAwardsPanel({ awards }: { awards: MatchedAward[] }) {
 
       <p className="mt-3 text-xs leading-relaxed text-slate-500">
         落札実績オープンデータに基づく<span className="font-semibold">過去の落札額</span>です。
-        この案件の予定価格ではありません。案件名で照合しているため、
-        名称が同じでも内容が変わっていることがあります。
+        この案件の予定価格ではありません。名称の近さだけで照合しているため、
+        名称が似ていても規模や内容が違うことがあります。金額は必ず名称と併せて確認してください。
       </p>
     </Panel>
   );
