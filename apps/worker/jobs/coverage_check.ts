@@ -18,6 +18,8 @@ type AgencyRow = {
   name: string;
   expected_freq: string | null;
   last_success_at: string | null;
+  /** [{connector, url, kind}] を想定（実装仕様書_v1.md §2） */
+  sources: { connector?: string }[] | null;
 };
 
 export type CoverageCheckResult = {
@@ -29,6 +31,8 @@ export type CoverageCheckResult = {
   missing: number;
   /** 様子見の機関（遅延） */
   delayed: number;
+  /** 巡回をまだ実装していない機関 */
+  notImplemented: number;
 };
 
 /**
@@ -65,7 +69,7 @@ export async function recordAgencySuccess(
 export async function loadCoverage(client: Supabase, now: Date = new Date()): Promise<CoverageSummary> {
   const { data, error } = await client
     .from("agencies")
-    .select("id, name, expected_freq, last_success_at, parent_id")
+    .select("id, name, expected_freq, last_success_at, sources, parent_id")
     .eq("active", true)
     .returns<(AgencyRow & { parent_id: string | null })[]>();
   if (error) throw new Error(`機関の取得に失敗しました: ${error.message}`);
@@ -79,6 +83,7 @@ export async function loadCoverage(client: Supabase, now: Date = new Date()): Pr
       name: r.name,
       expectedFreq: r.expected_freq,
       lastSuccessAt: r.last_success_at,
+      connectors: (r.sources ?? []).map((src) => src.connector).filter((c): c is string => typeof c === "string"),
     }));
 
   return evaluateCoverage(leaves, now);
@@ -93,8 +98,13 @@ export async function runCoverageCheck(now: Date = new Date()): Promise<Coverage
   const summary = await loadCoverage(client, now);
 
   console.log(
-    `[coverage_check] 判定対象${summary.checked}機関：正常${summary.healthy} / 遅延${summary.delayed.length} / 要対応${summary.missing.length}`,
+    `[coverage_check] 判定対象${summary.checked}機関：正常${summary.healthy} / 遅延${summary.delayed.length}` +
+      ` / 要対応${summary.missing.length} / 巡回未実装${summary.notImplemented.length}`,
   );
+  for (const agency of summary.notImplemented) {
+    // 障害ではなく未着手の作業。区別が付くように別の文言で出す
+    console.log(`[coverage_check] 巡回未実装：${agency.name}（${agency.id}／想定${agency.expectedFreq}）`);
+  }
   for (const agency of summary.missing) {
     const since = agency.daysSince === null ? "一度も取得できていません" : `最終取得から${Math.floor(agency.daysSince)}日`;
     console.warn(`[coverage_check] ${agency.status}：${agency.name}（${agency.id}／想定${agency.expectedFreq}／${since}）`);
@@ -110,5 +120,6 @@ export async function runCoverageCheck(now: Date = new Date()): Promise<Coverage
     healthy: summary.healthy,
     missing: summary.missing.length,
     delayed: summary.delayed.length,
+    notImplemented: summary.notImplemented.length,
   };
 }

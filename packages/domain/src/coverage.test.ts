@@ -9,7 +9,13 @@ import {
 const NOW = new Date("2026-08-22T10:00:00+09:00");
 
 function agency(over: Partial<CoverageAgency> & { id: string }): CoverageAgency {
-  return { name: "テスト機関", expectedFreq: "weekly", lastSuccessAt: "2026-08-20T10:00:00+09:00", ...over };
+  return {
+    name: "テスト機関",
+    expectedFreq: "weekly",
+    lastSuccessAt: "2026-08-20T10:00:00+09:00",
+    connectors: ["kkj"],
+    ...over,
+  };
 }
 
 /** NOW から指定日数だけ前の時刻。 */
@@ -86,6 +92,26 @@ describe("evaluateAgencyCoverage", () => {
 });
 
 describe("evaluateCoverage", () => {
+  it("巡回を実装していないコネクタの機関は「巡回未実装」にする", () => {
+    // 直すべき障害と、これから作る機能を混ぜない
+    const r = evaluateAgencyCoverage(agency({ id: "a", connectors: ["agency-site"], lastSuccessAt: null }), NOW);
+    expect(r.status).toBe("巡回未実装");
+  });
+
+  it("実装済みのコネクタを1つでも持てば、通常どおり判定する", () => {
+    const r = evaluateAgencyCoverage(agency({ id: "a", connectors: ["agency-site", "geps"], lastSuccessAt: null }), NOW);
+    expect(r.status).toBe("未取得");
+  });
+
+  it("コネクタが1つも無ければ巡回未実装", () => {
+    expect(evaluateAgencyCoverage(agency({ id: "a", connectors: [] }), NOW).status).toBe("巡回未実装");
+  });
+
+  it("基準が無ければ、巡回未実装より先に「基準なし」とする（判定しない）", () => {
+    const r = evaluateAgencyCoverage(agency({ id: "a", expectedFreq: null, connectors: [] }), NOW);
+    expect(r.status).toBe("基準なし");
+  });
+
   it("対応が要るもの（欠測・未取得）と様子見（遅延）を分ける", () => {
     const summary = evaluateCoverage(
       [
@@ -93,14 +119,25 @@ describe("evaluateCoverage", () => {
         agency({ id: "late", lastSuccessAt: daysAgo(10) }),
         agency({ id: "gone", lastSuccessAt: daysAgo(60) }),
         agency({ id: "never", lastSuccessAt: null }),
+        agency({ id: "unbuilt", connectors: ["agency-site"] }),
         agency({ id: "nofreq", expectedFreq: null }),
       ],
       NOW,
     );
-    expect(summary.checked).toBe(4);
+    expect(summary.checked).toBe(5);
     expect(summary.healthy).toBe(1);
     expect(summary.delayed.map((r) => r.id)).toEqual(["late"]);
     expect(summary.missing.map((r) => r.id)).toEqual(["gone", "never"]);
+    expect(summary.notImplemented.map((r) => r.id)).toEqual(["unbuilt"]);
+  });
+
+  it("巡回未実装は分母に含める（外すとカバレッジが実態より良く見える）", () => {
+    const summary = evaluateCoverage(
+      [agency({ id: "ok", lastSuccessAt: "2026-08-22T09:00:00+09:00" }), agency({ id: "unbuilt", connectors: ["agency-site"] })],
+      NOW,
+    );
+    expect(summary.checked).toBe(2);
+    expect(summary.healthy).toBe(1);
   });
 
   it("基準なしは分母にも入れない（判定できないものを失敗として数えない）", () => {
@@ -110,6 +147,13 @@ describe("evaluateCoverage", () => {
   });
 
   it("空の一覧でも落ちない", () => {
-    expect(evaluateCoverage([], NOW)).toEqual({ results: [], checked: 0, healthy: 0, missing: [], delayed: [] });
+    expect(evaluateCoverage([], NOW)).toEqual({
+      results: [],
+      checked: 0,
+      healthy: 0,
+      missing: [],
+      delayed: [],
+      notImplemented: [],
+    });
   });
 });

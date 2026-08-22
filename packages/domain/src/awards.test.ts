@@ -4,6 +4,7 @@ import {
   classifyAgencyClass,
   classifyItem,
   computeMarketRates,
+  dedupeByUpsertKey,
   dedupeLatestByProcurementNo,
   hasUnexpectedShape,
   normalizeAwardRow,
@@ -263,3 +264,51 @@ function base(overrides: Partial<NormalizedAward>): NormalizedAward {
     ...overrides,
   };
 }
+
+describe("dedupeByUpsertKey", () => {
+  const row = (procurementNo: string | null, openedAt: string | null, amount: number) => ({
+    procurementNo,
+    openedAt,
+    amount,
+  });
+
+  it("同じ（調達案件番号・落札日）の行をまとめる", () => {
+    // 1回のupsert文に同じキーが2つ入るとPostgresが失敗するため
+    const { awards, duplicates } = dedupeByUpsertKey([row("A", "2026-04-01", 100), row("A", "2026-04-01", 200)]);
+    expect(awards).toHaveLength(1);
+    expect(duplicates).toBe(1);
+  });
+
+  it("後に現れた行を採用する（訂正が後ろに来る想定）", () => {
+    const { awards } = dedupeByUpsertKey([row("A", "2026-04-01", 100), row("A", "2026-04-01", 200)]);
+    expect(awards[0].amount).toBe(200);
+  });
+
+  it("落札日が違えば別の行として残す", () => {
+    const { awards, duplicates } = dedupeByUpsertKey([row("A", "2026-04-01", 100), row("A", "2027-04-01", 200)]);
+    expect(awards).toHaveLength(2);
+    expect(duplicates).toBe(0);
+  });
+
+  it("調達案件番号が違えば別の行として残す", () => {
+    const { awards } = dedupeByUpsertKey([row("A", "2026-04-01", 100), row("B", "2026-04-01", 200)]);
+    expect(awards).toHaveLength(2);
+  });
+
+  it("nullを含むキーでも落ちない", () => {
+    const { awards, duplicates } = dedupeByUpsertKey([row(null, null, 100), row(null, null, 200)]);
+    expect(awards).toHaveLength(1);
+    expect(duplicates).toBe(1);
+  });
+
+  it("重複が無ければ件数も順序も変わらない", () => {
+    const input = [row("A", "2026-04-01", 100), row("B", "2026-04-02", 200), row("C", "2026-04-03", 300)];
+    const { awards, duplicates } = dedupeByUpsertKey(input);
+    expect(awards.map((a) => a.amount)).toEqual([100, 200, 300]);
+    expect(duplicates).toBe(0);
+  });
+
+  it("空でも落ちない", () => {
+    expect(dedupeByUpsertKey([])).toEqual({ awards: [], duplicates: 0 });
+  });
+});

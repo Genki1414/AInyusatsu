@@ -12,6 +12,9 @@
 import { createHash } from "node:crypto";
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
 import { recordAgencySuccess } from "./coverage_check";
+
+/** 機関マスタ上の「調達ポータル」。取得元そのものの稼働を見るための行。 */
+const SOURCE_AGENCY_ID = "p-portal";
 import type { DocKind, NormalizedGepsTender } from "@ai-nyusatsu-bu/domain";
 import { crawlDate, type GepsDocument } from "../connectors/geps";
 
@@ -300,8 +303,9 @@ export async function runDailyGepsCrawl(dateIso: string): Promise<CrawlDateSumma
       }
     }
 
-    // 取れたことを記録する。ここが無いと「取れていない」と区別がつかない
-    await recordAgencySuccess(client, succeededAgencies);
+    // 取れたことを記録する。ここが無いと「取れていない」と区別がつかない。
+    // 発注機関に加えて、取得元そのもの（機関マスタの "p-portal" 行）も更新する。
+    await recordAgencySuccess(client, [...succeededAgencies, SOURCE_AGENCY_ID]);
 
     // 打ち切り（500件到達）は§6の既定コードのどれにも該当しないため、crawl_errorsには
     // 積まずcrawl_runs.status="truncated"のみで表現する（要対応の記録として残す）。

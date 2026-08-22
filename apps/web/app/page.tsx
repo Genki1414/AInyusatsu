@@ -28,6 +28,7 @@ type AgencyRow = {
   name: string;
   expected_freq: string | null;
   last_success_at: string | null;
+  sources: { connector?: string }[] | null;
   parent_id: string | null;
 };
 
@@ -63,7 +64,7 @@ export default async function HomePage() {
       // 取れていないことを隠さない（CLAUDE.md 最重要の前提7）。機関ごとの収集状況を出す
       supabase
         .from("agencies")
-        .select("id, name, expected_freq, last_success_at, parent_id")
+        .select("id, name, expected_freq, last_success_at, sources, parent_id")
         .eq("active", true)
         .returns<AgencyRow[]>(),
     ]);
@@ -79,6 +80,7 @@ export default async function HomePage() {
         name: a.name,
         expectedFreq: a.expected_freq,
         lastSuccessAt: a.last_success_at,
+        connectors: (a.sources ?? []).map((s) => s.connector).filter((c): c is string => typeof c === "string"),
       })),
     now,
   );
@@ -142,7 +144,7 @@ export default async function HomePage() {
       {coverage.checked > 0 && (
         <Panel title={`案件の収集状況（${coverage.healthy}/${coverage.checked}機関）`}>
           {coverage.missing.length === 0 && coverage.delayed.length === 0 ? (
-            <p className="text-xs text-slate-600">監視している発注機関はすべて、想定どおりの間隔で取得できています。</p>
+            <p className="text-xs text-slate-600">巡回している発注機関はすべて、想定どおりの間隔で取得できています。</p>
           ) : (
             <>
               <p className="text-xs leading-relaxed text-slate-600">
@@ -167,6 +169,22 @@ export default async function HomePage() {
                 </p>
               )}
             </>
+          )}
+
+          {coverage.notImplemented.length > 0 && (
+            <div className="mt-3 border-t border-slate-100 pt-3">
+              <p className="text-xs leading-relaxed text-slate-600">
+                次の{coverage.notImplemented.length}機関は、まだ巡回の仕組みを用意できていません（障害ではありません）。
+                これらの機関の案件は、官公需情報ポータルや調達ポータルに載ったぶんだけが入っています。
+              </p>
+              <ul className="mt-2 flex flex-wrap gap-1">
+                {coverage.notImplemented.map((a) => (
+                  <li key={a.id}>
+                    <Pill>{a.name}</Pill>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </Panel>
       )}

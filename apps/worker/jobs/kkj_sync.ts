@@ -8,6 +8,9 @@
 import { agencyIdFromName, dedupeKey, type NormalizedKkjTender } from "@ai-nyusatsu-bu/domain";
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
 import { recordAgencySuccess } from "./coverage_check";
+
+/** 機関マスタ上の「官公需情報ポータル(API)」。取得元そのものの稼働を見るための行。 */
+const SOURCE_AGENCY_ID = "kkj";
 import { fetchItemsByDate } from "../connectors/kkj";
 
 export type KkjSyncSummary = {
@@ -108,8 +111,10 @@ export async function runKkjSync(dateIso: string): Promise<KkjSyncSummary> {
       merged++;
     }
 
-    // 取れたことを記録する。ここが無いと「取れていない」と区別がつかない
-    await recordAgencySuccess(client, succeededAgencies);
+    // 取れたことを記録する。ここが無いと「取れていない」と区別がつかない。
+    // 発注機関に加えて、取得元そのもの（機関マスタの "kkj" 行）も更新する。
+    // この行の expected_freq=daily は「APIを毎日叩けているか」を見るためのもの。
+    await recordAgencySuccess(client, [...succeededAgencies, SOURCE_AGENCY_ID]);
   } catch (err) {
     status = "failed";
     await client.from("crawl_errors").insert({

@@ -221,6 +221,34 @@ function round4(n: number): number {
 }
 
 // ---------------------------------------------------------------------------
+// 取り込み時の重複つぶし
+// ---------------------------------------------------------------------------
+
+/**
+ * awards の一意キー（procurement_no, opened_at）が重複する行をまとめる。
+ *
+ * 【なぜ必要か】
+ * 同じキーの行が1回のupsert文に2つ入ると Postgres は
+ * 「ON CONFLICT DO UPDATE command cannot affect row a second time」で失敗する。
+ * 実データ（2024年・2025年の全件ファイル）に同一キーの行が含まれており、取り込みが止まった。
+ *
+ * 同一キーの行はファイル内で後に現れたものを採用する（訂正が後ろに来る想定）。
+ * 何件まとめたかを返し、黙って捨てない。
+ */
+export function dedupeByUpsertKey<T extends { procurementNo: string | null; openedAt: string | null }>(
+  awards: T[],
+): { awards: T[]; duplicates: number } {
+  const byKey = new Map<string, T>();
+  let duplicates = 0;
+  for (const award of awards) {
+    const key = `${award.procurementNo ?? ""}\u0000${award.openedAt ?? ""}`;
+    if (byKey.has(key)) duplicates++;
+    byKey.set(key, award);
+  }
+  return { awards: [...byKey.values()], duplicates };
+}
+
+// ---------------------------------------------------------------------------
 // 再度公告・不調対応：procurementNoごとに最新のopenedAtだけを採用する
 // ---------------------------------------------------------------------------
 
