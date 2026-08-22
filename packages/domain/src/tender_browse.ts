@@ -74,3 +74,57 @@ export function tenderVerdict(best: BrowseProposal | null): TenderVerdict {
   }
   return { kind: "提案対象", status: best.status, score: best.score };
 }
+
+// ---------------------------------------------------------------------------
+// 絞り込み条件の読み取り
+//
+// URLのクエリはユーザーが自由に書き換えられる。数値でない値や負の金額が来ても
+// 落ちないようにし、想定外の値は「指定なし」に落とす（推測で別の値に読み替えない）。
+// ---------------------------------------------------------------------------
+
+/** 提出期限の絞り込みで選べる日数。ここに無い値は指定なしとして扱う。 */
+export const DEADLINE_WITHIN_OPTIONS = [7, 14, 30] as const;
+export type DeadlineWithin = (typeof DEADLINE_WITHIN_OPTIONS)[number];
+
+/**
+ * 予定価格の絞り込みを読む。円単位のintegerのみ受け付ける（CLAUDE.md：小数を使わない）。
+ * 空・数値でない・負の値は「指定なし」（null）にする。
+ */
+export function parseBudgetFilter(raw: string | undefined): number | null {
+  if (raw === undefined || raw.trim() === "") return null;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 0) return null;
+  return parsed;
+}
+
+/** 提出期限の絞り込み（残り日数）を読む。選択肢に無い値は「指定なし」にする。 */
+export function parseDeadlineWithin(raw: string | undefined): DeadlineWithin | null {
+  const parsed = Number(raw);
+  return (DEADLINE_WITHIN_OPTIONS as readonly number[]).includes(parsed) ? (parsed as DeadlineWithin) : null;
+}
+
+/** 「残りN日以内」の締め切り時刻を返す。この時刻より前の提出期限だけを出す。 */
+export function deadlineCutoff(withinDays: DeadlineWithin, now: Date): Date {
+  return new Date(now.getTime() + withinDays * 86_400_000);
+}
+
+/**
+ * 選んだ地域を、案件の areas と突き合わせる値の一覧に広げる。
+ *
+ * 案件の areas には「関東・甲信越」のような地方区分が入ることも、「東京都」のような
+ * 都道府県が入ることもある。「関東・甲信越」で絞ったときに東京都の案件が消えると
+ * 取りこぼすので、地方区分を選んだらその地方の都道府県も一緒に探す。
+ *
+ * 対応表（地方区分→都道府県）は画面側の辞書を渡す。domainに画面の選択肢を持たせない。
+ */
+export function expandAreaFilter(area: string, regionPrefectures: Record<string, readonly string[]>): string[] {
+  const trimmed = area.trim();
+  if (trimmed === "") return [];
+  const prefectures = regionPrefectures[trimmed] ?? [];
+  return [...new Set([trimmed, ...prefectures])];
+}
+
+/** 絞り込みが1つでも指定されているか（「絞り込みを解除」を出すかの判定）。 */
+export function hasActiveFilter(values: Array<string | number | null | undefined>): boolean {
+  return values.some((v) => v !== null && v !== undefined && String(v).trim() !== "");
+}

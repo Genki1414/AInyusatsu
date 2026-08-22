@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   BROWSABLE_COLLECT_STATUSES,
+  deadlineCutoff,
+  expandAreaFilter,
+  hasActiveFilter,
+  parseBudgetFilter,
+  parseDeadlineWithin,
   PENDING_COLLECT_STATUSES,
   pickBestProposal,
   proposalsByTender,
@@ -101,5 +106,80 @@ describe("tenderVerdict", () => {
       status: "検討中",
       score: 88,
     });
+  });
+});
+
+describe("parseBudgetFilter", () => {
+  it("円単位のintegerを読む", () => {
+    expect(parseBudgetFilter("5000000")).toBe(5_000_000);
+    expect(parseBudgetFilter("0")).toBe(0);
+  });
+
+  it("空・未指定は指定なし", () => {
+    expect(parseBudgetFilter(undefined)).toBeNull();
+    expect(parseBudgetFilter("")).toBeNull();
+    expect(parseBudgetFilter("   ")).toBeNull();
+  });
+
+  it("数値でない値・負の値・小数は指定なしに落とす（推測で読み替えない）", () => {
+    expect(parseBudgetFilter("500万")).toBeNull();
+    expect(parseBudgetFilter("-1")).toBeNull();
+    expect(parseBudgetFilter("1.5")).toBeNull();
+  });
+});
+
+describe("parseDeadlineWithin", () => {
+  it("選択肢の値だけを受け付ける", () => {
+    expect(parseDeadlineWithin("7")).toBe(7);
+    expect(parseDeadlineWithin("30")).toBe(30);
+  });
+
+  it("選択肢に無い値は指定なし", () => {
+    expect(parseDeadlineWithin("3")).toBeNull();
+    expect(parseDeadlineWithin("abc")).toBeNull();
+    expect(parseDeadlineWithin(undefined)).toBeNull();
+  });
+});
+
+describe("deadlineCutoff", () => {
+  it("指定した日数ぶん先の時刻を返す", () => {
+    const now = new Date("2026-08-22T10:00:00+09:00");
+    expect(deadlineCutoff(7, now).toISOString()).toBe(new Date("2026-08-29T10:00:00+09:00").toISOString());
+  });
+});
+
+describe("expandAreaFilter", () => {
+  const REGIONS = {
+    "東北": ["青森県", "岩手県", "宮城県"],
+    "関東・甲信越": ["東京都", "神奈川県"],
+  };
+
+  it("地方区分を選んだら、その地方の都道府県も一緒に探す", () => {
+    expect(expandAreaFilter("東北", REGIONS)).toEqual(["東北", "青森県", "岩手県", "宮城県"]);
+  });
+
+  it("都道府県を選んだらそれだけ", () => {
+    expect(expandAreaFilter("東京都", REGIONS)).toEqual(["東京都"]);
+  });
+
+  it("北海道のように地方区分と都道府県が同名でも重複しない", () => {
+    expect(expandAreaFilter("北海道", { "北海道": ["北海道"] })).toEqual(["北海道"]);
+  });
+
+  it("空なら何も指定しない", () => {
+    expect(expandAreaFilter("", REGIONS)).toEqual([]);
+    expect(expandAreaFilter("  ", REGIONS)).toEqual([]);
+  });
+});
+
+describe("hasActiveFilter", () => {
+  it("1つでも指定されていればtrue", () => {
+    expect(hasActiveFilter([null, "", "清掃"])).toBe(true);
+    expect(hasActiveFilter([null, undefined, 0])).toBe(true);
+  });
+
+  it("すべて未指定ならfalse", () => {
+    expect(hasActiveFilter([null, undefined, "", "   "])).toBe(false);
+    expect(hasActiveFilter([])).toBe(false);
   });
 });

@@ -6,13 +6,22 @@
 //
 // 提案条件に合わない案件も隠さずに出し、合わない理由を添える。合っているかどうかは
 // 提案（proposals）があればそれを使い、無ければ「未判定」と出す（推測しない）。
+//
+// 絞り込みはURLのクエリで持つ（GETフォーム）。条件をそのまま共有・ブックマークできる。
 import { ListChecks, Search } from "lucide-react";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { CollectPill, Panel, Pill, ProposePill, btnClass } from "@/components/ui";
 import { requireOrgContext } from "@/lib/auth";
+import { AREA_OPTIONS, ITEM_OPTIONS, PREFECTURE_OPTIONS, QUAL_CATEGORIES, REGION_PREFECTURES } from "@/lib/catalog";
 import {
   BROWSABLE_COLLECT_STATUSES,
+  DEADLINE_WITHIN_OPTIONS,
+  deadlineCutoff,
+  expandAreaFilter,
+  hasActiveFilter,
+  parseBudgetFilter,
+  parseDeadlineWithin,
   PENDING_COLLECT_STATUSES,
   proposalsByTender,
   tenderVerdict,
@@ -21,6 +30,34 @@ import {
 
 /** 1ページに出す件数。200件/日で集まるので、全部を1画面には出さない。 */
 const PAGE_SIZE = 50;
+
+/**
+ * キーワードで拾う発注機関の上限。機関IDをURLのクエリに並べて案件を絞るため、
+ * 多すぎるとリクエストURLが長くなりすぎる。ここに達したら打ち切って画面に断る。
+ */
+const AGENCY_MATCH_LIMIT = 100;
+
+/** 等級は全省庁統一資格のA〜D。案件側に入っていないこともある。 */
+const GRADE_OPTIONS = ["A", "B", "C", "D"] as const;
+
+const SORTS = {
+  deadline: { label: "提出期限が近い順", column: "submit_deadline", ascending: true },
+  newest: { label: "公告が新しい順", column: "notice_date", ascending: false },
+} as const;
+type SortKey = keyof typeof SORTS;
+
+type SearchParams = {
+  q?: string;
+  item?: string;
+  area?: string;
+  qual?: string;
+  grade?: string;
+  min_budget?: string;
+  max_budget?: string;
+  within?: string;
+  sort?: string;
+  page?: string;
+};
 
 type TenderRow = {
   id: string;
@@ -50,7 +87,7 @@ function daysLeft(iso: string | null): number | null {
   return Math.ceil((target.getTime() - Date.now()) / 86_400_000);
 }
 
-/** 金額は円単位のintegerで持っている（CLAUDE.md）。表示は万円に丸めず、そのまま3桁区切りで出す。 */
+/** 金額は円単位のintegerで持っている（CLAUDE.md）。3桁区切りでそのまま出す。 */
 function yen(value: number | null): string | null {
   return value === null ? null : `${value.toLocaleString("ja-JP")}円`;
 }
@@ -61,26 +98,54 @@ function pageFrom(raw: string | undefined): number {
   return Number.isInteger(parsed) && parsed >= 1 ? parsed : 1;
 }
 
-/** 検索・ページ送りのリンクを作る。 */
-function hrefWith(params: { q?: string; page?: number }): string {
-  const search = new URLSearchParams();
-  if (params.q) search.set("q", params.q);
-  if (params.page && params.page > 1) search.set("page", String(params.page));
-  const query = search.toString();
-  return query === "" ? "/tenders" : `/tenders?${query}`;
+/** 選択肢に無い値は「指定なし」に落とす（URLを書き換えられても落ちないように）。 */
+function pickOption(raw: string | undefined, options: readonly string[]): string {
+  const value = (raw ?? "").trim();
+  return options.includes(value) ? value : "";
 }
 
-export default async function TendersPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ q?: string; page?: string }>;
-}) {
-  const { q, page: pageParam } = await searchParams;
+/** ilikeのパターンで特別な意味を持つ文字を落とす。 */
+function likePattern(keyword: string): string {
+  return `%${keyword.replace(/[%_,]/g, " ")}%`;
+}
+
+const inputClass =
+  "rounded border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300";
+
+export default async function TendersPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const params = await searchParams;
   const { supabase, orgName } = await requireOrgContext();
 
-  const keyword = (q ?? "").trim();
-  const page = pageFrom(pageParam);
+  const now = new Date();
+  const keyword = (params.q ?? "").trim();
+  const item = pickOption(params.item, ITEM_OPTIONS);
+  const area = pickOption(params.area, [...AREA_OPTIONS, ...PREFECTURE_OPTIONS]);
+  const qual = pickOption(params.qual, QUAL_CATEGORIES);
+  const grade = pickOption(params.grade, GRADE_OPTIONS);
+  const minBudget = parseBudgetFilter(params.min_budget);
+  const maxBudget = parseBudgetFilter(params.max_budget);
+  const within = parseDeadlineWithin(params.within);
+  const sortKey: SortKey = params.sort === "newest" ? "newest" : "deadline";
+  const sort = SORTS[sortKey];
+  const page = pageFrom(params.page);
   const from = (page - 1) * PAGE_SIZE;
+
+  const filtered = hasActiveFilter([keyword, item, area, qual, grade, minBudget, maxBudget, within]);
+
+  // キーワードは案件名だけでなく発注機関名でも探せるようにする。
+  // 機関は数百件なので、先に機関を引いてから案件を絞る。
+  let agencyIds: string[] = [];
+  if (keyword !== "") {
+    const { data: agencies } = await supabase
+      .from("agencies")
+      .select("id")
+      .ilike("name", likePattern(keyword))
+      .limit(AGENCY_MATCH_LIMIT)
+      .returns<{ id: string }[]>();
+    agencyIds = (agencies ?? []).map((a) => a.id);
+  }
+  // 上限に達したら、拾いきれなかった機関がある。黙って絞らずに画面で断る。
+  const agencyMatchTruncated = agencyIds.length === AGENCY_MATCH_LIMIT;
 
   let query = supabase
     .from("tenders")
@@ -88,13 +153,25 @@ export default async function TendersPage({
       count: "exact",
     })
     .in("collect_status", [...BROWSABLE_COLLECT_STATUSES])
-    // 提出期限が近いものから。期限が取れていない案件は末尾へ
-    .order("submit_deadline", { ascending: true, nullsFirst: false })
+    // 並び順の値が無い案件（期限や公告日が取れていない）は末尾へ
+    .order(sort.column, { ascending: sort.ascending, nullsFirst: false })
     .range(from, from + PAGE_SIZE - 1);
+
   if (keyword !== "") {
-    // PostgRESTのilikeはパターン中の % と , を特別扱いするので、そのまま渡さない
-    query = query.ilike("name", `%${keyword.replace(/[%,]/g, " ")}%`);
+    const nameMatch = `name.ilike.${likePattern(keyword)}`;
+    query = query.or(agencyIds.length > 0 ? `${nameMatch},agency_id.in.(${agencyIds.join(",")})` : nameMatch);
   }
+  if (item !== "") query = query.eq("item", item);
+  if (qual !== "") query = query.eq("qual_category", qual);
+  if (grade !== "") query = query.eq("grade", grade);
+  if (area !== "") {
+    // 「関東・甲信越」で絞ったときに「東京都」の案件が消えないよう、地方区分は都道府県まで広げる
+    query = query.overlaps("areas", expandAreaFilter(area, REGION_PREFECTURES));
+  }
+  // 予定価格で絞ると、価格が取れていない案件は除かれる（画面に注記を出す）
+  if (minBudget !== null) query = query.gte("budget", minBudget);
+  if (maxBudget !== null) query = query.lte("budget", maxBudget);
+  if (within !== null) query = query.lte("submit_deadline", deadlineCutoff(within, now).toISOString());
 
   const [{ data: tenders, count, error }, { count: pendingCount }] = await Promise.all([
     query.returns<TenderRow[]>(),
@@ -132,40 +209,150 @@ export default async function TendersPage({
     ),
   );
 
+  /** ページ送りのリンク。絞り込みをすべて引き継ぐ。 */
+  function pageHref(target: number): string {
+    const search = new URLSearchParams();
+    if (keyword !== "") search.set("q", keyword);
+    if (item !== "") search.set("item", item);
+    if (area !== "") search.set("area", area);
+    if (qual !== "") search.set("qual", qual);
+    if (grade !== "") search.set("grade", grade);
+    if (minBudget !== null) search.set("min_budget", String(minBudget));
+    if (maxBudget !== null) search.set("max_budget", String(maxBudget));
+    if (within !== null) search.set("within", String(within));
+    if (sortKey !== "deadline") search.set("sort", sortKey);
+    if (target > 1) search.set("page", String(target));
+    const query = search.toString();
+    return query === "" ? "/tenders" : `/tenders?${query}`;
+  }
+
   return (
     <AppShell active="tenders" orgName={orgName}>
-      <Panel dense title={`すべての案件（${total.toLocaleString("ja-JP")}）`}>
-        <form method="get" className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-3 py-2">
-          <input
-            type="text"
-            name="q"
-            defaultValue={keyword}
-            placeholder="案件名で検索"
-            className="w-56 rounded border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300"
-          />
-          <button type="submit" className={btnClass("default", "sm")}>
-            <Search size={12} />
-            検索
-          </button>
-          {keyword !== "" && (
+      <Panel
+        dense
+        title={`すべての案件（${total.toLocaleString("ja-JP")}）`}
+        right={
+          filtered ? (
             <Link href="/tenders" className="text-xs text-blue-800 underline">
-              検索を解除
+              絞り込みを解除
             </Link>
-          )}
+          ) : undefined
+        }
+      >
+        <form method="get" className="space-y-2 border-b border-slate-200 px-3 py-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="text"
+              name="q"
+              defaultValue={keyword}
+              placeholder="案件名・発注機関で検索"
+              className={`${inputClass} w-56`}
+            />
+            <select name="item" defaultValue={item} className={inputClass} aria-label="営業品目">
+              <option value="">営業品目：すべて</option>
+              {ITEM_OPTIONS.map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
+            <select name="area" defaultValue={area} className={inputClass} aria-label="地域">
+              <option value="">地域：すべて</option>
+              <optgroup label="地方">
+                {AREA_OPTIONS.map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="都道府県">
+                {PREFECTURE_OPTIONS.map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+            <select name="qual" defaultValue={qual} className={inputClass} aria-label="資格区分">
+              <option value="">資格区分：すべて</option>
+              {QUAL_CATEGORIES.map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
+            <select name="grade" defaultValue={grade} className={inputClass} aria-label="等級">
+              <option value="">等級：すべて</option>
+              {GRADE_OPTIONS.map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-slate-600">予定価格</span>
+            <input
+              type="number"
+              name="min_budget"
+              min={0}
+              step={1}
+              defaultValue={minBudget ?? ""}
+              placeholder="下限（円）"
+              className={`${inputClass} w-28 tabular-nums`}
+              aria-label="予定価格の下限（円）"
+            />
+            <span className="text-xs text-slate-400">〜</span>
+            <input
+              type="number"
+              name="max_budget"
+              min={0}
+              step={1}
+              defaultValue={maxBudget ?? ""}
+              placeholder="上限（円）"
+              className={`${inputClass} w-28 tabular-nums`}
+              aria-label="予定価格の上限（円）"
+            />
+            <select name="within" defaultValue={within ?? ""} className={inputClass} aria-label="提出期限">
+              <option value="">提出期限：すべて</option>
+              {DEADLINE_WITHIN_OPTIONS.map((d) => (
+                <option key={d} value={d}>
+                  残り{d}日以内
+                </option>
+              ))}
+            </select>
+            <select name="sort" defaultValue={sortKey} className={inputClass} aria-label="並び順">
+              {Object.entries(SORTS).map(([key, s]) => (
+                <option key={key} value={key}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+            <button type="submit" className={btnClass("primary", "sm")}>
+              <Search size={12} />
+              この条件で探す
+            </button>
+          </div>
         </form>
+
         <p className="px-3 py-2 text-xs leading-relaxed text-slate-600">
           公告の取得・資料の取得・AI解析まで終わった案件をすべて出しています。
           {orgName}の提案条件に合わない案件も、合わない理由を添えて表示します。
           {pendingCount ? `ほかに解析待ちが${pendingCount.toLocaleString("ja-JP")}件あります。` : ""}
+          {minBudget !== null || maxBudget !== null
+            ? "予定価格で絞ると、予定価格が取れていない案件は除かれます。"
+            : ""}
+          {agencyMatchTruncated
+            ? `「${keyword}」に一致する発注機関が多すぎるため、${AGENCY_MATCH_LIMIT}機関までで打ち切っています。機関名をもう少し詳しく入れてください。`
+            : ""}
         </p>
       </Panel>
 
       {rows.length === 0 && (
         <Panel>
           <p className="text-xs text-slate-500">
-            {keyword === ""
-              ? "解析まで終わった案件がまだありません。"
-              : `「${keyword}」に一致する案件がありません。`}
+            {filtered ? "この条件に一致する案件がありません。" : "解析まで終わった案件がまだありません。"}
           </p>
         </Panel>
       )}
@@ -189,7 +376,7 @@ export default async function TendersPage({
                   {verdict.kind === "未判定" && <Pill>未判定</Pill>}
                   {t.item && <Pill>{t.item}</Pill>}
                   {t.grade && <Pill>{t.grade}</Pill>}
-                  {t.areas?.map((area) => <Pill key={area}>{area}</Pill>)}
+                  {t.areas?.map((a) => <Pill key={a}>{a}</Pill>)}
                   {budget && <Pill>予定価格 {budget}</Pill>}
                   {dl != null && <Pill tone="blue">提出まで残{dl}日</Pill>}
                 </div>
@@ -229,17 +416,17 @@ export default async function TendersPage({
         <Panel dense>
           <div className="flex items-center justify-between gap-2 px-3 py-2 text-xs">
             {page > 1 ? (
-              <Link href={hrefWith({ q: keyword, page: page - 1 })} className="text-blue-800 underline">
+              <Link href={pageHref(page - 1)} className="text-blue-800 underline">
                 前の{PAGE_SIZE}件
               </Link>
             ) : (
               <span className="text-slate-300">前の{PAGE_SIZE}件</span>
             )}
-            <span className="text-slate-500 tabular-nums">
+            <span className="tabular-nums text-slate-500">
               {page} / {lastPage}
             </span>
             {page < lastPage ? (
-              <Link href={hrefWith({ q: keyword, page: page + 1 })} className="text-blue-800 underline">
+              <Link href={pageHref(page + 1)} className="text-blue-800 underline">
                 次の{PAGE_SIZE}件
               </Link>
             ) : (
