@@ -8,8 +8,14 @@
 // 本来の依頼まで届かなくなる。期限を過ぎたものにも送らない（今から間に合わないため）。
 
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
-import { sendEmail } from "@ai-nyusatsu-bu/notifications";
-import { buildQuoteReminderEmail, shouldRemind, type SkipReason } from "@ai-nyusatsu-bu/domain";
+import { sendEmail, serviceFromAddress } from "@ai-nyusatsu-bu/notifications";
+import {
+  buildQuoteReminderEmail,
+  resolveSenderIdentity,
+  shouldRemind,
+  type SenderIdentity,
+  type SkipReason,
+} from "@ai-nyusatsu-bu/domain";
 
 export type RemindQuotesSummary = {
   /** 判定した見積の件数 */
@@ -70,6 +76,29 @@ async function firstOrgEmail(client: ReturnType<typeof createServiceClient>, org
 }
 
 /**
+ * 差出人と返信先を、依頼元の顧客企業に向けて決める。
+ * 協力会社にとっての取引相手はサービスの運営会社ではないため、ここを取り違えると
+ * 受け取った側が誰からの催促か分からなくなる。
+ */
+async function senderFor(
+  client: ReturnType<typeof createServiceClient>,
+  orgId: string,
+  orgName: string,
+): Promise<SenderIdentity> {
+  const { data } = await client
+    .from("organizations")
+    .select("reply_to")
+    .eq("id", orgId)
+    .maybeSingle<{ reply_to: string | null }>();
+  return resolveSenderIdentity({
+    orgName,
+    serviceAddress: serviceFromAddress(),
+    configuredReplyTo: data?.reply_to ?? null,
+    ownerEmail: await firstOrgEmail(client, orgId),
+  });
+}
+
+/**
  * 催促の対象を探して送る。
  * `now` を引数にしているのは、再現できる形でテストできるようにするため。
  */
@@ -125,11 +154,13 @@ export async function runQuoteReminders(now: Date = new Date()): Promise<RemindQ
       continue;
     }
 
+    const orgName = one(request.organizations)?.name ?? "発注元企業";
+    const sender = await senderFor(client, request.org_id, orgName);
     const { subject, body } = buildQuoteReminderEmail({
       partnerName: partner.name,
-      senderOrgName: one(request.organizations)?.name ?? "発注元企業",
-      // 協力会社が返信できる連絡先。依頼元と同じ扱いにする（quote_response と同じ引き方）
-      senderContactEmail: await firstOrgEmail(client, request.org_id),
+      senderOrgName: orgName,
+      // 協力会社が返信できる連絡先。署名にも同じアドレスを載せる
+      senderContactEmail: sender.replyTo,
       tenderName: one(request.tenders)?.name ?? "案件名未確認",
       trade: request.trade,
       dueAtLabel: jst(dueAt),
@@ -137,7 +168,7 @@ export async function runQuoteReminders(now: Date = new Date()): Promise<RemindQ
     });
 
     try {
-      await sendEmail({ to: partner.email, subject, text: body });
+      await sendEmail({ to: partner.email, subject, text: body, from: sender.from, replyTo: sender.replyTo });
     } catch (err) {
       // 1件の失敗で他の催促を止めない。失敗は握りつぶさずログに残す（CLAUDE.md）。
       summary.failed++;

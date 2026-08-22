@@ -3,8 +3,11 @@
 // 自社情報の設定。
 // 会社名は協力会社へ送るメール（挨拶・署名）と画面のヘッダーに使われる。
 // 一般管理費率・目標利益率は原価集計（タスク4-5）で応札価格の案を出すのに使う。
+// 返信先は、協力会社へ送るメールに Reply-To として付ける。協力会社が返信すると
+// ここへ届く。未設定なら登録者のアドレスに落ちるので、返信が宙に浮くことはない。
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { looksLikeEmail } from "@ai-nyusatsu-bu/domain";
 import { createClient } from "@/lib/supabase/server";
 import { requireOrgContext } from "@/lib/auth";
 
@@ -23,12 +26,18 @@ const companyNameSchema = z.object({
   orgName: z.string().trim().min(1, "会社名を入力してください").max(100, "会社名は100文字以内で入力してください"),
   overheadRate: percent("一般管理費率"),
   profitRate: percent("目標利益率"),
+  // 空欄なら未設定（登録者のアドレスを使う）。形が違うものは受け付けない
+  replyTo: z
+    .string()
+    .trim()
+    .transform((v) => (v === "" ? null : v))
+    .refine((v) => v === null || looksLikeEmail(v), "返信先はメールアドレスの形で入力してください"),
 });
 
 export type CompanyNameState = { error: string | null; saved: boolean };
 
 /**
- * 自社情報（会社名・一般管理費率・目標利益率）を変更する。
+ * 自社情報（会社名・一般管理費率・目標利益率・返信先）を変更する。
  * organizationsのRLSは自組織のみ許可しているため、ユーザーのセッションのまま更新できる。
  */
 export async function saveCompanyName(_prevState: CompanyNameState, formData: FormData): Promise<CompanyNameState> {
@@ -36,6 +45,7 @@ export async function saveCompanyName(_prevState: CompanyNameState, formData: Fo
     orgName: formData.get("org_name"),
     overheadRate: String(formData.get("overhead_rate") ?? ""),
     profitRate: String(formData.get("profit_rate") ?? ""),
+    replyTo: String(formData.get("reply_to") ?? ""),
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "入力内容を確認してください", saved: false };
@@ -49,6 +59,7 @@ export async function saveCompanyName(_prevState: CompanyNameState, formData: Fo
       name: parsed.data.orgName,
       overhead_rate: parsed.data.overheadRate,
       profit_rate: parsed.data.profitRate,
+      reply_to: parsed.data.replyTo,
     })
     .eq("id", orgId);
   if (error) {

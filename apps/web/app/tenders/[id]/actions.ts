@@ -6,6 +6,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { requireOrgContext } from "@/lib/auth";
 import { getAppUrl } from "@/lib/app-url";
+import { loadSenderIdentity } from "@/lib/sender";
 import { DUE_AT_PLACEHOLDER, RESPONSE_URL_PLACEHOLDER } from "./quote-request-shared";
 
 type TenderRow = {
@@ -54,7 +55,12 @@ export async function sendQuoteRequests(
   }
   const dueAtLabel = new Date(dueAtIso).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
 
-  const { orgId, orgName, userName, userEmail } = await requireOrgContext();
+  const { supabase: sb0, orgId, orgName, userName, userEmail } = await requireOrgContext();
+
+  // 差出人の表示名は依頼元の顧客企業、返信先も顧客企業に向ける（CLAUDE.md の運用方針）。
+  // 協力会社にとっての取引相手はサービスの運営会社ではないため、ここを取り違えると
+  // 受け取った側が誰からの依頼か分からなくなる。
+  const sender = await loadSenderIdentity(sb0, orgId, orgName, userEmail);
   const supabase = await createClient();
 
   // 御社による正式取得が完了するまでは送信させない（画面側のガードに加え、こちらでも検証する）。
@@ -158,7 +164,13 @@ export async function sendQuoteRequests(
       const responseUrl = `${getAppUrl()}/q/${quote.response_token}`;
       const personalizedBody = body.split(RESPONSE_URL_PLACEHOLDER).join(responseUrl);
       try {
-        await sendEmail({ to: partner.email, subject, text: personalizedBody });
+        await sendEmail({
+          to: partner.email,
+          subject,
+          text: personalizedBody,
+          from: sender.from,
+          replyTo: sender.replyTo,
+        });
         sentCount++;
       } catch (err) {
         failed.push(`${partner.name}：${err instanceof Error ? err.message : "送信に失敗しました"}`);

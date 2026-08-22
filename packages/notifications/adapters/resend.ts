@@ -12,6 +12,14 @@ export type SendEmailInput = {
   to: string;
   subject: string;
   text: string;
+  /**
+   * 差出人。表示名は依頼元の顧客企業、実アドレスはサービスのもの
+   * （packages/domain の buildFromHeader が組み立てる）。
+   * 省略した場合はサービスのアドレスだけで送る。
+   */
+  from?: string;
+  /** 返信先。協力会社が返信したときに顧客企業へ届くようにする */
+  replyTo?: string | null;
 };
 
 export type SendEmailResult = { id: string };
@@ -28,17 +36,22 @@ function getClient(): Resend {
   return client;
 }
 
-/** 送信元アドレス。Resendのサンドボックスドメインを既定値にする（本番運用時は要変更）。 */
-function fromAddress(): string {
+/**
+ * サービスの送信元アドレス。認証済みドメインのアドレスを1つだけ持つ。
+ * 顧客企業ごとの違いは、表示名（from）と返信先（replyTo）で表す。
+ * 未設定のときはResendのサンドボックスを使う（自分宛にしか届かない）。
+ */
+export function serviceFromAddress(): string {
   return process.env.RESEND_FROM_ADDRESS ?? "onboarding@resend.dev";
 }
 
 export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult> {
   const { data, error } = await getClient().emails.send({
-    from: fromAddress(),
+    from: input.from ?? serviceFromAddress(),
     to: input.to,
     subject: input.subject,
     text: input.text,
+    ...(input.replyTo ? { replyTo: input.replyTo } : {}),
   });
   if (error) {
     throw new Error(`メール送信に失敗しました（${input.to}）: ${error.message}`);

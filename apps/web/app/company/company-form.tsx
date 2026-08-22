@@ -15,10 +15,14 @@ export function CompanyForm({
   orgName,
   overheadRate,
   profitRate,
+  replyTo,
+  ownerEmail,
 }: {
   orgName: string;
   overheadRate: number;
   profitRate: number;
+  replyTo: string;
+  ownerEmail: string;
 }) {
   const [state, formAction, pending] = useActionState(saveCompanyName, initialState);
 
@@ -30,7 +34,22 @@ export function CompanyForm({
           <input type="text" name="org_name" defaultValue={orgName} required maxLength={100} className={`${input} w-72`} />
         </label>
         <p className="mt-1 text-xs text-slate-400">
-          協力会社へ送る見積依頼・資料送付メールの挨拶と署名に使われます。
+          協力会社へ送るメールの差出人名になります。受け取った協力会社の画面には、この名前が表示されます。
+        </p>
+
+        <label className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+          <span className="w-24 shrink-0 font-medium text-slate-700">返信先</span>
+          <input
+            type="email"
+            name="reply_to"
+            defaultValue={replyTo}
+            placeholder={ownerEmail}
+            maxLength={200}
+            className={`${input} w-72`}
+          />
+        </label>
+        <p className="mt-1 text-xs text-slate-400">
+          協力会社が返信したときに届くアドレスです。空欄のままなら {ownerEmail} に届きます。
         </p>
 
         <label className="mt-3 flex flex-wrap items-center gap-2 text-xs">

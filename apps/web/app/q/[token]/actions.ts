@@ -17,6 +17,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
 import { sendEmail } from "@ai-nyusatsu-bu/notifications";
+import { loadSenderIdentity } from "@/lib/sender";
 import {
   buildDocumentsEmail,
   documentFilenames,
@@ -201,10 +202,14 @@ async function sendDocuments(supabase: Supabase, ctx: QuoteContext): Promise<str
     return "資料のダウンロードURLを発行できなかったため自動送付できませんでした。手動での対応が必要です";
   }
 
+  // 差出人・返信先は依頼元の顧客企業に向ける（協力会社の取引相手は運営会社ではない）。
+  const ownerEmail = await firstOrgEmail(supabase, ctx.request.orgId);
+  const sender = await loadSenderIdentity(supabase, ctx.request.orgId, ctx.request.orgName, ownerEmail);
+
   const { subject, body } = buildDocumentsEmail({
     partnerName: ctx.partner.name,
     senderOrgName: ctx.request.orgName,
-    senderContactEmail: await firstOrgEmail(supabase, ctx.request.orgId),
+    senderContactEmail: sender.replyTo,
     tenderName: ctx.request.tenderName,
     trade: ctx.request.trade,
     dueAtLabel: jst(ctx.request.dueAt),
@@ -213,7 +218,7 @@ async function sendDocuments(supabase: Supabase, ctx: QuoteContext): Promise<str
   });
 
   try {
-    await sendEmail({ to: ctx.partner.email, subject, text: body });
+    await sendEmail({ to: ctx.partner.email, subject, text: body, from: sender.from, replyTo: sender.replyTo });
   } catch (err) {
     console.error("[quote-response] 資料送付メールの送信に失敗しました", err);
     return `資料の自動送付に失敗しました：${err instanceof Error ? err.message : "原因不明"}`;
