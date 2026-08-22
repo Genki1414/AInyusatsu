@@ -9,10 +9,16 @@
 // 請求が見えにくくなるため、1回の実行で処理する件数に上限を設ける。
 // 上限に達した分は次回に回すだけで、失われはしない。
 // 全件を解析したい場合は ANALYZE_DAILY_LIMIT を引き上げる（0 にすると解析を止められる）。
+//
+// 【提出期限を過ぎた案件を解析しない】
+// 対象は提出期限の近い順に並べるので、期限切れの案件を落としておかないと、死んだ案件が
+// 真っ先に解析されて費用だけがかかる。tender_lifecycle が毎日落としているが、ここでも
+// 念のため除外する（解析は費用がかかるので、二重に守る）。
 
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
 import { estimateCostYen, summarizeUsage, type UsageSummary } from "@ai-nyusatsu-bu/ai";
 import { analyzeTender } from "./analyze_tender";
+import { runTenderLifecycle } from "./tender_lifecycle";
 
 /** 1回の実行で解析する件数の既定値。実測 約69円/件 なので、50件で約3,500円。 */
 export const DEFAULT_ANALYZE_LIMIT = 50;
@@ -45,7 +51,10 @@ export function analyzeLimitFromEnv(raw: string | undefined = process.env.ANALYZ
  * 解析待ちの案件を、提出期限が近い順に解析する。
  * 1件の失敗で全体を止めない（理由は analyzeTender 側で案件に記録される）。
  */
-export async function runAnalyzePending(limit: number = analyzeLimitFromEnv()): Promise<AnalyzePendingSummary> {
+export async function runAnalyzePending(
+  limit: number = analyzeLimitFromEnv(),
+  now: Date = new Date(),
+): Promise<AnalyzePendingSummary> {
   const client = createServiceClient();
 
   if (limit === 0) {
@@ -59,6 +68,8 @@ export async function runAnalyzePending(limit: number = analyzeLimitFromEnv()): 
     .select("id, name, tender_documents!inner(id)")
     .eq("collect_status", "取得済")
     .not("tender_documents.extracted_text", "is", null)
+    // 提出期限を過ぎた案件に費用をかけない。期限が取れていない案件は残す（推測しない）
+    .or(`submit_deadline.is.null,submit_deadline.gte.${now.toISOString()}`)
     // 提出期限が近いものから。期限の無い案件は後回しにする
     .order("submit_deadline", { ascending: true, nullsFirst: false })
     .limit(limit + 1)
@@ -99,6 +110,20 @@ export async function runAnalyzePending(limit: number = analyzeLimitFromEnv()): 
     console.warn(
       `[analyze_pending] 上限に達したため${deferred}件を次回に回しました。全件を処理するには ANALYZE_DAILY_LIMIT を引き上げてください`,
     );
+  }
+
+  // 解析が終わった案件をその場で公開する。定時の tender_lifecycle を待つと、
+  // 解析が長引いた日は提案が翌日に持ち越しになる。
+  if (analyzed > 0) {
+    try {
+      const lifecycle = await runTenderLifecycle(now);
+      console.log(`[analyze_pending] 解析後の公開：${lifecycle.published}件`);
+    } catch (err) {
+      // 公開に失敗しても解析結果は残っている。定時の tender_lifecycle が拾い直す。
+      console.error(
+        `[analyze_pending] 解析後の公開に失敗しました: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   return { analyzed, failed, deferred, estimatedYen };

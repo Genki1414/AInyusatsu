@@ -10,6 +10,7 @@
 //   04:30 調達ポータルの巡回・資料取得（〜07:00 ごろ）
 //   08:00 テキスト抽出
 //   09:00 AI解析
+//   10:30 公開・終了の反映
 //   11:00 提案の作成
 // 12:00の巡回ぶんも拾えるよう、抽出・解析・提案は夕方にもう一度走らせる。
 
@@ -20,6 +21,7 @@ export type JobName =
   | "crawl-geps"
   | "extract-text"
   | "analyze-pending"
+  | "tender-lifecycle"
   | "match-tenders"
   | "remind-quotes"
   | "import-awards"
@@ -38,6 +40,9 @@ export const SCHEDULE: readonly ScheduledJob[] = [
   { name: "crawl-geps", cron: "30 4,12 * * *", description: "調達ポータルを巡回し、資料を取得する" },
   { name: "extract-text", cron: "0 8,16 * * *", description: "取得した資料からテキストを抽出する（必要ならOCR）" },
   { name: "analyze-pending", cron: "0 9,17 * * *", description: "解析待ちの案件をAI解析する" },
+  // 仕様書 §5 の close は「毎日 00:30」。ここでは公開も兼ねるため、提案（11:00 / 19:00）の
+  // 直前にも走らせる。解析が終わった案件をその日のうちに提案へ乗せるため。
+  { name: "tender-lifecycle", cron: "30 0,10,18 * * *", description: "解析完了を公開中にし、提出期限を過ぎた案件を終了にする" },
   { name: "match-tenders", cron: "0 11,19 * * *", description: "条件セットごとに採点し、提案を作る" },
   { name: "remind-quotes", cron: "0 * * * *", description: "回答期限24時間前の未回答へ催促する" },
   { name: "import-awards", cron: "0 3 1 * *", description: "落札実績オープンデータの差分を取り込む（月次）" },

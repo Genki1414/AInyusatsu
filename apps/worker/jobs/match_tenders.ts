@@ -13,7 +13,13 @@
 //   （実装仕様書_v1.md §8）。delivered_at / read_at はここでは更新しない
 
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
-import { evaluateFit, type FitCompanyProfile, type FitCriteriaSet, type FitTender } from "@ai-nyusatsu-bu/domain";
+import {
+  evaluateFit,
+  isDeadlinePassed,
+  type FitCompanyProfile,
+  type FitCriteriaSet,
+  type FitTender,
+} from "@ai-nyusatsu-bu/domain";
 
 const RESCORABLE_STATUSES = new Set(["提案対象", "配信済", "既読"]);
 
@@ -92,13 +98,16 @@ function toFitCriteria(row: CriteriaSetRow): FitCriteriaSet {
 export async function runMatchTenders(now: Date = new Date()): Promise<MatchTendersResult> {
   const client = createServiceClient();
 
-  const { data: tenders, error: tendersError } = await client
+  const { data: allTenders, error: tendersError } = await client
     .from("tenders")
     .select("id, agency_id, qual_category, item, grade, areas, budget, submit_deadline, name")
     .eq("collect_status", "公開中")
     .returns<TenderRow[]>();
   if (tendersError) throw new Error(`案件の取得に失敗しました: ${tendersError.message}`);
-  if (!tenders || tenders.length === 0) {
+  // 提出期限を過ぎた案件は提案しない。tender_lifecycle が「終了」に落とすが、
+  // 期限を過ぎてから次の実行までの間はまだ「公開中」なので、ここでも弾く。
+  const tenders = (allTenders ?? []).filter((t) => !isDeadlinePassed(t.submit_deadline, now));
+  if (tenders.length === 0) {
     return { tendersMatched: 0, criteriaSetsMatched: 0, proposalsCreated: 0, proposalsUpdated: 0, proposalsSkipped: 0 };
   }
   const tenderIds = tenders.map((t) => t.id);
