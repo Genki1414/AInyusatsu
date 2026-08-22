@@ -119,6 +119,33 @@ export async function loadTenderForAnalysis(client: Supabase, tenderId: string):
   };
 }
 
+/**
+ * 1本も成功しなかった案件の失敗理由を記録する。
+ *
+ * これまでは例外を投げるだけで、DBには何も残らなかった。手で流している間は画面で
+ * 気づけるが、自動で回すと「解析されないまま静かに溜まる」ことになる。
+ * 解析結果は保存できないので collect_status は進めず、理由だけを残す。
+ */
+export async function recordAnalysisFailure(
+  client: Supabase,
+  tenderId: string,
+  failures: PromptFailure[],
+): Promise<void> {
+  const reasons = failures.map((f) => f.message);
+  const { error } = await client
+    .from("tenders")
+    .update({
+      needs_review: true,
+      review_reasons: reasons,
+      failure_code: "PARSE_INVALID",
+      failure_reason: reasons.join(" / ").slice(0, 2000),
+    })
+    .eq("id", tenderId);
+  if (error) {
+    console.error(`[analysis] 失敗理由の記録に失敗しました（tender=${tenderId}）: ${error.message}`);
+  }
+}
+
 export type PersistAnalysisResult = {
   analysisVersion: number;
   tenderFieldsFilled: string[];

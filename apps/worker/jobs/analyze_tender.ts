@@ -26,6 +26,8 @@ import {
   analyzeNotes,
   analyzeQualifications,
   callClaude,
+  estimateDocumentTokens,
+  EXPENSIVE_TOKENS,
   formatUsageSummary,
   summarizeUsage,
   type ModelUsage,
@@ -33,7 +35,14 @@ import {
   type OnUsage,
   type UsageSummary,
 } from "@ai-nyusatsu-bu/ai";
-import { collectPromptFailures, loadTenderForAnalysis, persistAnalysis, settle, valueOr } from "./analysis_shared";
+import {
+  collectPromptFailures,
+  loadTenderForAnalysis,
+  persistAnalysis,
+  recordAnalysisFailure,
+  settle,
+  valueOr,
+} from "./analysis_shared";
 
 export type AnalyzeTenderResult = {
   tenderId: string;
@@ -53,6 +62,16 @@ export type AnalyzeTenderResult = {
 export async function analyzeTender(tenderId: string): Promise<AnalyzeTenderResult> {
   const client = createServiceClient();
   const input = await loadTenderForAnalysis(client, tenderId);
+
+  // 資料が極端に大きい案件は1件で数百円かかる。自動で回すと気づけないので、
+  // 実行前に見えるようにしておく（上限のガードは buildAnalysisPrompt が持っている）。
+  const documentTokens = estimateDocumentTokens(input.documents);
+  if (documentTokens >= EXPENSIVE_TOKENS) {
+    console.warn(
+      `[analyze_tender] 資料が大きい案件です（推定${documentTokens.toLocaleString("ja-JP")}トークン）。` +
+        `1件あたりの費用が平均の数倍になります（tender=${tenderId}）`,
+    );
+  }
 
   // スキーマ不一致の理由を捨てない（CLAUDE.md「エラーは握りつぶさない」）。
   // 2回失敗するとParseInvalidErrorになるが、それだけでは「どの項目がなぜ弾かれたか」が
@@ -97,7 +116,9 @@ export async function analyzeTender(tenderId: string): Promise<AnalyzeTenderResu
     ["注意事項", notesR],
   ]);
   if (failures.length === settled.length) {
-    // 1本も成功していないなら保存できるものが無い。理由を添えて失敗として扱う。
+    // 1本も成功していないなら保存できるものが無い。理由をDBに残してから失敗として扱う
+    // （自動実行では例外がログに流れて終わるため、案件側にも残さないと気づけない）。
+    await recordAnalysisFailure(client, tenderId, failures);
     throw new Error(`AI解析がすべて失敗しました: ${failures.map((f) => f.message).join(" / ")}`);
   }
 
