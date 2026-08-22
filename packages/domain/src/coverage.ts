@@ -12,6 +12,17 @@
 // 【二段階にする理由】
 // 1回巡回に失敗しただけで「欠測」と言うと、相手先の一時的な不調でも警報が鳴り続け、
 // そのうち誰も見なくなる。想定間隔を超えた時点で「遅延」、倍を超えたら「欠測」とする。
+//
+// 【「巡回未実装」を分ける理由】
+// 機関マスタには、まだ巡回を実装していないコネクタ（agency-site）の機関が入っている。
+// これらを「未取得」と一緒に並べると、直すべき障害と、これから作る機能の区別がつかない。
+// 分母からは外さない（外すとカバレッジが実態より良く見える）が、別の状態として示す。
+
+/**
+ * 巡回を実装済みのコネクタ。これ以外しか持たない機関は「巡回未実装」とする。
+ * agency-site（機関ごとのサイトを個別に巡回する）は未実装。
+ */
+export const IMPLEMENTED_CONNECTORS = ["kkj", "geps"] as const;
 
 /** expected_freq の値と、取得の想定間隔（日）。 */
 export const EXPECTED_FREQ_DAYS: Record<string, number> = {
@@ -27,6 +38,8 @@ export type CoverageAgency = {
   expectedFreq: string | null;
   /** 最後に取得できた日時（ISO 8601）。一度も取れていなければ null */
   lastSuccessAt: string | null;
+  /** この機関を取りにいくコネクタ名（agencies.sources[].connector） */
+  connectors: string[];
 };
 
 export type CoverageStatus =
@@ -38,6 +51,8 @@ export type CoverageStatus =
   | "欠測"
   /** 一度も取れていない */
   | "未取得"
+  /** この機関を取りにいくコネクタがまだ実装されていない */
+  | "巡回未実装"
   /** expected_freq が無く、判定できない */
   | "基準なし";
 
@@ -59,6 +74,8 @@ export type CoverageSummary = {
   missing: CoverageResult[];
   /** 様子見の機関（遅延） */
   delayed: CoverageResult[];
+  /** 巡回をまだ実装していない機関。障害ではなく未着手の作業 */
+  notImplemented: CoverageResult[];
 };
 
 /** expected_freq を想定間隔（日）に直す。知らない値は基準なし扱いにする（推測しない）。 */
@@ -69,12 +86,20 @@ export function expectedIntervalDays(freq: string | null): number | null {
 }
 
 /** 1機関の状態を判定する。 */
-export function evaluateAgencyCoverage(agency: CoverageAgency, now: Date): CoverageResult {
+export function evaluateAgencyCoverage(
+  agency: CoverageAgency,
+  now: Date,
+  implementedConnectors: readonly string[] = IMPLEMENTED_CONNECTORS,
+): CoverageResult {
   const allowedDays = expectedIntervalDays(agency.expectedFreq);
   const base = { ...agency, allowedDays };
 
   if (allowedDays === null) {
     return { ...base, status: "基準なし", daysSince: null };
+  }
+  // 取りにいく手段がまだ無い機関は、障害として並べない（直せるものと区別する）
+  if (!agency.connectors.some((c) => implementedConnectors.includes(c))) {
+    return { ...base, status: "巡回未実装", daysSince: null };
   }
   if (agency.lastSuccessAt === null) {
     return { ...base, status: "未取得", daysSince: null };
@@ -92,9 +117,16 @@ export function evaluateAgencyCoverage(agency: CoverageAgency, now: Date): Cover
   return { ...base, status: "欠測", daysSince };
 }
 
-/** 機関の一覧を判定し、対応が要るものをまとめる。 */
-export function evaluateCoverage(agencies: CoverageAgency[], now: Date): CoverageSummary {
-  const results = agencies.map((a) => evaluateAgencyCoverage(a, now));
+/**
+ * 機関の一覧を判定し、対応が要るものをまとめる。
+ * 「巡回未実装」は分母（checked）に含める。外すとカバレッジが実態より良く見えるため。
+ */
+export function evaluateCoverage(
+  agencies: CoverageAgency[],
+  now: Date,
+  implementedConnectors: readonly string[] = IMPLEMENTED_CONNECTORS,
+): CoverageSummary {
+  const results = agencies.map((a) => evaluateAgencyCoverage(a, now, implementedConnectors));
   const checked = results.filter((r) => r.status !== "基準なし");
   return {
     results,
@@ -102,5 +134,6 @@ export function evaluateCoverage(agencies: CoverageAgency[], now: Date): Coverag
     healthy: checked.filter((r) => r.status === "正常").length,
     missing: checked.filter((r) => r.status === "欠測" || r.status === "未取得"),
     delayed: checked.filter((r) => r.status === "遅延"),
+    notImplemented: checked.filter((r) => r.status === "巡回未実装"),
   };
 }

@@ -8,7 +8,13 @@
 // 同じファイルを2回流しても件数は変わらない（supabase/migrations/20260802000001_awards_open_data.sql）。
 
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
-import { hasUnexpectedShape, normalizeAwardRow, parseAwardsCsv, type NormalizedAward } from "@ai-nyusatsu-bu/domain";
+import {
+  dedupeByUpsertKey,
+  hasUnexpectedShape,
+  normalizeAwardRow,
+  parseAwardsCsv,
+  type NormalizedAward,
+} from "@ai-nyusatsu-bu/domain";
 import { fetchDiffData, fetchFullData, type FetchResult } from "../connectors/p-portal-awards";
 
 const UPSERT_BATCH_SIZE = 500;
@@ -99,14 +105,25 @@ async function processCsvText(text: string, sourceBatch: string): Promise<Import
     normalized.push(award);
   }
 
-  await upsertAwards(normalized, sourceBatch);
+  // 同一キー（procurement_no, opened_at）が1回のupsert文に2つ入るとPostgresが失敗する。
+  // 実データに同一キーの行が含まれているため、ここでまとめてから投入する。
+  const { awards: deduped, duplicates } = dedupeByUpsertKey(normalized);
+  if (duplicates > 0) {
+    console.warn(`[import_awards] 一意キーが重複する行を${duplicates}件まとめました（後に現れた行を採用）`);
+  }
+
+  await upsertAwards(deduped, sourceBatch);
+
+  const detail: Record<string, unknown> = {};
+  if (Object.keys(skipReasons).length > 0) detail.skipReasons = skipReasons;
+  if (duplicates > 0) detail.duplicates = duplicates;
 
   return {
     status: "succeeded",
     rowsTotal: rows.length,
-    rowsUpserted: normalized.length,
-    rowsSkipped: rows.length - normalized.length,
-    detail: Object.keys(skipReasons).length > 0 ? { skipReasons } : undefined,
+    rowsUpserted: deduped.length,
+    rowsSkipped: rows.length - deduped.length,
+    detail: Object.keys(detail).length > 0 ? detail : undefined,
   };
 }
 
