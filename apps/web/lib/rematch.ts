@@ -6,7 +6,13 @@
 //
 // 実装はapps/worker側と重複するが、片方はservice_roleで全org一括、もう片方はRLSで
 // 自org限定という前提が異なるため、無理に共通化していない。
-import { evaluateFit, type FitCompanyProfile, type FitCriteriaSet, type FitTender } from "@ai-nyusatsu-bu/domain";
+import {
+  evaluateFit,
+  isDeadlinePassed,
+  type FitCompanyProfile,
+  type FitCriteriaSet,
+  type FitTender,
+} from "@ai-nyusatsu-bu/domain";
 import type { createClient } from "@/lib/supabase/server";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
@@ -56,7 +62,7 @@ export type RematchResult = { proposalsCreated: number; proposalsUpdated: number
 export async function rematchOrgProposals(supabase: Supabase, orgId: string): Promise<RematchResult> {
   const now = new Date();
 
-  const [{ data: tenders, error: tendersError }, { data: criteriaSets, error: criteriaError }, { data: profileRow }, { data: partnerRows }] =
+  const [{ data: allTenders, error: tendersError }, { data: criteriaSets, error: criteriaError }, { data: profileRow }, { data: partnerRows }] =
     await Promise.all([
       supabase
         .from("tenders")
@@ -77,7 +83,9 @@ export async function rematchOrgProposals(supabase: Supabase, orgId: string): Pr
     ]);
   if (tendersError) throw new Error(`案件の取得に失敗しました: ${tendersError.message}`);
   if (criteriaError) throw new Error(`条件セットの取得に失敗しました: ${criteriaError.message}`);
-  if (!tenders || tenders.length === 0 || !criteriaSets || criteriaSets.length === 0) {
+  // 提出期限を過ぎた案件は提案しない（apps/worker/jobs/match_tenders.ts と同じ扱い）
+  const tenders = (allTenders ?? []).filter((t) => !isDeadlinePassed(t.submit_deadline, now));
+  if (tenders.length === 0 || !criteriaSets || criteriaSets.length === 0) {
     return { proposalsCreated: 0, proposalsUpdated: 0, proposalsSkipped: 0 };
   }
 

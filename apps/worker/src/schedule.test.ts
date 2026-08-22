@@ -31,7 +31,33 @@ describe("SCHEDULE", () => {
     expect(at("extract-text")).toBeLessThan(at("analyze-pending"));
     expect(at("analyze-pending")).toBeLessThan(at("match-tenders"));
   });
+
+  it("提案の直前に公開・終了が反映される（期限切れを提案しない／解析結果をその日のうちに載せる）", () => {
+    const lifecycleHours = hoursOf(job("tender-lifecycle").cron);
+    for (const matchHour of hoursOf(job("match-tenders").cron)) {
+      expect(
+        lifecycleHours.some((h) => h < matchHour && matchHour - h <= 1),
+        `${matchHour}時の提案の直前に tender-lifecycle が走っていません`,
+      ).toBe(true);
+    }
+  });
+
+  it("公開・終了は毎日走る（仕様書 §5 close は毎日00:30）", () => {
+    expect(hoursOf(job("tender-lifecycle").cron)).toContain(0);
+  });
 });
+
+/** ジョブを名前で引く。 */
+function job(name: string) {
+  const found = SCHEDULE.find((j) => j.name === name);
+  if (!found) throw new Error(`スケジュールに ${name} がありません`);
+  return found;
+}
+
+/** cronの2番目（時）をすべて数値で返す。「0,10,18」なら [0, 10, 18]。 */
+function hoursOf(cron: string): number[] {
+  return cron.split(/\s+/)[1].split(",").map(Number);
+}
 
 /** cronの先頭（分）を数値で返す。 */
 function minuteOf(cron: string): number {

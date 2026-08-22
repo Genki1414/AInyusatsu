@@ -25,6 +25,7 @@ import { runKkjSync } from "../jobs/kkj_sync";
 import { runDailyGepsCrawl } from "../jobs/crawl_geps";
 import { runExtractPendingDocuments } from "../jobs/extract_document_text";
 import { runAnalyzePending } from "../jobs/analyze_pending";
+import { runTenderLifecycle } from "../jobs/tender_lifecycle";
 import { runMatchTenders } from "../jobs/match_tenders";
 import { runQuoteReminders } from "../jobs/remind_quotes";
 import { runDiffImport } from "../jobs/import_awards";
@@ -47,6 +48,7 @@ const HANDLERS: Record<JobName, () => Promise<unknown>> = {
   "crawl-geps": () => runDailyGepsCrawl(todayJst()),
   "extract-text": () => runExtractPendingDocuments(),
   "analyze-pending": () => runAnalyzePending(),
+  "tender-lifecycle": () => runTenderLifecycle(),
   "match-tenders": () => runMatchTenders(),
   "remind-quotes": () => runQuoteReminders(),
   // 落札実績は前日ぶんの差分を取り込む（当日ぶんはまだ公開されていない）
