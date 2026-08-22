@@ -7,6 +7,7 @@
 
 import { agencyIdFromName, dedupeKey, type NormalizedKkjTender } from "@ai-nyusatsu-bu/domain";
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
+import { recordAgencySuccess } from "./coverage_check";
 import { fetchItemsByDate } from "../connectors/kkj";
 
 export type KkjSyncSummary = {
@@ -82,6 +83,8 @@ export async function runKkjSync(dateIso: string): Promise<KkjSyncSummary> {
   let merged = 0;
   let skipped = 0;
   let status: KkjSyncSummary["status"] = "completed";
+  // 取得できた機関。欠測検知（coverage_check）の基準になる last_success_at を更新する
+  const succeededAgencies = new Set<string>();
 
   try {
     const result = await fetchItemsByDate(dateIso);
@@ -101,8 +104,12 @@ export async function runKkjSync(dateIso: string): Promise<KkjSyncSummary> {
       });
       await ensureAgency(client, agencyId, tender.agencyName);
       await upsertTender(client, tender, agencyId, key);
+      succeededAgencies.add(agencyId);
       merged++;
     }
+
+    // 取れたことを記録する。ここが無いと「取れていない」と区別がつかない
+    await recordAgencySuccess(client, succeededAgencies);
   } catch (err) {
     status = "failed";
     await client.from("crawl_errors").insert({

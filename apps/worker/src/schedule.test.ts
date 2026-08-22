@@ -45,6 +45,13 @@ describe("SCHEDULE", () => {
   it("公開・終了は毎日走る（仕様書 §5 close は毎日00:30）", () => {
     expect(hoursOf(job("tender-lifecycle").cron)).toContain(0);
   });
+
+  it("欠測チェックは毎日06:00（仕様書 §5 coverage_check）", () => {
+    // 巡回（04:30〜07:00ごろ）と重なるが、判定は「想定間隔を過ぎたか」なので、
+    // その日ぶんがまだ終わっていなくても誤って警報にはならない。
+    expect(hoursOf(job("coverage-check").cron)).toEqual([6]);
+    expect(minuteOf(job("coverage-check").cron)).toBe(0);
+  });
 });
 
 /** ジョブを名前で引く。 */

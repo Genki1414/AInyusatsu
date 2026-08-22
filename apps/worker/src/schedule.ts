@@ -23,6 +23,7 @@ export type JobName =
   | "analyze-pending"
   | "tender-lifecycle"
   | "match-tenders"
+  | "coverage-check"
   | "remind-quotes"
   | "import-awards"
   | "refresh-market-rates";
@@ -44,6 +45,7 @@ export const SCHEDULE: readonly ScheduledJob[] = [
   // 直前にも走らせる。解析が終わった案件をその日のうちに提案へ乗せるため。
   { name: "tender-lifecycle", cron: "30 0,10,18 * * *", description: "解析完了を公開中にし、提出期限を過ぎた案件を終了にする" },
   { name: "match-tenders", cron: "0 11,19 * * *", description: "条件セットごとに採点し、提案を作る" },
+  { name: "coverage-check", cron: "0 6 * * *", description: "機関ごとに、想定頻度に対して取得できているかを確かめる" },
   { name: "remind-quotes", cron: "0 * * * *", description: "回答期限24時間前の未回答へ催促する" },
   { name: "import-awards", cron: "0 3 1 * *", description: "落札実績オープンデータの差分を取り込む（月次）" },
   { name: "refresh-market-rates", cron: "30 3 1 * *", description: "落札率の集計を作り直す（月次）" },

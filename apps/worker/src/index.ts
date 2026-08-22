@@ -27,6 +27,7 @@ import { runExtractPendingDocuments } from "../jobs/extract_document_text";
 import { runAnalyzePending } from "../jobs/analyze_pending";
 import { runTenderLifecycle } from "../jobs/tender_lifecycle";
 import { runMatchTenders } from "../jobs/match_tenders";
+import { runCoverageCheck } from "../jobs/coverage_check";
 import { runQuoteReminders } from "../jobs/remind_quotes";
 import { runDiffImport } from "../jobs/import_awards";
 import { refreshMarketRates } from "../jobs/refresh_market_rates";
@@ -50,6 +51,7 @@ const HANDLERS: Record<JobName, () => Promise<unknown>> = {
   "analyze-pending": () => runAnalyzePending(),
   "tender-lifecycle": () => runTenderLifecycle(),
   "match-tenders": () => runMatchTenders(),
+  "coverage-check": () => runCoverageCheck(),
   "remind-quotes": () => runQuoteReminders(),
   // 落札実績は前日ぶんの差分を取り込む（当日ぶんはまだ公開されていない）
   "import-awards": () => runDiffImport(yesterday()),

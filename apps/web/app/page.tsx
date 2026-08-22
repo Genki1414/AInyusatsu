@@ -8,6 +8,7 @@ import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { Panel, Pill, ProposePill } from "@/components/ui";
 import { requireOrgContext } from "@/lib/auth";
+import { evaluateCoverage, type CoverageAgency } from "@ai-nyusatsu-bu/domain";
 
 type ProposalDeadlineRow = {
   id: string;
@@ -22,6 +23,14 @@ type ProposalDeadlineRow = {
   } | null;
 };
 
+type AgencyRow = {
+  id: string;
+  name: string;
+  expected_freq: string | null;
+  last_success_at: string | null;
+  parent_id: string | null;
+};
+
 function daysLeft(iso: string | null, now: Date): number | null {
   if (!iso) return null;
   const target = new Date(iso);
@@ -33,7 +42,14 @@ export default async function HomePage() {
   const { supabase, orgId, orgName } = await requireOrgContext();
   const now = new Date();
 
-  const [{ data: profile }, { count: criteriaCount }, { count: partnerCount }, { count: consideringCount }, { data: proposalRows }] =
+  const [
+    { data: profile },
+    { count: criteriaCount },
+    { count: partnerCount },
+    { count: consideringCount },
+    { data: proposalRows },
+    { data: agencyRows },
+  ] =
     await Promise.all([
       supabase.from("company_profiles").select("qual_categories").eq("org_id", orgId).maybeSingle<{ qual_categories: string[] }>(),
       supabase.from("criteria_sets").select("id", { count: "exact", head: true }),
@@ -44,7 +60,28 @@ export default async function HomePage() {
         .select("id, status, tenders(id, name, qa_deadline, submit_deadline, bid_open_at, collect_status)")
         .neq("status", "対象外")
         .returns<ProposalDeadlineRow[]>(),
+      // 取れていないことを隠さない（CLAUDE.md 最重要の前提7）。機関ごとの収集状況を出す
+      supabase
+        .from("agencies")
+        .select("id, name, expected_freq, last_success_at, parent_id")
+        .eq("active", true)
+        .returns<AgencyRow[]>(),
     ]);
+
+  // 公告を出す単位（子を持たない機関）だけを数える（機関マスタ_v2.md §4「葉ノード基準」）
+  const agencies = agencyRows ?? [];
+  const hasChild = new Set(agencies.map((a) => a.parent_id).filter((id): id is string => id !== null));
+  const coverage = evaluateCoverage(
+    agencies
+      .filter((a) => !hasChild.has(a.id))
+      .map((a): CoverageAgency => ({
+        id: a.id,
+        name: a.name,
+        expectedFreq: a.expected_freq,
+        lastSuccessAt: a.last_success_at,
+      })),
+    now,
+  );
 
   const setupSteps = [
     { label: "入札資格を確認する", done: (profile?.qual_categories?.length ?? 0) > 0 },
@@ -101,6 +138,38 @@ export default async function HomePage() {
           ))}
         </div>
       </Panel>
+
+      {coverage.checked > 0 && (
+        <Panel title={`案件の収集状況（${coverage.healthy}/${coverage.checked}機関）`}>
+          {coverage.missing.length === 0 && coverage.delayed.length === 0 ? (
+            <p className="text-xs text-slate-600">監視している発注機関はすべて、想定どおりの間隔で取得できています。</p>
+          ) : (
+            <>
+              <p className="text-xs leading-relaxed text-slate-600">
+                下の機関は想定した間隔で取得できていません。これらの機関の案件は、
+                <span className="font-semibold">出ていないのではなく、こちらで取れていない</span>可能性があります。
+              </p>
+              <ul className="mt-2 space-y-1">
+                {[...coverage.missing, ...coverage.delayed].slice(0, 8).map((a) => (
+                  <li key={a.id} className="flex flex-wrap items-center gap-2 text-xs">
+                    <Pill tone={a.status === "遅延" ? "amber" : "rose"}>{a.status}</Pill>
+                    <span className="font-medium text-slate-800">{a.name}</span>
+                    <span className="text-slate-500">
+                      想定 {a.expectedFreq}
+                      {a.daysSince === null ? "／一度も取得できていません" : `／最終取得から${Math.floor(a.daysSince)}日`}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {coverage.missing.length + coverage.delayed.length > 8 && (
+                <p className="mt-2 text-xs text-slate-500">
+                  ほか{coverage.missing.length + coverage.delayed.length - 8}機関
+                </p>
+              )}
+            </>
+          )}
+        </Panel>
+      )}
 
       <div className="grid gap-3 lg:grid-cols-[2fr_1fr]">
         <Panel title="検討中の案件" dense right={<Link href="/proposals" className="text-xs text-blue-800 underline">すべて見る</Link>}>
