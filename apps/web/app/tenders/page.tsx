@@ -173,12 +173,20 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
   if (maxBudget !== null) query = query.lte("budget", maxBudget);
   if (within !== null) query = query.lte("submit_deadline", deadlineCutoff(within, now).toISOString());
 
-  const [{ data: tenders, count, error }, { count: pendingCount }] = await Promise.all([
+  const [{ data: tenders, count, error }, { count: pendingCount }, { count: disclosedBudgetCount }] = await Promise.all([
     query.returns<TenderRow[]>(),
     supabase
       .from("tenders")
       .select("id", { count: "exact", head: true })
       .in("collect_status", [...PENDING_COLLECT_STATUSES]),
+    // 予定価格は国の入札では原則として事前公表されない（AI解析プロンプト集.md：
+    // 「非公表」「事後公表」なら null）。実際に何件あるかを絞り込みの見出しに出して、
+    // 使う前に無駄かどうかが分かるようにする。
+    supabase
+      .from("tenders")
+      .select("id", { count: "exact", head: true })
+      .in("collect_status", [...BROWSABLE_COLLECT_STATUSES])
+      .not("budget", "is", null),
   ]);
   if (error) throw new Error(`案件の取得に失敗しました: ${error.message}`);
 
@@ -292,7 +300,10 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-slate-600">予定価格</span>
+            <span className="text-xs text-slate-600">
+              予定価格
+              <span className="ml-1 text-slate-400">（公表 {(disclosedBudgetCount ?? 0).toLocaleString("ja-JP")}件）</span>
+            </span>
             <input
               type="number"
               name="min_budget"
@@ -341,7 +352,7 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
           {orgName}の提案条件に合わない案件も、合わない理由を添えて表示します。
           {pendingCount ? `ほかに解析待ちが${pendingCount.toLocaleString("ja-JP")}件あります。` : ""}
           {minBudget !== null || maxBudget !== null
-            ? "予定価格で絞ると、予定価格が取れていない案件は除かれます。"
+            ? "予定価格で絞ると、予定価格が非公表・未確認の案件は除かれます。国の入札では予定価格を事前公表しないことが多く、公表されている案件はわずかです。"
             : ""}
           {agencyMatchTruncated
             ? `「${keyword}」に一致する発注機関が多すぎるため、${AGENCY_MATCH_LIMIT}機関までで打ち切っています。機関名をもう少し詳しく入れてください。`
