@@ -4,7 +4,6 @@ import {
   deadlineCutoff,
   expandAreaFilter,
   hasActiveFilter,
-  parseBudgetFilter,
   parseDeadlineWithin,
   PENDING_COLLECT_STATUSES,
   pickBestProposal,
@@ -106,25 +105,6 @@ describe("tenderVerdict", () => {
       status: "検討中",
       score: 88,
     });
-  });
-});
-
-describe("parseBudgetFilter", () => {
-  it("円単位のintegerを読む", () => {
-    expect(parseBudgetFilter("5000000")).toBe(5_000_000);
-    expect(parseBudgetFilter("0")).toBe(0);
-  });
-
-  it("空・未指定は指定なし", () => {
-    expect(parseBudgetFilter(undefined)).toBeNull();
-    expect(parseBudgetFilter("")).toBeNull();
-    expect(parseBudgetFilter("   ")).toBeNull();
-  });
-
-  it("数値でない値・負の値・小数は指定なしに落とす（推測で読み替えない）", () => {
-    expect(parseBudgetFilter("500万")).toBeNull();
-    expect(parseBudgetFilter("-1")).toBeNull();
-    expect(parseBudgetFilter("1.5")).toBeNull();
   });
 });
 

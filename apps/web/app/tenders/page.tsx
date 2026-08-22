@@ -20,7 +20,6 @@ import {
   deadlineCutoff,
   expandAreaFilter,
   hasActiveFilter,
-  parseBudgetFilter,
   parseDeadlineWithin,
   PENDING_COLLECT_STATUSES,
   proposalsByTender,
@@ -52,8 +51,6 @@ type SearchParams = {
   area?: string;
   qual?: string;
   grade?: string;
-  min_budget?: string;
-  max_budget?: string;
   within?: string;
   sort?: string;
   page?: string;
@@ -122,15 +119,13 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
   const area = pickOption(params.area, [...AREA_OPTIONS, ...PREFECTURE_OPTIONS]);
   const qual = pickOption(params.qual, QUAL_CATEGORIES);
   const grade = pickOption(params.grade, GRADE_OPTIONS);
-  const minBudget = parseBudgetFilter(params.min_budget);
-  const maxBudget = parseBudgetFilter(params.max_budget);
   const within = parseDeadlineWithin(params.within);
   const sortKey: SortKey = params.sort === "newest" ? "newest" : "deadline";
   const sort = SORTS[sortKey];
   const page = pageFrom(params.page);
   const from = (page - 1) * PAGE_SIZE;
 
-  const filtered = hasActiveFilter([keyword, item, area, qual, grade, minBudget, maxBudget, within]);
+  const filtered = hasActiveFilter([keyword, item, area, qual, grade, within]);
 
   // キーワードは案件名だけでなく発注機関名でも探せるようにする。
   // 機関は数百件なので、先に機関を引いてから案件を絞る。
@@ -168,25 +163,20 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
     // 「関東・甲信越」で絞ったときに「東京都」の案件が消えないよう、地方区分は都道府県まで広げる
     query = query.overlaps("areas", expandAreaFilter(area, REGION_PREFECTURES));
   }
-  // 予定価格で絞ると、価格が取れていない案件は除かれる（画面に注記を出す）
-  if (minBudget !== null) query = query.gte("budget", minBudget);
-  if (maxBudget !== null) query = query.lte("budget", maxBudget);
   if (within !== null) query = query.lte("submit_deadline", deadlineCutoff(within, now).toISOString());
 
-  const [{ data: tenders, count, error }, { count: pendingCount }, { count: disclosedBudgetCount }] = await Promise.all([
+  const [{ data: tenders, count, error }, { count: pendingCount }, { count: totalCount }] = await Promise.all([
     query.returns<TenderRow[]>(),
     supabase
       .from("tenders")
       .select("id", { count: "exact", head: true })
       .in("collect_status", [...PENDING_COLLECT_STATUSES]),
-    // 予定価格は国の入札では原則として事前公表されない（AI解析プロンプト集.md：
-    // 「非公表」「事後公表」なら null）。実際に何件あるかを絞り込みの見出しに出して、
-    // 使う前に無駄かどうかが分かるようにする。
+    // 絞り込みに関係なく、いま見られる案件の総数。絞った結果だけを出すと
+    // 「案件が少ない」と見えてしまうので、母数を必ず添える。
     supabase
       .from("tenders")
       .select("id", { count: "exact", head: true })
-      .in("collect_status", [...BROWSABLE_COLLECT_STATUSES])
-      .not("budget", "is", null),
+      .in("collect_status", [...BROWSABLE_COLLECT_STATUSES]),
   ]);
   if (error) throw new Error(`案件の取得に失敗しました: ${error.message}`);
 
@@ -225,8 +215,6 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
     if (area !== "") search.set("area", area);
     if (qual !== "") search.set("qual", qual);
     if (grade !== "") search.set("grade", grade);
-    if (minBudget !== null) search.set("min_budget", String(minBudget));
-    if (maxBudget !== null) search.set("max_budget", String(maxBudget));
     if (within !== null) search.set("within", String(within));
     if (sortKey !== "deadline") search.set("sort", sortKey);
     if (target > 1) search.set("page", String(target));
@@ -238,7 +226,11 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
     <AppShell active="tenders" orgName={orgName}>
       <Panel
         dense
-        title={`すべての案件（${total.toLocaleString("ja-JP")}）`}
+        title={
+          filtered
+            ? `すべての案件（${(totalCount ?? 0).toLocaleString("ja-JP")}件中 ${total.toLocaleString("ja-JP")}件）`
+            : `すべての案件（${(totalCount ?? 0).toLocaleString("ja-JP")}件）`
+        }
         right={
           filtered ? (
             <Link href="/tenders" className="text-xs text-blue-800 underline">
@@ -300,31 +292,6 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-slate-600">
-              予定価格
-              <span className="ml-1 text-slate-400">（公表 {(disclosedBudgetCount ?? 0).toLocaleString("ja-JP")}件）</span>
-            </span>
-            <input
-              type="number"
-              name="min_budget"
-              min={0}
-              step={1}
-              defaultValue={minBudget ?? ""}
-              placeholder="下限（円）"
-              className={`${inputClass} w-28 tabular-nums`}
-              aria-label="予定価格の下限（円）"
-            />
-            <span className="text-xs text-slate-400">〜</span>
-            <input
-              type="number"
-              name="max_budget"
-              min={0}
-              step={1}
-              defaultValue={maxBudget ?? ""}
-              placeholder="上限（円）"
-              className={`${inputClass} w-28 tabular-nums`}
-              aria-label="予定価格の上限（円）"
-            />
             <select name="within" defaultValue={within ?? ""} className={inputClass} aria-label="提出期限">
               <option value="">提出期限：すべて</option>
               {DEADLINE_WITHIN_OPTIONS.map((d) => (
@@ -351,9 +318,6 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
           公告の取得・資料の取得・AI解析まで終わった案件をすべて出しています。
           {orgName}の提案条件に合わない案件も、合わない理由を添えて表示します。
           {pendingCount ? `ほかに解析待ちが${pendingCount.toLocaleString("ja-JP")}件あります。` : ""}
-          {minBudget !== null || maxBudget !== null
-            ? "予定価格で絞ると、予定価格が非公表・未確認の案件は除かれます。国の入札では予定価格を事前公表しないことが多く、公表されている案件はわずかです。"
-            : ""}
           {agencyMatchTruncated
             ? `「${keyword}」に一致する発注機関が多すぎるため、${AGENCY_MATCH_LIMIT}機関までで打ち切っています。機関名をもう少し詳しく入れてください。`
             : ""}

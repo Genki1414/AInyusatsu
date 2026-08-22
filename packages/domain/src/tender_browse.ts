@@ -86,17 +86,6 @@ export function tenderVerdict(best: BrowseProposal | null): TenderVerdict {
 export const DEADLINE_WITHIN_OPTIONS = [7, 14, 30] as const;
 export type DeadlineWithin = (typeof DEADLINE_WITHIN_OPTIONS)[number];
 
-/**
- * 予定価格の絞り込みを読む。円単位のintegerのみ受け付ける（CLAUDE.md：小数を使わない）。
- * 空・数値でない・負の値は「指定なし」（null）にする。
- */
-export function parseBudgetFilter(raw: string | undefined): number | null {
-  if (raw === undefined || raw.trim() === "") return null;
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed < 0) return null;
-  return parsed;
-}
-
 /** 提出期限の絞り込み（残り日数）を読む。選択肢に無い値は「指定なし」にする。 */
 export function parseDeadlineWithin(raw: string | undefined): DeadlineWithin | null {
   const parsed = Number(raw);
