@@ -5,10 +5,14 @@
 // 参照：docs/reference/ローカル実行手順.md
 
 import { analyzeTender } from "../jobs/analyze_tender";
-import { cliArgs } from "./_args";
+import { CliUsageError, cliArgs, rejectExtraArgs, runCli } from "./_args";
+
+const USAGE = "pnpm --filter worker analyze:tender -- <tenders.id>";
 
 async function main() {
-  const tenderId = cliArgs()[0];
+  const args = cliArgs();
+  rejectExtraArgs(args, 1, USAGE);
+  const tenderId = args[0];
   if (!tenderId) {
     console.error("使い方: pnpm --filter worker analyze:tender -- <tenders.id>");
     process.exitCode = 1;
@@ -19,7 +23,4 @@ async function main() {
   console.log(JSON.stringify(result, null, 2));
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exitCode = 1;
-});
+runCli(main);

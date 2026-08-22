@@ -4,17 +4,17 @@
 // 参照：docs/reference/ローカル実行手順.md
 
 import { refreshMarketRates } from "../jobs/refresh_market_rates";
-import { cliArgs } from "./_args";
+import { cliArgs, rejectExtraArgs, requirePositiveInt, runCli } from "./_args";
+
+const USAGE = "pnpm --filter worker market-rates:refresh [-- 対象月数]";
 
 async function main() {
-  const arg = cliArgs()[0];
-  const periodMonths = arg ? Number(arg) : undefined;
+  const args = cliArgs();
+  rejectExtraArgs(args, 1, USAGE);
+  const periodMonths = args[0] ? requirePositiveInt(args[0], "対象月数") : undefined;
   console.log(`market_ratesを再計算します（対象=${periodMonths ?? 24}か月）`);
   const outcome = await refreshMarketRates(periodMonths);
   console.log(JSON.stringify(outcome, null, 2));
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exitCode = 1;
-});
+runCli(main);

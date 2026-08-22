@@ -17,7 +17,7 @@ import {
   stagePrompts,
   submitAnalysisBatch,
 } from "../jobs/analyze_tenders_batch";
-import { cliArgs } from "./_args";
+import { cliArgs, runCli } from "./_args";
 
 const USAGE = `使い方:
   analyze:batch -- submit <1|2> <tenderId>...

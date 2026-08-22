@@ -15,20 +15,26 @@ import {
   maxNoticeAgeFromEnv,
   runAnalyzePending,
 } from "../jobs/analyze_pending";
-import { cliArgs } from "./_args";
+import { CliUsageError, cliArgs, rejectExtraArgs, runCli } from "./_args";
+
+const USAGE = "pnpm --filter worker analyze:pending [-- 件数 [公告日の日数]]";
 
 /** 実測の1案件あたりの費用（円）。見込み額の表示にだけ使う。 */
 const YEN_PER_TENDER = 69;
 
 async function main() {
-  const [raw, ageRaw] = cliArgs();
+  const args = cliArgs();
+  rejectExtraArgs(args, 2, USAGE);
+  const [raw, ageRaw] = args;
   let limit: number;
   if (raw === undefined) {
     limit = analyzeLimitFromEnv();
   } else {
     const parsed = Number(raw);
     if (!Number.isInteger(parsed) || parsed < 0) {
-      throw new Error(`件数は0以上の整数で指定してください（受け取った値: ${raw}）。既定は${DEFAULT_ANALYZE_LIMIT}件です`);
+      throw new CliUsageError(
+        `件数は0以上の整数で指定してください（受け取った値: ${JSON.stringify(raw)}）。既定は${DEFAULT_ANALYZE_LIMIT}件です`,
+      );
     }
     limit = parsed;
   }
@@ -39,7 +45,7 @@ async function main() {
   if (ageRaw !== undefined) {
     maxAge = parseMaxNoticeAgeDays(ageRaw);
     if (maxAge === null) {
-      throw new Error(`公告日の日数は1以上の整数で指定してください（受け取った値: ${ageRaw}）`);
+      throw new CliUsageError(`公告日の日数は1以上の整数で指定してください（受け取った値: ${JSON.stringify(ageRaw)}）`);
     }
   }
 
@@ -56,7 +62,4 @@ async function main() {
   console.log(JSON.stringify(summary, null, 2));
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exitCode = 1;
-});
+runCli(main);

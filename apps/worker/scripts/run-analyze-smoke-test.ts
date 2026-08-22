@@ -12,11 +12,15 @@
 
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
 import { analyzeBasicInfo, callClaude } from "@ai-nyusatsu-bu/ai";
-import { cliArgs } from "./_args";
+import { cliArgs, rejectExtraArgs, runCli } from "./_args";
+
+const USAGE = "pnpm --filter worker ai:smoke-test [-- <tender_documents.id>]";
 
 async function main() {
   const client = createServiceClient();
-  const documentId = cliArgs()[0];
+  const args = cliArgs();
+  rejectExtraArgs(args, 1, USAGE);
+  const documentId = args[0];
 
   const query = client
     .from("tender_documents")
@@ -69,7 +73,4 @@ async function main() {
   console.log(JSON.stringify(result, null, 2));
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exitCode = 1;
-});
+runCli(main);
