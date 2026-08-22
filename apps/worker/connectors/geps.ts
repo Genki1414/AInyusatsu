@@ -26,6 +26,38 @@ import {
   type NormalizedGepsTender,
 } from "@ai-nyusatsu-bu/domain";
 
+/**
+ * 同一ドメインへのアクセス間隔（ミリ秒）。
+ * docs/調達ポータルコネクタ設計.md §2-5 の「同一ドメインは1並列・1req/2秒」。
+ * これまで実装に入っておらず、間隔ゼロで叩いていた（2026-08-22 実行時に多数のタイムアウト）。
+ */
+const POLITE_INTERVAL_MS = 2000;
+
+/** 検索結果の描画を待つ上限。0件の日もあるため、出現しなくても先へ進む。 */
+const RESULT_WAIT_MS = 20000;
+
+/** 画面内の目印（入力欄・表）が出るのを待つ上限。 */
+const ELEMENT_WAIT_MS = 30000;
+
+/** 1案件あたりの試行回数。相手先の一時的な遅さで取りこぼさないため。 */
+const MAX_ITEM_ATTEMPTS = 2;
+
+/** 再試行の前に置く間隔。相手先が詰まっているときに続けて叩かない。 */
+const RETRY_BACKOFF_MS = 5000;
+
+/**
+ * 画面遷移のあとに落ち着くのを待つ。
+ *
+ * waitForLoadState("networkidle") はこのサイトでは安定しない。実行ログでも
+ * 「"load" event fired」のあと networkidle に到達せず30秒でタイムアウトしていた
+ * （ページ自体は読めている）。load の完了だけを待ち、あとは固定の間隔を置く。
+ * この待ち時間はアクセス間隔（1req/2秒）を兼ねる。
+ */
+async function settle(page: Page): Promise<void> {
+  await page.waitForLoadState("load");
+  await page.waitForTimeout(POLITE_INTERVAL_MS);
+}
+
 // 実データ確認済み（2026-08-01）：GEPSの検索フォームは物品だけ・役務だけを絞り込む手段が
 // 無い（「分類」はradioで全て／物品・役務／簡易な公共事業の3択のみ）。そのため検索は
 // 分類を指定せず1日1回だけ行い、案件ごとの分類はextractDetailFromCurrentPage()が
@@ -82,6 +114,7 @@ function contactInfo(): { company: string; name: string; tel: string; email: str
 /** 公開開始日=dateIso（1日分）で検索し、結果件数を返す（分類での絞り込みはできない。上記コメント参照）。 */
 export async function searchByDate(page: Page, dateIso: string): Promise<GepsSearchResult> {
   await page.goto(SEARCH_URL);
+  await settle(page);
 
   // 公開開始日（開始・終了とも同じ日を指定して1日ぶんに絞る）。
   // 実データ確認済み（2026-08-01）：ラベルは「公開開始日の自」「公開開始日の至」
@@ -98,13 +131,22 @@ export async function searchByDate(page: Page, dateIso: string): Promise<GepsSea
   // 実際の検索実行ボタンは <input type="submit" value="検索 " id="OAA0102"> で、
   // 前後の空白を除けばアクセシブルネームが厳密に"検索"のみなので、exact:trueで一意にする。
   await page.getByRole("button", { name: "検索", exact: true }).click();
-  await page.waitForLoadState("networkidle");
+  await settle(page);
+
+  // 検索結果の描画を待つ。0件の日もあるため、リンクの出現は必須にしない
+  await page.getByRole("link", { name: "公示本文" }).first().waitFor({ state: "visible", timeout: RESULT_WAIT_MS }).catch(() => {});
 
   // 実データ確認済み（2026-08-01）：「公示本文」のリンクはhrefを持つ<a>ではなく、
   // javascript:doSubmitParams(...)でページ内フォーム送信するリンクだった。そのため
   // hrefを事前に取得してpage.goto()する方式（旧実装）は net::ERR_ABORTED になる。
   // 実際にクリックして遷移させる必要がある（openDetailByIndex参照）。
   const count = await page.getByRole("link", { name: "公示本文" }).count();
+  if (count === 0) {
+    // 「公示が無い日」と「描画が間に合わなかった」を、この時点では区別できない。
+    // 黙って0件として扱わず、あとから追えるように残す。
+    // eslint-disable-next-line no-console
+    console.warn(`検索結果が0件でした（${dateIso}）。公示が無い日か、画面の描画が間に合っていない可能性があります`);
+  }
 
   return { count, truncated: isSearchTruncated(count) };
 }
@@ -128,7 +170,9 @@ export async function openDetailByIndex(
   // detail画面のURL（/OAA0104）への遷移を明示的に待ってから読み取る。
   const link = page.getByRole("link", { name: "公示本文" }).nth(index);
   await Promise.all([page.waitForURL(/OAA0104/), link.click()]);
-  await page.waitForLoadState("networkidle");
+  await settle(page);
+  // 詳細は <tr><th>ラベル</th><td>値</td></tr> の表。表の出現を直接待つ
+  await page.locator("th").first().waitFor({ state: "visible", timeout: ELEMENT_WAIT_MS });
   const { detail, documentDownloadUrl } = await extractDetailFromCurrentPage(page);
   return { detail, documentDownloadUrl, detailPageUrl: page.url() };
 }
@@ -199,6 +243,7 @@ async function extractDetailFromCurrentPage(
  */
 export async function downloadDocuments(page: Page, documentDownloadUrl: string): Promise<GepsDocument[]> {
   await page.goto(documentDownloadUrl);
+  await settle(page);
   await dismissCookieConsent(page);
 
   // 連絡先情報入力方法選択：実データ確認済み（2026-08-01）、リンクやボタンではなくradio
@@ -222,7 +267,9 @@ export async function downloadDocuments(page: Page, documentDownloadUrl: string)
   // 実機確認済み：クリック直後は次の画面の読み込みが終わっていないことがあり、
   // 詳細画面の遷移待ちと同様の競合でth:text-is(...)が見つからずタイムアウトすることが
   // あった。読み込み完了を待ってから入力欄を探す。
-  await page.waitForLoadState("networkidle");
+  await settle(page);
+  // 次に必要な入力欄そのものの出現を待つ（networkidleに頼らない）
+  await page.locator('th:text-is("商号又は名称") + td input').first().waitFor({ state: "visible", timeout: ELEMENT_WAIT_MS });
 
   // 利用者情報入力（4項目・すべて必須）。実機確認済み（2026-08-03）：詳細画面と同様、
   // ここも<label for>ではなく<tr><th>ラベル</th><td><input></td></tr>という表構造
@@ -244,7 +291,7 @@ export async function downloadDocuments(page: Page, documentDownloadUrl: string)
   // たどり着く。連絡先入力直後にダウンロードボタンを探しに行く実装では、この
   // 確認画面を素通りできずタイムアウトしていた（2段階の「次へ」が必要）。
   await page.getByRole("button", { name: "次へ", exact: true }).click({ force: true });
-  await page.waitForLoadState("networkidle");
+  await settle(page);
 
   // 利用者情報確認画面。表示された内容を確認し、再度「次へ」を押す。
   await page.getByRole("button", { name: "次へ", exact: true }).click({ force: true });
@@ -347,35 +394,54 @@ export async function crawlDate(dateIso: string): Promise<GepsCrawlResult> {
     const tenderErrors: GepsTenderError[] = [];
 
     for (let i = 0; i < search.count; i++) {
-      try {
-        // 詳細画面・資料DL画面への遷移で一覧のページ状態が失われるため、2件目以降は
-        // 案件ごとに検索をやり直してから i 番目の「公示本文」をクリックする
-        // （javascript:doSubmitParams(...)によるページ内遷移のため、ブラウザバックでの
-        // 復元が確実とは限らない。実データ確認済み・2026-08-01）。
-        if (i > 0) {
-          await searchByDate(page, dateIso);
-        }
-        const { detail, documentDownloadUrl, detailPageUrl } = await openDetailByIndex(page, i);
-        const normalized = normalizeGepsTender(detail, detailPageUrl);
-        tenders.push(normalized);
-
-        if (documentDownloadUrl) {
-          try {
-            const docs = await downloadDocuments(page, documentDownloadUrl);
-            documentsByProcurementNo.set(normalized.procurementNo, { status: "downloaded", documents: docs });
-          } catch (err) {
-            // 資料が取れない案件があっても、案件自体の投入は止めない（資料取得方針_v3.md）。
-            // 「取得に失敗した（要対応）」として、機関が出していない場合と区別して記録する。
-            const message = err instanceof Error ? err.message : String(err);
-            documentsByProcurementNo.set(normalized.procurementNo, { status: "failed", message });
-            // eslint-disable-next-line no-console
-            console.error(`資料ダウンロード失敗: ${normalized.procurementNo}`, err);
+      // 相手先の応答が遅いだけの失敗で取りこぼさないよう、1案件につきMAX_ITEM_ATTEMPTS回試す。
+      // 失敗はtendersへの追加より前で起きる（追加後の資料取得の失敗は内側で捕まえる）ため、
+      // やり直しても同じ案件が二重に入ることはない。
+      let lastError: unknown = null;
+      for (let attempt = 1; attempt <= MAX_ITEM_ATTEMPTS; attempt++) {
+        try {
+          // 詳細画面・資料DL画面への遷移で一覧のページ状態が失われるため、2件目以降は
+          // 案件ごとに検索をやり直してから i 番目の「公示本文」をクリックする
+          // （javascript:doSubmitParams(...)によるページ内遷移のため、ブラウザバックでの
+          // 復元が確実とは限らない。実データ確認済み・2026-08-01）。
+          if (i > 0 || attempt > 1) {
+            await searchByDate(page, dateIso);
           }
-        } else {
-          // 資料ダウンロードURLが無い＝機関が資料一式を出していない（公告のみの案件）。
-          documentsByProcurementNo.set(normalized.procurementNo, { status: "no_download_url" });
+          const { detail, documentDownloadUrl, detailPageUrl } = await openDetailByIndex(page, i);
+          const normalized = normalizeGepsTender(detail, detailPageUrl);
+          tenders.push(normalized);
+
+          if (documentDownloadUrl) {
+            try {
+              const docs = await downloadDocuments(page, documentDownloadUrl);
+              documentsByProcurementNo.set(normalized.procurementNo, { status: "downloaded", documents: docs });
+            } catch (err) {
+              // 資料が取れない案件があっても、案件自体の投入は止めない（資料取得方針_v3.md）。
+              // 「取得に失敗した（要対応）」として、機関が出していない場合と区別して記録する。
+              const message = err instanceof Error ? err.message : String(err);
+              documentsByProcurementNo.set(normalized.procurementNo, { status: "failed", message });
+              // eslint-disable-next-line no-console
+              console.error(`資料ダウンロード失敗: ${normalized.procurementNo}`, err);
+            }
+          } else {
+            // 資料ダウンロードURLが無い＝機関が資料一式を出していない（公告のみの案件）。
+            documentsByProcurementNo.set(normalized.procurementNo, { status: "no_download_url" });
+          }
+          lastError = null;
+          break;
+        } catch (err) {
+          lastError = err;
+          if (attempt < MAX_ITEM_ATTEMPTS) {
+            // eslint-disable-next-line no-console
+            console.warn(
+              `検索・詳細取得に失敗しました。やり直します（index=${i} ${attempt}/${MAX_ITEM_ATTEMPTS}）: ${err instanceof Error ? err.message : String(err)}`,
+            );
+            await page.waitForTimeout(RETRY_BACKOFF_MS);
+          }
         }
-      } catch (err) {
+      }
+
+      if (lastError !== null) {
         // 実機確認済み（2026-08-03）：検索やり直しや詳細画面の取得も、サイト側の応答が
         // 遅い時間帯にはタイムアウトすることがある。ここで捕まえずに投げると
         // crawlDate()全体が例外で終了し、呼び出し元（jobs/crawl_geps.ts）は
@@ -383,9 +449,9 @@ export async function crawlDate(dateIso: string): Promise<GepsCrawlResult> {
         // 既にtendersへ積まれていた（取得済みの）他の案件まで巻き添えで失われて
         // しまう。1件の検索・詳細取得の失敗で他の全案件を巻き込まないよう、
         // その案件だけスキップして次のiへ進む。
-        tenderErrors.push({ index: i, message: err instanceof Error ? err.message : String(err) });
+        tenderErrors.push({ index: i, message: lastError instanceof Error ? lastError.message : String(lastError) });
         // eslint-disable-next-line no-console
-        console.error(`検索・詳細取得に失敗しスキップしました（index=${i}）`, err);
+        console.error(`検索・詳細取得に失敗しスキップしました（index=${i}）`, lastError);
       }
     }
 
