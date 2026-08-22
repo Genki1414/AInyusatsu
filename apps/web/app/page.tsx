@@ -18,6 +18,7 @@ type ProposalDeadlineRow = {
     qa_deadline: string | null;
     submit_deadline: string | null;
     bid_open_at: string | null;
+    collect_status: string;
   } | null;
 };
 
@@ -40,7 +41,7 @@ export default async function HomePage() {
       supabase.from("proposals").select("id", { count: "exact", head: true }).eq("status", "検討中"),
       supabase
         .from("proposals")
-        .select("id, status, tenders(id, name, qa_deadline, submit_deadline, bid_open_at)")
+        .select("id, status, tenders(id, name, qa_deadline, submit_deadline, bid_open_at, collect_status)")
         .neq("status", "対象外")
         .returns<ProposalDeadlineRow[]>(),
     ]);
@@ -53,8 +54,11 @@ export default async function HomePage() {
   ];
   const setupLeft = setupSteps.filter((s) => !s.done);
 
+  // 提出期限を過ぎた案件（終了）は「今日やること」に出さない。もう手の打ちようがない。
+  const livePropos = (proposalRows ?? []).filter((p) => p.tenders && p.tenders.collect_status !== "終了");
+
   const deadlines: { tenderId: string; name: string; kind: string; tone: "violet" | "blue" | "slate"; d: number }[] = [];
-  for (const p of proposalRows ?? []) {
+  for (const p of livePropos) {
     if (!p.tenders) continue;
     const t = p.tenders;
     const qa = daysLeft(t.qa_deadline, now);
@@ -66,8 +70,8 @@ export default async function HomePage() {
   }
   deadlines.sort((a, b) => a.d - b.d);
 
-  const activeCount = (proposalRows ?? []).length;
-  const consideringRows = (proposalRows ?? []).filter((p) => p.status === "検討中");
+  const activeCount = livePropos.length;
+  const consideringRows = livePropos.filter((p) => p.status === "検討中");
 
   return (
     <AppShell active="home" orgName={orgName}>

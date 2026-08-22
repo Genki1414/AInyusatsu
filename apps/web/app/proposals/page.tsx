@@ -22,6 +22,7 @@ type ProposalRow = {
     item: string | null;
     grade: string | null;
     submit_deadline: string | null;
+    collect_status: string;
     agencies: { name: string } | { name: string }[] | null;
   } | null;
 };
@@ -51,13 +52,20 @@ export default async function ProposalsPage() {
       .maybeSingle<{ qual_categories: string[]; grades: Record<string, string>; items: string[]; areas: string[] }>(),
     supabase
       .from("proposals")
-      .select("id, status, score, reasons_ok, reasons_ng, excluded_reason, tenders(id, name, item, grade, submit_deadline, agencies(name))")
+      .select(
+        "id, status, score, reasons_ok, reasons_ng, excluded_reason, tenders(id, name, item, grade, submit_deadline, collect_status, agencies(name))",
+      )
       .order("score", { ascending: false })
       .returns<ProposalRow[]>(),
   ]);
 
-  const rows = (proposals ?? []).filter((p) => p.status !== "対象外" && p.tenders);
-  const excluded = (proposals ?? []).filter((p) => p.status === "対象外" && p.tenders);
+  // 提出期限を過ぎた案件（終了）はここに出さない。参加できないものを並べても判断の邪魔になる。
+  // 提案そのものは残っているので、「すべての案件」からは履歴として辿れる。
+  const live = (proposals ?? []).filter((p) => p.tenders && p.tenders.collect_status !== "終了");
+  const closedCount = (proposals ?? []).filter((p) => p.tenders && p.tenders.collect_status === "終了").length;
+
+  const rows = live.filter((p) => p.status !== "対象外");
+  const excluded = live.filter((p) => p.status === "対象外");
 
   return (
     <AppShell active="proposals" orgName={orgName}>
@@ -80,6 +88,14 @@ export default async function ProposalsPage() {
           {profile?.areas?.length ? profile.areas.join("・") : "未登録"}
         </p>
       </Panel>
+
+      {closedCount > 0 && (
+        <Panel dense>
+          <p className="px-3 py-2 text-xs text-slate-500">
+            提出期限を過ぎた案件を{closedCount.toLocaleString("ja-JP")}件、この一覧から外しています。
+          </p>
+        </Panel>
+      )}
 
       {rows.length === 0 && (
         <Panel>
