@@ -3,14 +3,16 @@
 // 参照：docs/reference/ローカル実行手順.md
 
 import { runTenderLifecycle } from "../jobs/tender_lifecycle";
+import { cliArgs, rejectExtraArgs, runCli } from "./_args";
+
+const USAGE = "pnpm --filter worker tenders:lifecycle";
 
 async function main() {
+  rejectExtraArgs(cliArgs(), 0, USAGE);
+
   console.log("解析完了の案件を公開中にし、提出期限を過ぎた案件を終了にします");
   const result = await runTenderLifecycle();
   console.log(JSON.stringify(result, null, 2));
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exitCode = 1;
-});
+runCli(main);

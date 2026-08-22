@@ -12,12 +12,18 @@
 
 import { expandDateRange } from "@ai-nyusatsu-bu/domain";
 import { runDailyGepsCrawl, type CrawlDateSummary } from "../jobs/crawl_geps";
-import { cliArgs } from "./_args";
+import { cliArgs, rejectExtraArgs, requireDateIso, runCli } from "./_args";
 import { yesterdayJst } from "./_date";
 
+const USAGE = "pnpm --filter worker geps:crawl [-- YYYY-MM-DD [YYYY-MM-DD]]";
+
 async function main() {
-  const [fromArg, toArg] = cliArgs();
-  const dates = toArg ? expandDateRange(fromArg, toArg) : [fromArg || yesterdayJst()];
+  const args = cliArgs();
+  rejectExtraArgs(args, 2, USAGE);
+  const [fromArg, toArg] = args;
+  const dates = toArg
+    ? expandDateRange(requireDateIso(fromArg, "開始日"), requireDateIso(toArg, "終了日"))
+    : [fromArg ? requireDateIso(fromArg, "公開開始日") : yesterdayJst()];
 
   console.log(`調達ポータルの巡回を実行します（公開開始日=${dates[0]}${dates.length > 1 ? ` 〜 ${dates[dates.length - 1]}（${dates.length}日）` : ""}）`);
 
@@ -59,7 +65,4 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exitCode = 1;
-});
+runCli(main);

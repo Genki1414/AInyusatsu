@@ -7,8 +7,10 @@
 // 参照：docs/reference/ローカル実行手順.md
 
 import { runDiffImport, runFullImport } from "../jobs/import_awards";
-import { cliArgs } from "./_args";
+import { CliUsageError, cliArgs, rejectExtraArgs, requireDateIso, requirePositiveInt, runCli } from "./_args";
 import { yesterdayJst } from "./_date";
+
+const USAGE = "pnpm --filter worker awards:import -- <full 西暦年 | diff YYYY-MM-DD>";
 
 function currentYearJst(): number {
   const nowJst = new Date(Date.now() + 9 * 60 * 60 * 1000);
@@ -16,15 +18,15 @@ function currentYearJst(): number {
 }
 
 async function main() {
-  const [mode, arg] = cliArgs();
+  const args = cliArgs();
+  rejectExtraArgs(args, 2, USAGE);
+  const [mode, arg] = args;
   if (mode !== "full" && mode !== "diff") {
-    console.error("使い方: run-import-awards.ts <full|diff> [年 または YYYY-MM-DD]");
-    process.exitCode = 1;
-    return;
+    throw new CliUsageError(`full か diff を指定してください（受け取った値: ${JSON.stringify(mode ?? "")}）\n使い方: ${USAGE}`);
   }
 
   if (mode === "full") {
-    const year = arg ? Number(arg) : currentYearJst();
+    const year = arg ? requirePositiveInt(arg, "西暦年") : currentYearJst();
     console.log(`落札実績オープンデータ（全件・${year}年）を取り込みます`);
     const outcome = await runFullImport(year);
     console.log(JSON.stringify(outcome, null, 2));
@@ -32,14 +34,11 @@ async function main() {
     return;
   }
 
-  const dateIso = arg || yesterdayJst();
+  const dateIso = arg ? requireDateIso(arg, "対象日") : yesterdayJst();
   console.log(`落札実績オープンデータ（差分・${dateIso}）を取り込みます`);
   const outcome = await runDiffImport(new Date(`${dateIso}T00:00:00Z`));
   console.log(JSON.stringify(outcome, null, 2));
   if (outcome.status === "failed") process.exitCode = 1;
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exitCode = 1;
-});
+runCli(main);
