@@ -10,6 +10,13 @@
 // 上限に達した分は次回に回すだけで、失われはしない。
 // 全件を解析したい場合は ANALYZE_DAILY_LIMIT を引き上げる（0 にすると解析を止められる）。
 //
+// 【公告日が古い案件を解析しない（任意）】
+// 提出期限はコネクタからは取れず、AI解析で初めて埋まる。つまり解析前の案件はすべて
+// submit_deadline が null で、期限切れとして終了に落とせない。解析を後回しにするほど
+// 解析待ちは積み上がり、いざ流すときに、とっくに締め切られた案件にも費用がかかる。
+// ANALYZE_MAX_NOTICE_AGE_DAYS を指定すると、公告日がそれより古い案件を解析しない。
+// 公告日は提出期限そのものではないため、既定では絞らない（推測で対象を減らさない）。
+//
 // 【提出期限を過ぎた案件を解析しない】
 // 対象は提出期限の近い順に並べるので、期限切れの案件を落としておかないと、死んだ案件が
 // 真っ先に解析されて費用だけがかかる。tender_lifecycle が毎日落としているが、ここでも
@@ -17,6 +24,7 @@
 
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
 import { estimateCostYen, summarizeUsage, type UsageSummary } from "@ai-nyusatsu-bu/ai";
+import { noticeDateCutoff, parseMaxNoticeAgeDays, toDateIso } from "@ai-nyusatsu-bu/domain";
 import { analyzeTender } from "./analyze_tender";
 import { runTenderLifecycle } from "./tender_lifecycle";
 
@@ -32,11 +40,20 @@ export type AnalyzePendingSummary = {
   deferred: number;
   /** 今回の推定費用（円） */
   estimatedYen: number;
+  /** 公告日で絞った場合の下限（絞っていなければ null） */
+  noticeDateFrom: string | null;
 };
 
 type PendingRow = { id: string; name: string };
 
 /** 環境変数から1回あたりの上限を読む。数値でなければ既定値に落とす。 */
+/** 環境変数から「公告日が何日前まで」を読む。未設定なら絞らない。 */
+export function maxNoticeAgeFromEnv(
+  raw: string | undefined = process.env.ANALYZE_MAX_NOTICE_AGE_DAYS,
+): number | null {
+  return parseMaxNoticeAgeDays(raw);
+}
+
 export function analyzeLimitFromEnv(raw: string | undefined = process.env.ANALYZE_DAILY_LIMIT): number {
   if (raw === undefined || raw.trim() === "") return DEFAULT_ANALYZE_LIMIT;
   const parsed = Number(raw);
@@ -54,16 +71,18 @@ export function analyzeLimitFromEnv(raw: string | undefined = process.env.ANALYZ
 export async function runAnalyzePending(
   limit: number = analyzeLimitFromEnv(),
   now: Date = new Date(),
+  maxNoticeAgeDays: number | null = maxNoticeAgeFromEnv(),
 ): Promise<AnalyzePendingSummary> {
   const client = createServiceClient();
+  const noticeDateFrom = maxNoticeAgeDays === null ? null : toDateIso(noticeDateCutoff(maxNoticeAgeDays, now));
 
   if (limit === 0) {
     console.warn("[analyze_pending] ANALYZE_DAILY_LIMIT=0 のため解析を行いません");
-    return { analyzed: 0, failed: 0, deferred: 0, estimatedYen: 0 };
+    return { analyzed: 0, failed: 0, deferred: 0, estimatedYen: 0, noticeDateFrom };
   }
 
   // 上限より1件多く引いて、次回に回した分があるかを知る。
-  const { data: pending, error } = await client
+  let query = client
     .from("tenders")
     .select("id, name, tender_documents!inner(id)")
     .eq("collect_status", "取得済")
@@ -72,8 +91,13 @@ export async function runAnalyzePending(
     .or(`submit_deadline.is.null,submit_deadline.gte.${now.toISOString()}`)
     // 提出期限が近いものから。期限の無い案件は後回しにする
     .order("submit_deadline", { ascending: true, nullsFirst: false })
-    .limit(limit + 1)
-    .returns<PendingRow[]>();
+    .limit(limit + 1);
+  if (noticeDateFrom !== null) {
+    // 公告日が古い案件は、すでに締め切られている見込みが高い
+    query = query.gte("notice_date", noticeDateFrom);
+  }
+
+  const { data: pending, error } = await query.returns<PendingRow[]>();
   if (error) throw new Error(`解析待ちの案件の取得に失敗しました: ${error.message}`);
 
   // inner join のぶん同じ案件が重複しうるので、ここで一意にする。
@@ -81,7 +105,8 @@ export async function runAnalyzePending(
   const targets = unique.slice(0, limit);
   const deferred = Math.max(0, unique.length - targets.length);
 
-  console.log(`[analyze_pending] 解析待ち ${unique.length}件のうち ${targets.length}件を処理します（上限${limit}件）`);
+  const scope = noticeDateFrom === null ? "" : `／公告日 ${noticeDateFrom} 以降に限定`;
+  console.log(`[analyze_pending] 解析待ち ${unique.length}件のうち ${targets.length}件を処理します（上限${limit}件${scope}）`);
 
   const usages: UsageSummary[] = [];
   let analyzed = 0;
@@ -126,7 +151,7 @@ export async function runAnalyzePending(
     }
   }
 
-  return { analyzed, failed, deferred, estimatedYen };
+  return { analyzed, failed, deferred, estimatedYen, noticeDateFrom };
 }
 
 /** 複数案件ぶんのトークン消費をまとめた集計（ログ用）。 */

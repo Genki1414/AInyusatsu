@@ -40,3 +40,4 @@ export * from "./submission_checklist";
 export * from "./tender_lifecycle";
 export * from "./tender_browse";
 export * from "./date_range";
+export * from "./analysis_scope";
