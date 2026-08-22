@@ -8,6 +8,7 @@ import { logout } from "@/app/actions";
 const NAV = [
   { key: "home", href: "/", label: "今日やること" },
   { key: "proposals", href: "/proposals", label: "提案された案件" },
+  { key: "tenders", href: "/tenders", label: "すべての案件" },
   { key: "criteria", href: "/criteria", label: "提案条件" },
   { key: "qualifications", href: "/qualifications", label: "入札資格" },
   { key: "partners", href: "/partners", label: "協力会社" },

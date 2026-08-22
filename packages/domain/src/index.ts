@@ -12,6 +12,7 @@
 //   - tender_date_validation.ts  期限の前後関係・和暦変換ミスの検出（タスク2-3b）
 //   - fit.ts            適合判定（タスク3-1）
 //   - tender_lifecycle.ts 案件を公開中・終了へ進める判定（実装仕様書 §5 close）
+//   - tender_browse.ts  すべての案件を一覧で見せるときの判定（タスク3-5）
 //   - quote_request.ts  数量表の業種別切り出し・見積依頼メールの組み立て（タスク4-1）
 //   - quote_response.ts 協力会社の回答（資料送付・回答通知メール、署名付きURLの有効期限）（タスク4-2）
 // 実装予定（実装仕様書_v1.md §1 / ClaudeCode_実装指示書.md §4 参照）
@@ -37,3 +38,4 @@ export * from "./sender_identity";
 export * from "./cost_estimate";
 export * from "./submission_checklist";
 export * from "./tender_lifecycle";
+export * from "./tender_browse";

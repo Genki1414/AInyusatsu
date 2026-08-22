@@ -61,7 +61,14 @@ export default async function ProposalsPage() {
 
   return (
     <AppShell active="proposals" orgName={orgName}>
-      <Panel title="照合条件">
+      <Panel
+        title="照合条件"
+        right={
+          <Link href="/tenders" className="text-xs text-blue-800 underline">
+            すべての案件を見る
+          </Link>
+        }
+      >
         <p className="text-xs leading-relaxed text-slate-600">
           {orgName}／全省庁統一資格 {profile?.qual_categories?.length ? profile.qual_categories.join("・") : "未登録"}／等級{" "}
           {profile?.grades && Object.keys(profile.grades).length > 0
@@ -76,7 +83,13 @@ export default async function ProposalsPage() {
 
       {rows.length === 0 && (
         <Panel>
-          <p className="text-xs text-slate-500">まだ提案された案件がありません。</p>
+          <p className="text-xs leading-relaxed text-slate-500">
+            まだ提案された案件がありません。ここには提案条件に合う案件だけが出ます。
+            <Link href="/tenders" className="text-blue-800 underline">
+              すべての案件
+            </Link>
+            から、条件に合わないものも含めて見られます。
+          </p>
         </Panel>
       )}
 
