@@ -42,3 +42,4 @@ export * from "./tender_browse";
 export * from "./date_range";
 export * from "./analysis_scope";
 export * from "./coverage";
+export * from "./award_scale";
