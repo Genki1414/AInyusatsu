@@ -9,6 +9,7 @@ import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { Field, Panel, Pill } from "@/components/ui";
 import { requireOrgContext } from "@/lib/auth";
+import { Modal } from "@/components/Modal";
 import { PartnerForm, type PartnerFormValues } from "./partner-form";
 
 type PartnerRow = {
@@ -220,7 +221,11 @@ export default async function PartnersPage({
         </Panel>
       )}
 
-      {showForm && <PartnerForm key={values.id ?? "new"} values={values} />}
+      {showForm && (
+        <Modal title={values.id ? "会社を編集" : "会社を追加"} closeHref="/partners">
+          <PartnerForm key={values.id ?? "new"} values={values} />
+        </Modal>
+      )}
     </AppShell>
   );
 }
