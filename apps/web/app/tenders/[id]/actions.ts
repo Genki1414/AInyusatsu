@@ -6,8 +6,12 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { requireOrgContext } from "@/lib/auth";
 import { getAppUrl } from "@/lib/app-url";
+import { TRADE_OPTIONS } from "@/lib/catalog";
 import { loadSenderIdentity } from "@/lib/sender";
 import { DUE_AT_PLACEHOLDER, RESPONSE_URL_PLACEHOLDER } from "./quote-request-shared";
+
+/** 依頼先のチェックボックスのフィールド名の接頭辞（画面側と揃える）。 */
+const TRADE_FIELD_PREFIX = "partners_";
 
 type TenderRow = {
   name: string;
@@ -88,14 +92,32 @@ export async function sendQuoteRequests(
   if (partnersError) return { error: `協力会社の取得に失敗しました: ${partnersError.message}`, summary: null };
 
   const partnerById = new Map((partners ?? []).map((p) => [p.id, p]));
-  const tradeGroups = groupLotsByTrade(lots ?? []);
+  const lotGroups = groupLotsByTrade(lots ?? []);
+  const lotsByTrade = new Map(lotGroups.map((g) => [g.trade, g.lots]));
+
+  // 数量表が無い案件でも依頼できるよう、画面で業種を足せるようにしている（前提7）。
+  // どの業種が送信対象かはフォームのキー（partners_<業種>）から読む。
+  // 任意の文字列で quote_requests.trade を作られないよう、数量表の業種か
+  // 業種辞書（TRADE_OPTIONS）にあるものだけを受け付ける。
+  const allowedTrades = new Set<string>([...lotsByTrade.keys(), ...TRADE_OPTIONS]);
+  const submittedTrades = [
+    ...new Set(
+      [...formData.keys()]
+        .filter((key) => key.startsWith(TRADE_FIELD_PREFIX))
+        .map((key) => key.slice(TRADE_FIELD_PREFIX.length)),
+    ),
+  ].filter((trade) => allowedTrades.has(trade));
+
+  const tradeGroups = submittedTrades.map((trade) => ({ trade, lots: lotsByTrade.get(trade) ?? [] }));
 
   let requestCount = 0;
   let sentCount = 0;
   const failed: string[] = [];
 
   for (const group of tradeGroups) {
-    const partnerIds = formData.getAll(`partners_${group.trade}`).filter((v): v is string => typeof v === "string");
+    const partnerIds = formData
+      .getAll(`${TRADE_FIELD_PREFIX}${group.trade}`)
+      .filter((v): v is string => typeof v === "string");
     if (partnerIds.length === 0) continue;
 
     // フォームのtextareaは常に値を持つ（プレビュー生成時のDUE_AT_PLACEHOLDERを含む）ため、

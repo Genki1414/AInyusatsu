@@ -6,6 +6,13 @@
 // チェックを入れて送信する。実際にメールが送信されるため、送信ボタンには確認ダイアログを
 // 挟んでいる（components/ConfirmSubmitButton）。
 //
+// 【数量表が無い案件でも依頼できる】
+// 以前は数量表から業種を切り出せない案件では見積依頼を作れなかった。実際には数量表が
+// 公開されない案件も、こちらで取得できていない案件も多く、そのたびに依頼が止まっていた。
+// 「資料は揃わなくても、提案できる内容があれば提案する」（CLAUDE.md 最重要の前提7）を
+// 見積依頼にも適用し、業種を自分で選んで依頼できるようにしている。
+// 数量表がある業種でも、それ以外の業種を足して依頼できる。
+//
 // 御社による正式取得（company_tenders.official_status）が「取得済」になるまでは送信できない
 // （docs/資料取得方針_v3.md §5「取得済みになるまで…作業を促さない」を見積依頼にも適用する。
 // ユーザーからの明示的な要望による）。サーバー側（actions.ts）でも同じ判定をしている。
@@ -14,7 +21,7 @@ import Link from "next/link";
 import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
 import { Panel, Pill } from "@/components/ui";
 import { buildQuoteRequestEmail, groupLotsByTrade, type QuoteRequestLot } from "@ai-nyusatsu-bu/domain";
-import { AREA_OPTIONS, PREFECTURE_OPTIONS } from "@/lib/catalog";
+import { AREA_OPTIONS, PREFECTURE_OPTIONS, TRADE_OPTIONS } from "@/lib/catalog";
 import { sendQuoteRequests, type SendQuoteRequestsState } from "./actions";
 import { DUE_AT_PLACEHOLDER, RESPONSE_URL_PLACEHOLDER } from "./quote-request-shared";
 // 型のみのimport（@ai-nyusatsu-bu/ai に依存する実装は絶対にこのファイルへ持ち込まない。
@@ -238,7 +245,19 @@ export function RequestTab({
 }) {
   const boundAction = sendQuoteRequests.bind(null, tenderId);
   const [state, formAction, pending] = useActionState(boundAction, initialState);
-  const tradeGroups = groupLotsByTrade(lots);
+  const lotGroups = groupLotsByTrade(lots);
+  // 数量表から切り出せなかった業種を、利用者が自分で足せるようにする
+  const [manualTrades, setManualTrades] = useState<string[]>([]);
+  const lotTrades = new Set(lotGroups.map((g) => g.trade));
+  const addableTrades = TRADE_OPTIONS.filter((t) => !lotTrades.has(t));
+  const tradeGroups: { trade: string; lots: typeof lots }[] = [
+    ...lotGroups,
+    ...manualTrades.filter((t) => !lotTrades.has(t)).map((trade) => ({ trade, lots: [] as typeof lots })),
+  ];
+
+  const toggleTrade = (trade: string) => {
+    setManualTrades((prev) => (prev.includes(trade) ? prev.filter((t) => t !== trade) : [...prev, trade]));
+  };
 
   if (officialStatus !== "取得済") {
     return (
@@ -256,16 +275,42 @@ export function RequestTab({
     );
   }
 
-  if (tradeGroups.length === 0) {
-    return (
-      <Panel title="見積依頼">
-        <p className="text-xs text-slate-500">数量表が無いため、見積依頼を作成できません。</p>
-      </Panel>
-    );
-  }
-
   return (
     <form action={formAction} className="space-y-3">
+        <Panel title="依頼する業種">
+          {lotGroups.length === 0 ? (
+            <p className="text-xs leading-relaxed text-slate-600">
+              この案件には数量表がありません。依頼する業種を選ぶと、見積依頼を作成できます。
+              内訳の代わりに「公告資料をご確認のうえお見積りをお願いします」と依頼文に入ります。
+            </p>
+          ) : (
+            <p className="text-xs leading-relaxed text-slate-600">
+              数量表から{lotGroups.map((g) => g.trade).join("・")}を切り出しました。
+              数量表に無い業種も、下から選んで依頼できます。
+            </p>
+          )}
+          <div className="mt-2 flex flex-wrap gap-1">
+            {addableTrades.map((trade) => (
+              <label
+                key={trade}
+                className={`cursor-pointer rounded border px-2 py-1 text-xs ${
+                  manualTrades.includes(trade)
+                    ? "border-blue-700 bg-blue-50 font-medium text-blue-900"
+                    : "border-slate-300 text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  className="sr-only"
+                  checked={manualTrades.includes(trade)}
+                  onChange={() => toggleTrade(trade)}
+                />
+                {trade}
+              </label>
+            ))}
+          </div>
+        </Panel>
+
         {tradeGroups.map((group) => {
           const candidates = partners.filter((p) => p.email);
           const rec = recommendations[group.trade] ?? null;
@@ -285,7 +330,10 @@ export function RequestTab({
             responseUrl: RESPONSE_URL_PLACEHOLDER,
           });
           return (
-            <Panel key={group.trade} title={`${group.trade}（数量表 ${group.lots.length}行）`}>
+            <Panel
+              key={group.trade}
+              title={group.lots.length > 0 ? `${group.trade}（数量表 ${group.lots.length}行）` : `${group.trade}（数量表なし）`}
+            >
               {rec && rec.recommendations.length > 0 && (
                 <div className="mb-2 rounded border border-violet-200 bg-violet-50 px-2 py-1.5">
                   <p className="text-xs font-medium text-violet-800">AIのおすすめ</p>

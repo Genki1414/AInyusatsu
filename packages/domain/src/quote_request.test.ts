@@ -131,3 +131,44 @@ describe("buildQuoteRequestEmail", () => {
     expect(body).toContain("履行期間：未確認 〜 未確認");
   });
 });
+
+describe("buildQuoteRequestEmail（数量表が無い場合）", () => {
+  it("内訳の代わりに、公告資料を確認してもらう案内を入れる", () => {
+    const { body } = buildQuoteRequestEmail({
+      senderOrgName: "東北三上機材株式会社",
+      senderContactName: "三上",
+      senderContactEmail: "mikami@example.co.jp",
+      tenderName: "令和8年度庁舎清掃業務",
+      agencyName: "東北財務局",
+      place: "仙台市",
+      termFrom: "2026-04-01",
+      termTo: "2027-03-31",
+      dueAtLabel: "2026/08/30 17:00",
+      trade: "清掃",
+      lots: [],
+      responseUrl: "https://example.com/q/token",
+    });
+    expect(body).toContain("【対象範囲】");
+    expect(body).toContain("数量表の内訳をお示しできません");
+    expect(body).toContain("公告資料をご確認のうえ");
+  });
+
+  it("数量表があるときは、これまでどおり内訳を並べる", () => {
+    const { body } = buildQuoteRequestEmail({
+      senderOrgName: "東北三上機材株式会社",
+      senderContactName: "三上",
+      senderContactEmail: "mikami@example.co.jp",
+      tenderName: "令和8年度庁舎清掃業務",
+      agencyName: "東北財務局",
+      place: "仙台市",
+      termFrom: null,
+      termTo: null,
+      dueAtLabel: "2026/08/30 17:00",
+      trade: "清掃",
+      lots: [{ line_no: 1, item: "床清掃", spec: "月1回", qty: 12, unit: "回", trade: "清掃" }],
+      responseUrl: "https://example.com/q/token",
+    });
+    expect(body).toContain("1. 床清掃（月1回） 12回");
+    expect(body).not.toContain("数量表の内訳をお示しできません");
+  });
+});
