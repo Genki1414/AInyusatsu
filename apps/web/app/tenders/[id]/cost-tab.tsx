@@ -9,7 +9,7 @@
 // 金額は担当者の手入力で記録する。回答ページ（/q/[token]）では金額を受け付けない方針のため
 // （正式な見積書として弱い。ユーザー決定 2026-08-21）。
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import { aggregateCost, bidGuide, type MarketRate, type QuoteForCosting } from "@ai-nyusatsu-bu/domain";
 import { Panel, Pill, btnClass } from "@/components/ui";
@@ -23,12 +23,43 @@ function yen(value: number): string {
   return `${value.toLocaleString("ja-JP")}円`;
 }
 
+/**
+ * 金額の入力欄。打ちながら3桁ごとに区切りを入れる。
+ * 桁を目で数えないと分からないと、1桁の打ち間違いに気づけない。
+ *
+ * サーバー側（cost-actions.ts の amountSchema）は区切り記号を取り除いてから
+ * 数値にするので、区切りが入ったまま送信して構わない。
+ */
+function AmountInput({ name, defaultValue, className }: { name: string; defaultValue: number | null; className: string }) {
+  const [text, setText] = useState(defaultValue === null ? "" : defaultValue.toLocaleString("ja-JP"));
+  return (
+    <input
+      name={name}
+      value={text}
+      onChange={(e) => setText(withSeparators(e.target.value))}
+      placeholder="未回答"
+      inputMode="numeric"
+      className={className}
+    />
+  );
+}
+
+/**
+ * 入力中の文字列に3桁区切りを入れる。
+ * 数字以外は落とすが、入力途中の空文字は空のままにする（0を勝手に入れない）。
+ */
+function withSeparators(raw: string): string {
+  const digits = raw.replace(/[^\d]/g, "");
+  if (digits === "") return "";
+  return Number(digits).toLocaleString("ja-JP");
+}
+
 function AmountForm({ tenderId, quoteId, amount }: { tenderId: string; quoteId: string; amount: number | null }) {
   const bound = setQuoteAmount.bind(null, tenderId, quoteId);
   const [state, formAction, pending] = useActionState(bound, initialState);
   return (
     <form action={formAction} className="flex items-center justify-end gap-1">
-      <input name="amount" defaultValue={amount ?? ""} placeholder="未回答" inputMode="numeric" className={numberInput} />
+      <AmountInput name="amount" defaultValue={amount} className={numberInput} />
       <button type="submit" disabled={pending} className={btnClass("default", "sm")}>
         {pending ? "…" : "保存"}
       </button>
@@ -239,7 +270,17 @@ export function CostTab({
             </p>
             {state.error && <p className="mt-2 rounded bg-rose-50 px-2 py-1.5 text-xs text-rose-800">{state.error}</p>}
             <form action={formAction} className="mt-2 flex flex-wrap items-center gap-2">
-              <input name="bid_price" defaultValue={decidedBidPrice ?? estimate.bid} inputMode="numeric" className={numberInput} />
+              {/*
+                採用する見積を変えると estimate.bid が変わるが、入力欄は非制御なので
+                初期値を差し替えても表示が古いままだった（採用を変えても応札価格の案が
+                反映されない、と見える）。keyを変えて作り直すことで追従させる。
+              */}
+              <AmountInput
+                key={`bid-${decidedBidPrice ?? "none"}-${estimate.bid}`}
+                name="bid_price"
+                defaultValue={decidedBidPrice ?? estimate.bid}
+                className={numberInput}
+              />
               <button type="submit" disabled={pending} className={btnClass("primary", "sm")}>
                 {pending ? "記録しています…" : "この価格に決定する"}
               </button>

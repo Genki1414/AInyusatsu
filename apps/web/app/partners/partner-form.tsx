@@ -34,9 +34,11 @@ export function PartnerForm({ values }: { values: PartnerFormValues }) {
   const otherAreas = values.areas.filter((a) => !AREA_CATALOG.includes(a));
 
   // 保存できたら小窓を閉じて一覧へ戻る。開いたままだと、保存できたのかどうかが分かりにくい。
+  // 閉じるだけだと今度は「保存されたのか、閉じただけなのか」が分からないので、
+  // 一覧側で完了を知らせるためのしるしをURLに付ける。
   useEffect(() => {
-    if (state.savedId) router.push("/partners");
-  }, [state.savedId, router]);
+    if (state.savedId) router.push(`/partners?saved=${values.id ? "updated" : "created"}`);
+  }, [state.savedId, values.id, router]);
 
   return (
     <form action={formAction} className="space-y-3">

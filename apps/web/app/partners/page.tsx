@@ -4,7 +4,7 @@
 // タスク4系）から算出する値で、まだ実データが無いため表示しない。評価（rating）は
 // 自由入力の列としてそのまま使う。AIのおすすめ度（recommendScore）も見積の実績データが
 // 前提のため、このタスク（3-5）では省略する。
-import { Phone, Star } from "lucide-react";
+import { CheckCircle2, Phone, Star } from "lucide-react";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { Field, Panel, Pill } from "@/components/ui";
@@ -43,9 +43,9 @@ const BLANK: PartnerFormValues = {
 export default async function PartnersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ partner?: string; q?: string; trade?: string }>;
+  searchParams: Promise<{ partner?: string; q?: string; trade?: string; saved?: string }>;
 }) {
-  const { partner: partnerId, q, trade } = await searchParams;
+  const { partner: partnerId, q, trade, saved } = await searchParams;
   const { supabase, orgName } = await requireOrgContext();
 
   const [{ data: partners }, { data: lotRows }] = await Promise.all([
@@ -92,8 +92,21 @@ export default async function PartnersPage({
     : BLANK;
   const showForm = partnerId !== undefined;
 
+  // 保存できたことを知らせる。小窓が閉じるだけだと、保存されたのか閉じただけなのかが分からない。
+  const savedMessage = saved === "created" ? "協力会社を追加しました。" : saved === "updated" ? "協力会社を更新しました。" : null;
+
   return (
     <AppShell active="partners" orgName={orgName}>
+      {savedMessage && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2">
+          <CheckCircle2 size={14} className="shrink-0 text-emerald-700" />
+          <p className="text-xs text-emerald-900">{savedMessage}</p>
+          <Link href="/partners" className="ml-auto text-xs text-emerald-800 underline">
+            閉じる
+          </Link>
+        </div>
+      )}
+
       <Panel
         dense
         title={`協力会社（${rows.length}）`}

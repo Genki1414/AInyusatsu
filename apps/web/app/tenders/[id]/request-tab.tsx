@@ -16,7 +16,7 @@
 // 御社による正式取得（company_tenders.official_status）が「取得済」になるまでは送信できない
 // （docs/資料取得方針_v3.md §5「取得済みになるまで…作業を促さない」を見積依頼にも適用する。
 // ユーザーからの明示的な要望による）。サーバー側（actions.ts）でも同じ判定をしている。
-import { useActionState, useRef, useState } from "react";
+import { useActionState, useCallback, useRef, useState } from "react";
 import Link from "next/link";
 import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
 import { Panel, Pill } from "@/components/ui";
@@ -68,10 +68,13 @@ function PartnerPicker({
   trade,
   candidates,
   recommended,
+  onSelectedCountChange,
 }: {
   trade: string;
   candidates: RequestTabPartner[];
   recommended: Record<string, string>;
+  /** 送信ボタンに「何社へ送るか」を出すため、選択数を親へ伝える */
+  onSelectedCountChange: (trade: string, count: number) => void;
 }) {
   const [query, setQuery] = useState("");
   const [tradeOnly, setTradeOnly] = useState(true);
@@ -92,7 +95,9 @@ function PartnerPicker({
   // チェックボックスは非制御（フォーム送信時の値をそのまま使うため）で、選択数もこのref経由で
   // 数え直す（ボタンでのDOM直接操作はchangeイベントを発火しないため、都度手動で更新する）。
   function updateSelectedCount() {
-    setSelectedCount(listRef.current?.querySelectorAll<HTMLInputElement>('input[type="checkbox"]:checked').length ?? 0);
+    const count = listRef.current?.querySelectorAll<HTMLInputElement>('input[type="checkbox"]:checked').length ?? 0;
+    setSelectedCount(count);
+    onSelectedCountChange(trade, count);
   }
 
   // 「表示中の全社を選択」はDOMを直接操作する。hiddenが付いていない
@@ -259,6 +264,14 @@ export function RequestTab({
     setManualTrades((prev) => (prev.includes(trade) ? prev.filter((t) => t !== trade) : [...prev, trade]));
   };
 
+  // 送信ボタンに「何社へ送るか」を出す。同じ会社を複数の業種で選んだ場合は、
+  // 業種ごとに1通ずつ送られるので、通数として数える。
+  const [selectedByTrade, setSelectedByTrade] = useState<Record<string, number>>({});
+  const handleSelectedCountChange = useCallback((trade: string, count: number) => {
+    setSelectedByTrade((prev) => (prev[trade] === count ? prev : { ...prev, [trade]: count }));
+  }, []);
+  const totalSelected = tradeGroups.reduce((sum, g) => sum + (selectedByTrade[g.trade] ?? 0), 0);
+
   if (officialStatus !== "取得済") {
     return (
       <Panel title="見積依頼">
@@ -364,7 +377,12 @@ export function RequestTab({
                   この業種に対応するメール登録済みの協力会社がありません。「協力会社」画面から登録してください。
                 </p>
               ) : (
-                <PartnerPicker trade={group.trade} candidates={candidates} recommended={recommendedMap} />
+                <PartnerPicker
+                  trade={group.trade}
+                  candidates={candidates}
+                  recommended={recommendedMap}
+                  onSelectedCountChange={handleSelectedCountChange}
+                />
               )}
 
               <label className="mt-3 block text-xs">
@@ -391,13 +409,18 @@ export function RequestTab({
 
         <div className="flex flex-wrap items-center gap-2">
           <ConfirmSubmitButton
-            confirmMessage="選択した協力会社へ本当にメールを送信します。よろしいですか？"
-            disabled={pending}
+            confirmMessage={
+              totalSelected > 0
+                ? `${totalSelected}社へ本当にメールを送信します。よろしいですか？`
+                : "選択した協力会社へ本当にメールを送信します。よろしいですか？"
+            }
+            disabled={pending || totalSelected === 0}
             className="rounded border border-blue-800 bg-blue-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-900 disabled:opacity-40"
           >
-            {pending ? "送信中..." : "見積依頼を送信する"}
+            {pending ? "送信中..." : totalSelected > 0 ? `${totalSelected}社へ見積依頼を送信する` : "見積依頼を送信する"}
           </ConfirmSubmitButton>
           <Pill tone="amber">実際にメールが送信されます</Pill>
+          {totalSelected === 0 && <span className="text-xs text-slate-500">依頼先を1社以上選んでください</span>}
         </div>
       </form>
   );
