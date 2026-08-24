@@ -71,7 +71,12 @@ export function buildQuoteRequestEmail(input: QuoteRequestEmailInput): { subject
     `回答期限：${input.dueAtLabel}`,
     "",
     "【対象範囲】",
-    ...input.lots.map(formatLotLine),
+    // 数量表が取れていない案件でも依頼を出せるようにする（CLAUDE.md 最重要の前提7）。
+    // 内訳が無い理由（機関が出していない／こちらで取得できていない）はここでは断定せず、
+    // 「お示しできない」という事実だけを書く。
+    ...(input.lots.length > 0
+      ? input.lots.map(formatLotLine)
+      : ["数量表の内訳をお示しできません。公告資料をご確認のうえ、お見積りをお願いいたします。"]),
     "",
     "下記の専用フォームから、資料のご請求または見送りのご連絡をお願いいたします。",
     input.responseUrl,
