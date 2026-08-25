@@ -137,6 +137,9 @@ STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
 STRIPE_PRICE_STD_MONTHLY=
 STRIPE_PRICE_PRO_MONTHLY=
+# 受け付ける支払い方法（既定はカードと銀行振込の両方）。
+# Stripe側で銀行振込を有効にしていない場合は card だけにする。
+STRIPE_PAYMENT_METHODS=card,customer_balance
 
 # メール
 RESEND_API_KEY=

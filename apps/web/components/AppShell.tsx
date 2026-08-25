@@ -13,6 +13,7 @@ const NAV = [
   { key: "qualifications", href: "/qualifications", label: "入札資格" },
   { key: "partners", href: "/partners", label: "協力会社" },
   { key: "company", href: "/company", label: "自社情報" },
+  { key: "billing", href: "/billing", label: "ご契約" },
 ] as const;
 
 export type NavKey = (typeof NAV)[number]["key"];
