@@ -56,7 +56,8 @@ function jst(iso: string): string {
 }
 
 function appUrl(): string {
-  return (process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3001").replace(/\/+$/, "");
+  // APP_URL を優先する（ブラウザへ配る必要が無い値のため）。以前の設定も引き続き見る
+  return (process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3001").replace(/\/+$/, "");
 }
 
 /** 協力会社への返信先に使う、依頼元組織のメールアドレスを1件取得する。 */
