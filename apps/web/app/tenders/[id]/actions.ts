@@ -1,7 +1,7 @@
 "use server";
 
-import { buildQuoteRequestEmail, groupLotsByTrade } from "@ai-nyusatsu-bu/domain";
-import { sendEmail } from "@ai-nyusatsu-bu/notifications";
+import { buildQuoteRequestEmail, groupLotsByTrade, replyToList } from "@ai-nyusatsu-bu/domain";
+import { inboundEmailDomain, sendEmail } from "@ai-nyusatsu-bu/notifications";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { requireOrgContext } from "@/lib/auth";
@@ -193,7 +193,9 @@ export async function sendQuoteRequests(
           subject,
           text: personalizedBody,
           from: sender.from,
-          replyTo: sender.replyTo,
+          // 顧客企業と、この見積あての受信アドレスの両方を返信先にする。
+          // 協力会社が「返信」を1回押すだけで両方へ届く（タスク4-3）
+          replyTo: replyToList(sender.replyTo, quote.response_token, inboundEmailDomain()),
         });
         sentCount++;
       } catch (err) {
