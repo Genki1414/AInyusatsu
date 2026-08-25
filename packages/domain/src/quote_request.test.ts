@@ -172,3 +172,29 @@ describe("buildQuoteRequestEmail（数量表が無い場合）", () => {
     expect(body).not.toContain("数量表の内訳をお示しできません");
   });
 });
+
+describe("buildQuoteRequestEmail（署名の連絡先）", () => {
+  const base = {
+    senderOrgName: "東北三上機材株式会社",
+    senderContactName: "三上",
+    tenderName: "令和8年度庁舎清掃業務",
+    agencyName: "東北財務局",
+    place: "仙台市",
+    termFrom: null,
+    termTo: null,
+    dueAtLabel: "2026/08/30 17:00",
+    trade: "清掃",
+    lots: [],
+    responseUrl: "https://example.com/q/token",
+  };
+
+  it("署名の末尾に連絡先が入る", () => {
+    const lines = buildQuoteRequestEmail({ ...base, senderContactEmail: "info@toyo.co.jp" }).body.split("\n");
+    expect(lines.slice(-3)).toEqual(["東北三上機材株式会社", "三上", "info@toyo.co.jp"]);
+  });
+
+  it("連絡先が無ければ署名から省く（空行や空欄を残さない）", () => {
+    const lines = buildQuoteRequestEmail({ ...base, senderContactEmail: null }).body.split("\n");
+    expect(lines.slice(-2)).toEqual(["東北三上機材株式会社", "三上"]);
+  });
+});

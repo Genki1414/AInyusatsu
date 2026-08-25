@@ -130,7 +130,9 @@ export async function sendQuoteRequests(
         : buildQuoteRequestEmail({
             senderOrgName: orgName,
             senderContactName: userName,
-            senderContactEmail: userEmail,
+            // 署名の連絡先は返信先（Reply-To）と揃える。食い違うと、協力会社から見て
+            // 返信ボタンの宛先と本文の連絡先が別になる
+            senderContactEmail: sender.replyTo,
             tenderName: tender.name,
             agencyName: agencyName(tender.agencies),
             place: tender.place,

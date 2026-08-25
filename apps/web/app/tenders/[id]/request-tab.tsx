@@ -236,7 +236,7 @@ export function RequestTab({
   tenderId: string;
   senderOrgName: string;
   senderContactName: string;
-  senderContactEmail: string;
+  senderContactEmail: string | null;
   tenderName: string;
   agencyName: string;
   place: string | null;
