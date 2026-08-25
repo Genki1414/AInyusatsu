@@ -21,7 +21,8 @@
     "tenders:lifecycle": "tsx --env-file=.env.local scripts/run-tender-lifecycle.ts",
     "match:tenders": "tsx --env-file=.env.local scripts/run-match-tenders.ts",
     "coverage:check": "tsx --env-file=.env.local scripts/run-coverage-check.ts",
-    "quotes:remind": "tsx --env-file=.env.local scripts/run-remind-quotes.ts"
+    "quotes:remind": "tsx --env-file=.env.local scripts/run-remind-quotes.ts",
+    "inbound:reparse": "tsx --env-file=.env.local scripts/run-reparse-inbound.ts"
   },
   "dependencies": {
     "@ai-nyusatsu-bu/ai": "workspace:*",

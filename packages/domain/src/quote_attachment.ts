@@ -12,6 +12,8 @@
 // 顧客企業自身の商談の書類なので、顧客企業に見せてよい。
 // 取り違えないよう、保存先のバケットを分ける。
 
+import { findAttachments } from "./inbound_payload";
+
 /** 1件あたりの上限。これを超える添付は保存しない（受信口が詰まるのを防ぐ）。 */
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
@@ -43,37 +45,62 @@ export function fileExtension(name: string): string | null {
 /**
  * 受信したJSONから添付を取り出す。
  *
- * providerごとに項目名が違いうるため、よくある名前を順に見る。
+ * 添付がJSONのどこに入っているかはproviderによって違う（data.attachments とは限らない）。
+ * 一覧の場所は findAttachments() がJSON全体をたどって探す。ここでは1件ずつの項目名のゆれを吸収する。
  * 解釈を誤っても元データ（inbound_messages.raw）から直せるようにしてある。
  */
 export function extractAttachments(payload: unknown): InboundAttachment[] {
-  const data = (payload as { data?: Record<string, unknown> })?.data ?? {};
-  const raw = data.attachments;
-  if (!Array.isArray(raw)) return [];
+  const { entries } = findAttachments(payload);
 
   const attachments: InboundAttachment[] = [];
-  for (const entry of raw) {
+  for (const entry of entries) {
+    // 取得先URLの文字列だけが並ぶ形にも耐える
+    if (typeof entry === "string") {
+      if (!/^https?:\/\//i.test(entry.trim())) continue;
+      attachments.push({ filename: filenameFromUrl(entry), contentType: null, base64: null, url: entry.trim() });
+      continue;
+    }
     if (typeof entry !== "object" || entry === null) continue;
     const item = entry as Record<string, unknown>;
 
-    const filename = pickString(item, ["filename", "file_name", "name"]) ?? "attachment";
-    const contentType = pickString(item, ["content_type", "contentType", "type", "mime_type"]);
-    const base64 = pickString(item, ["content", "content_base64", "data"]);
-    const url = pickString(item, ["url", "download_url", "href"]);
+    // "type": "attachment" のように種別が入っていることがあるので、MIMEの形をしたものだけ採る
+    const contentTypeRaw = pickString(item, ["content_type", "contenttype", "mime_type", "mimetype", "type"]);
+    const contentType = contentTypeRaw !== null && contentTypeRaw.includes("/") ? contentTypeRaw : null;
+    const base64 = pickString(item, ["content", "content_base64", "contentbase64", "base64", "data"]);
+    const url = pickString(item, ["url", "download_url", "downloadurl", "href", "link", "content_url"]);
     // 中身も取得先も無いものは保存できない
     if (base64 === null && url === null) continue;
+
+    const filename =
+      pickString(item, ["filename", "file_name", "name", "title"]) ?? (url !== null ? filenameFromUrl(url) : "attachment");
 
     attachments.push({ filename: safeFilename(filename), contentType, base64, url });
   }
   return attachments;
 }
 
+/** 項目名の大文字小文字・区切りのゆれを無視して文字列を取り出す。 */
 function pickString(item: Record<string, unknown>, keys: string[]): string | null {
+  const normalized = new Map<string, unknown>();
+  for (const [key, value] of Object.entries(item)) {
+    const lower = key.toLowerCase();
+    if (!normalized.has(lower)) normalized.set(lower, value);
+  }
   for (const key of keys) {
-    const value = item[key];
+    const value = normalized.get(key.toLowerCase());
     if (typeof value === "string" && value.trim() !== "") return value;
   }
   return null;
+}
+
+/** URLしか無いときのファイル名。取れなければ既定値。 */
+function filenameFromUrl(url: string): string {
+  try {
+    const last = new URL(url).pathname.split("/").filter((part) => part !== "").pop();
+    return last ? decodeURIComponent(last) : "attachment";
+  } catch {
+    return "attachment";
+  }
 }
 
 /**

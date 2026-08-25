@@ -129,6 +129,13 @@ function InboxMessages({ messages }: { messages: QuoteInboxMessage[] }) {
                 {m.body}
               </pre>
             )}
+
+            {/* 届いたのに何も読めていないことを黙って隠さない（日時だけが出て理由が分からない状態を作らない） */}
+            {m.body.trim() === "" && m.attachments.length === 0 && (
+              <p className="mt-1.5 text-xs text-amber-700">
+                返信は届いていますが、本文も添付も読み取れていません。協力会社に直接ご確認ください。
+              </p>
+            )}
           </li>
         ))}
       </ul>

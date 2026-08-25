@@ -20,6 +20,11 @@
 // 協力会社は未回答のままで、回答期限の24時間前に催促が飛んでいた。
 // 返信が届いた事実だけは確実なので、ここで記録して催促を止める。
 //
+// 【項目名を決め打ちしない】
+// 最初の1通は記録できたのに本文が空・添付ゼロだった（2026-08-25）。data.text / data.attachments と
+// 決め打ちしていたためで、中身は raw に残っていた。今はJSON全体をたどって探す（findMessageBody / findAttachments）。
+// それでも見つからなかったときは、どこも該当しなかったことをログに残す（黙って空で保存しない）。
+//
 // 【見送りは自動で確定させない】
 // 本文から辞退を読み取れても quotes.declined は変えない。読み違えると原価集計から
 // 外れてしまう。人が画面で見て判断する。
@@ -29,6 +34,9 @@ import { createServiceClient } from "@ai-nyusatsu-bu/db";
 import {
   attachmentStorageKey,
   extractAttachments,
+  findAttachments,
+  findMessageBody,
+  findRecipients,
   MAX_ATTACHMENT_BYTES,
   parseInboundAddress,
   parseQuoteReply,
@@ -57,28 +65,6 @@ type QuoteRow = {
 function one<T>(value: T | T[] | null | undefined): T | null {
   if (!value) return null;
   return Array.isArray(value) ? (value[0] ?? null) : value;
-}
-
-/** 受け取ったJSONから宛先の一覧を取り出す。providerごとの表記ゆれに耐えるよう幅を持たせる。 */
-function recipientAddresses(payload: unknown): string[] {
-  const data = (payload as { data?: Record<string, unknown> })?.data ?? {};
-  const raw = data.to ?? data.recipient ?? data.recipients;
-  const list = Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : [];
-  return list
-    .filter((v): v is string => typeof v === "string")
-    // "名前 <addr@example.com>" の形でも拾えるようにする
-    .map((v) => (v.includes("<") ? (v.split("<")[1] ?? "").replace(">", "") : v).trim())
-    .filter((v) => v !== "");
-}
-
-/** 本文を取り出す。テキストが無ければHTMLからタグを落として使う。 */
-function messageBody(payload: unknown): string {
-  const data = (payload as { data?: Record<string, unknown> })?.data ?? {};
-  const text = data.text ?? data.plain ?? data.body;
-  if (typeof text === "string" && text.trim() !== "") return text;
-  const html = data.html;
-  if (typeof html === "string") return html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-  return "";
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
@@ -127,7 +113,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   // 宛先から、どの見積への返信かを特定する
-  const token = recipientAddresses(payload).map(parseInboundAddress).find((t): t is string => t !== null) ?? null;
+  const token = findRecipients(payload).map(parseInboundAddress).find((t): t is string => t !== null) ?? null;
 
   let quote: QuoteRow | null = null;
   if (token) {
@@ -144,7 +130,14 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   const request_ = one(quote?.quote_requests);
-  const parsed = parseQuoteReply(messageBody(payload));
+
+  const body = findMessageBody(payload);
+  const attachmentsHit = findAttachments(payload);
+  // 読めなかったときに「なぜ空なのか」が後から分かるようにする
+  if (body.text === "") console.warn(`[inbound] 本文を見つけられませんでした（${messageId ?? "id不明"}）`);
+  if (attachmentsHit.path === null) console.info(`[inbound] 添付の項目が見当たりません（${messageId ?? "id不明"}）`);
+
+  const parsed = parseQuoteReply(body.text);
   const stored = await storeAttachments(client, extractAttachments(payload), {
     quoteId: quote?.id ?? null,
     messageId: messageId ?? "unknown",
