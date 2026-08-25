@@ -46,4 +46,6 @@ export * from "./tender_browse";
 export * from "./date_range";
 export * from "./analysis_scope";
 export * from "./coverage";
+export * from "./daily_digest";
+export * from "./proposal_status";
 export * from "./award_match";

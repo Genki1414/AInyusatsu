@@ -12,6 +12,7 @@
 //   09:00 AI解析
 //   10:30 公開・終了の反映
 //   11:00 提案の作成
+//   07:00 ダイジェストの送信（前日ぶんの提案をまとめて知らせる）
 // 12:00の巡回ぶんも拾えるよう、抽出・解析・提案は夕方にもう一度走らせる。
 
 export const TIMEZONE = "Asia/Tokyo";
@@ -23,6 +24,7 @@ export type JobName =
   | "analyze-pending"
   | "tender-lifecycle"
   | "match-tenders"
+  | "notify-digest"
   | "coverage-check"
   | "remind-quotes"
   | "import-awards"
@@ -45,6 +47,9 @@ export const SCHEDULE: readonly ScheduledJob[] = [
   // 直前にも走らせる。解析が終わった案件をその日のうちに提案へ乗せるため。
   { name: "tender-lifecycle", cron: "30 0,10,18 * * *", description: "解析完了を公開中にし、提出期限を過ぎた案件を終了にする" },
   { name: "match-tenders", cron: "0 11,19 * * *", description: "条件セットごとに採点し、提案を作る" },
+  // 毎朝1通のダイジェスト（実装仕様書 §8）。前日の提案（11:00 / 19:00）をまとめて知らせる。
+  // その日の11:00ぶんは翌朝に回る。急ぎの期限は即時通知で拾う想定（未実装）。
+  { name: "notify-digest", cron: "0 7 * * *", description: "新着の提案・近い期限・未回答の見積を1通にまとめて送る" },
   { name: "coverage-check", cron: "0 6 * * *", description: "機関ごとに、想定頻度に対して取得できているかを確かめる" },
   { name: "remind-quotes", cron: "0 * * * *", description: "回答期限24時間前の未回答へ催促する" },
   { name: "import-awards", cron: "0 3 1 * *", description: "落札実績オープンデータの差分を取り込む（月次）" },

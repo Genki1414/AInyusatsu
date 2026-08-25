@@ -8,20 +8,23 @@
 // のみ作り直す」）に従い、既存のproposalsのうちstatusが 検討中／対象外 の行は
 // ユーザーの判断が入った状態とみなし上書きしない。新規の組み合わせは常に作成する。
 //
-// 【スコープ外・別タスク】
-// - 通知の送信（毎朝のダイジェスト・即時通知）は通知アダプタが無いため対象外
-//   （実装仕様書_v1.md §8）。delivered_at / read_at はここでは更新しない
+// 【通知との関係】
+// 毎朝のダイジェスト（notify_digest）は status が 提案対象 のものを「新着」として送り、
+// 送ったら 配信済 にする。ここで再採点するときに 配信済・既読 を 提案対象 へ戻すと、
+// 同じ提案が毎朝届いて読まれなくなるため、状態の決め方は
+// packages/domain の nextProposalStatus に任せる。
+// delivered_at / read_at はここでは更新しない（送信側・画面側が持つ）
 
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
 import {
+  canRescore,
   evaluateFit,
   isDeadlinePassed,
+  nextProposalStatus,
   type FitCompanyProfile,
   type FitCriteriaSet,
   type FitTender,
 } from "@ai-nyusatsu-bu/domain";
-
-const RESCORABLE_STATUSES = new Set(["提案対象", "配信済", "既読"]);
 
 const EMPTY_PROFILE: FitCompanyProfile = { qualCategories: [], grades: {}, items: [], areas: [] };
 
@@ -221,7 +224,7 @@ export async function runMatchTenders(now: Date = new Date()): Promise<MatchTend
 
       const key = `${criteria.org_id}:${tender.id}:${criteria.id}`;
       const existing = existingByKey.get(key);
-      if (existing && !RESCORABLE_STATUSES.has(existing.status)) {
+      if (existing && !canRescore(existing.status)) {
         skipped++;
         continue;
       }
@@ -230,7 +233,9 @@ export async function runMatchTenders(now: Date = new Date()): Promise<MatchTend
         org_id: criteria.org_id,
         tender_id: tender.id,
         criteria_set_id: criteria.id,
-        status: result.eligible ? "提案対象" : "対象外",
+        // 知らせた事実（配信済・既読）は再採点で消さない。
+        // 戻してしまうと、毎朝のダイジェストに同じ提案が新着として出続ける
+        status: nextProposalStatus(existing?.status ?? null, result.eligible),
         score: result.score,
         reasons_ok: result.reasonsOk,
         reasons_ng: result.reasonsNg,
