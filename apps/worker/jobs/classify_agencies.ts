@@ -12,7 +12,13 @@
 // 「不明」の機関名も並べて、人が見て確かめられるようにする。
 
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
-import { classifyAgencyScope, judgeQualificationScope, type GovScope, type ScopeVerdict } from "@ai-nyusatsu-bu/domain";
+import {
+  classifyAgencyScope,
+  isSourceAgency,
+  judgeQualificationScope,
+  type GovScope,
+  type ScopeVerdict,
+} from "@ai-nyusatsu-bu/domain";
 
 /** AI解析1件あたりの費用（実測）。見込み額の計算に使う。 */
 const YEN_PER_ANALYSIS = 69;
@@ -68,6 +74,9 @@ export async function runClassifyAgencies(options: ClassifyAgenciesOptions): Pro
   const changed: { id: string; scope: GovScope }[] = [];
 
   for (const agency of agencies ?? []) {
+    // 収集元（官公需情報ポータル・調達ポータル）は発注機関ではない。
+    // 分類の対象に入れると「分類できなかった機関」に並び続け、本当の取りこぼしが埋もれる
+    if (isSourceAgency(agency.id)) continue;
     const scope = classifyAgencyScope(agency.name);
     scopeById.set(agency.id, scope);
     counts[scope]++;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyAgencyScope, judgeQualificationScope, shouldAnalyze } from "./qualification_scope";
+import { classifyAgencyScope, isSourceAgency, judgeQualificationScope, shouldAnalyze } from "./qualification_scope";
 
 describe("classifyAgencyScope", () => {
   it("府省庁を国と判定する", () => {
@@ -151,5 +151,25 @@ describe("実データで取りこぼした機関", () => {
   it("収集元そのものは発注機関ではないので不明のまま", () => {
     expect(classifyAgencyScope("官公需情報ポータル(API)")).toBe("不明");
     expect(classifyAgencyScope("調達ポータル")).toBe("不明");
+  });
+});
+
+describe("国の委員会", () => {
+  it("委員会名のあとに住所が続いても国と判定する（実データ例）", () => {
+    expect(classifyAgencyScope("個人情報保護委員会東京都")).toBe("国");
+    expect(classifyAgencyScope("公正取引委員会")).toBe("国");
+    expect(classifyAgencyScope("原子力規制委員会")).toBe("国");
+  });
+
+  it("県の委員会と取り違えない", () => {
+    expect(classifyAgencyScope("新潟県教育委員会")).toBe("自治体");
+  });
+});
+
+describe("isSourceAgency", () => {
+  it("収集元そのものは発注機関ではない", () => {
+    expect(isSourceAgency("kkj")).toBe(true);
+    expect(isSourceAgency("p-portal")).toBe(true);
+    expect(isSourceAgency("auto-51e03e554603")).toBe(false);
   });
 });
