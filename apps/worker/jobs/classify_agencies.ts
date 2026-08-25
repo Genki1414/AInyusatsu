@@ -27,6 +27,11 @@ export type ClassifyAgenciesOptions = {
   apply: boolean;
 };
 
+/** 独立行政法人等を対象に含めるか（INCLUDE_INCORPORATED_AGENCIES=true）。 */
+export function includeIncorporatedFromEnv(raw: string | undefined = process.env.INCLUDE_INCORPORATED_AGENCIES): boolean {
+  return raw?.trim().toLowerCase() === "true";
+}
+
 export type ClassifyAgenciesResult = {
   /** 機関の数（区分ごと） */
   agencies: Record<GovScope, number>;
@@ -79,11 +84,12 @@ export async function runClassifyAgencies(options: ClassifyAgenciesOptions): Pro
     .returns<TenderRow[]>();
   if (tenderError) throw new Error(`案件の取得に失敗しました: ${tenderError.message}`);
 
+  const includeIncorporated = includeIncorporatedFromEnv();
   const verdicts: Record<ScopeVerdict, number> = { 対象: 0, 対象外: 0, 未判定: 0 };
   const reasons: Record<string, number> = {};
   for (const tender of tenders ?? []) {
     const govScope = scopeById.get(tender.agency_id) ?? "不明";
-    const decision = judgeQualificationScope({ govScope, procurement: tender.procurement });
+    const decision = judgeQualificationScope({ govScope, procurement: tender.procurement }, { includeIncorporated });
     verdicts[decision.verdict]++;
     if (decision.verdict !== "対象") reasons[decision.reason] = (reasons[decision.reason] ?? 0) + 1;
   }

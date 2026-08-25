@@ -87,6 +87,20 @@ describe("judgeQualificationScope", () => {
     expect(judgeQualificationScope({ govScope: "独立行政法人等", procurement: "物品" }).verdict).toBe("対象外");
   });
 
+  it("設定を変えれば独立行政法人等を対象に含められる", () => {
+    const input = { govScope: "独立行政法人等" as const, procurement: "役務" };
+    expect(judgeQualificationScope(input).verdict).toBe("対象外");
+    expect(judgeQualificationScope(input, { includeIncorporated: true }).verdict).toBe("対象");
+  });
+
+  it("独立行政法人等を含める設定でも、建設工事は対象外のまま", () => {
+    const decision = judgeQualificationScope(
+      { govScope: "独立行政法人等", procurement: "工事" },
+      { includeIncorporated: true },
+    );
+    expect(decision).toEqual({ verdict: "対象外", reason: "建設工事（V2）" });
+  });
+
   it("機関を分類できないものは未判定（対象にも対象外にもしない）", () => {
     expect(judgeQualificationScope({ govScope: "不明", procurement: "役務" })).toEqual({
       verdict: "未判定",
@@ -100,5 +114,42 @@ describe("shouldAnalyze", () => {
     expect(shouldAnalyze({ verdict: "対象", reason: "" })).toBe(true);
     expect(shouldAnalyze({ verdict: "未判定", reason: "" })).toBe(false);
     expect(shouldAnalyze({ verdict: "対象外", reason: "" })).toBe(false);
+  });
+});
+
+// 実データ（2026-08-25 の agencies:classify）で「不明」になった機関。
+// 分類できなかったものを、次に同じ取りこぼしをしないためテストに残す。
+describe("実データで取りこぼした機関", () => {
+  it("地方整備局の下の事務所を国と判定する", () => {
+    expect(classifyAgencyScope("仙台河川国道事務所")).toBe("国");
+    expect(classifyAgencyScope("東北技術事務所")).toBe("国");
+  });
+
+  it("「地方」が付かない地方支分部局を国と判定する", () => {
+    expect(classifyAgencyScope("東北防衛局")).toBe("国");
+    expect(classifyAgencyScope("関東信越厚生局")).toBe("国");
+    expect(classifyAgencyScope("東北農政局")).toBe("国");
+    expect(classifyAgencyScope("関東経済産業局")).toBe("国");
+  });
+
+  it("法人名の付かない大学を独立行政法人等と判定する", () => {
+    expect(classifyAgencyScope("東北大学")).toBe("独立行政法人等");
+    expect(classifyAgencyScope("放送大学学園")).toBe("独立行政法人等");
+    expect(classifyAgencyScope("日本私立学校振興・共済事業団")).toBe("独立行政法人等");
+  });
+
+  it("省庁の大学校は国のまま（末尾が「校」）", () => {
+    expect(classifyAgencyScope("防衛大学校")).toBe("国");
+    expect(classifyAgencyScope("気象大学校")).toBe("国");
+  });
+
+  it("自治体の工事事務所を国と取り違えない", () => {
+    expect(classifyAgencyScope("東京都第三建設事務所")).toBe("自治体");
+    expect(classifyAgencyScope("新潟県 河川事務所")).toBe("自治体");
+  });
+
+  it("収集元そのものは発注機関ではないので不明のまま", () => {
+    expect(classifyAgencyScope("官公需情報ポータル(API)")).toBe("不明");
+    expect(classifyAgencyScope("調達ポータル")).toBe("不明");
   });
 });
