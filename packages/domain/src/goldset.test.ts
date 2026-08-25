@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   compareTender,
   evaluateGoldset,
+  expandChecked,
   sameInstant,
   sameSet,
   sameText,
@@ -161,5 +162,56 @@ describe("evaluateGoldset", () => {
     ]);
     expect(report.trades).toMatchObject({ truePositive: 1, falsePositive: 1, falseNegative: 1 });
     expect(report.trades.f1).toBeCloseTo(0.5);
+  });
+});
+
+describe("checked（確認した項目）", () => {
+  it("グループ名で項目に開く", () => {
+    expect([...expandChecked(["期限"])]).toEqual(["submitDeadline", "qaDeadline", "bidOpenAt"]);
+    expect(expandChecked(["業種"]).has("trades")).toBe(true);
+    expect(expandChecked(["すべて"]).size).toBe(8);
+  });
+
+  it("項目名を直接書いてもよい", () => {
+    expect([...expandChecked(["submitDeadline"])]).toEqual(["submitDeadline"]);
+  });
+
+  it("確認した項目は、間違いを書かなければ正解として数える", () => {
+    const result = compareTender({ tenderId: "t1", tenderName: "A", checked: ["期限"] }, actual());
+    expect(result.fields.map((f) => f.field)).toEqual(["提出期限", "質問期限", "開札"]);
+    expect(result.mistakes).toEqual([]);
+  });
+
+  it("確認したうえで違っていた項目は、書いた値で判定する", () => {
+    const result = compareTender(
+      { tenderId: "t1", tenderName: "A", checked: ["期限"], expected: { submitDeadline: "2026-09-20T17:00:00+09:00" } },
+      actual(),
+    );
+    expect(result.fields).toHaveLength(3);
+    expect(result.mistakes.map((m) => m.field)).toEqual(["提出期限"]);
+  });
+
+  it("確認していない案件は1項目も測らない（見ていないものを正解に数えない）", () => {
+    const result = compareTender({ tenderId: "t1", tenderName: "A" }, actual());
+    expect(result.fields).toEqual([]);
+  });
+
+  it("checked に書き忘れても、expected に書いた項目は測る", () => {
+    const result = compareTender({ tenderId: "t1", tenderName: "A", expected: { item: "警備" } }, actual());
+    expect(result.fields.map((f) => f.field)).toEqual(["営業品目"]);
+    expect(result.mistakes).toHaveLength(1);
+  });
+
+  it("確認していない案件だけなら、指標は「測っていない」になる", () => {
+    const report = evaluateGoldset([{ entry: { tenderId: "t1", tenderName: "A" }, actual: actual() }]);
+    expect(report.deadlines.rate).toBeNull();
+    expect(report.meets.deadlines).toBeNull();
+  });
+
+  it("業種を確認して合っていればF1は1.0", () => {
+    const report = evaluateGoldset([
+      { entry: { tenderId: "t1", tenderName: "A", checked: ["業種"] }, actual: actual({ trades: ["清掃"] }) },
+    ]);
+    expect(report.trades.f1).toBe(1);
   });
 });
