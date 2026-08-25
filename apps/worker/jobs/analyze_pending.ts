@@ -17,6 +17,13 @@
 // ANALYZE_MAX_NOTICE_AGE_DAYS を指定すると、公告日がそれより古い案件を解析しない。
 // 公告日は提出期限そのものではないため、既定では絞らない（推測で対象を減らさない）。
 //
+// 【全省庁統一資格の範囲だけを解析する】
+// KKJは国の機関も自治体も、物品も工事も区別せずに返す。実測（2026-08-21の公告日ぶん）
+// では1日543件のうち25%が建設工事だった。自治体・建設工事は「やらないこと」（CLAUDE.md）
+// なので、対象外と決めてある案件に費用を払わないよう、解析の前に落とす。
+// 判定の元になる agencies.gov_scope は `agencies:classify` が埋める。
+// 分類していない機関（gov_scope が null）は解析しない。推測で費用を払わない。
+//
 // 【提出期限を過ぎた案件を解析しない】
 // 対象は提出期限の近い順に並べるので、期限切れの案件を落としておかないと、死んだ案件が
 // 真っ先に解析されて費用だけがかかる。tender_lifecycle が毎日落としているが、ここでも
@@ -24,7 +31,7 @@
 
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
 import { estimateCostYen, summarizeUsage, type UsageSummary } from "@ai-nyusatsu-bu/ai";
-import { noticeDateCutoff, parseMaxNoticeAgeDays, toDateIso } from "@ai-nyusatsu-bu/domain";
+import { judgeQualificationScope, noticeDateCutoff, parseMaxNoticeAgeDays, shouldAnalyze, toDateIso } from "@ai-nyusatsu-bu/domain";
 import { analyzeTender } from "./analyze_tender";
 import { runTenderLifecycle } from "./tender_lifecycle";
 
@@ -42,9 +49,16 @@ export type AnalyzePendingSummary = {
   estimatedYen: number;
   /** 公告日で絞った場合の下限（絞っていなければ null） */
   noticeDateFrom: string | null;
+  /** 統一資格の範囲外として解析しなかった件数 */
+  outOfScope: number;
 };
 
-type PendingRow = { id: string; name: string };
+type PendingRow = { id: string; name: string; procurement: string; agencies: { gov_scope: string | null } | { gov_scope: string | null }[] | null };
+
+function one<T>(value: T | T[] | null | undefined): T | null {
+  if (!value) return null;
+  return Array.isArray(value) ? (value[0] ?? null) : value;
+}
 
 /** 環境変数から1回あたりの上限を読む。数値でなければ既定値に落とす。 */
 /** 環境変数から「公告日が何日前まで」を読む。未設定なら絞らない。 */
@@ -78,14 +92,34 @@ export async function runAnalyzePending(
 
   if (limit === 0) {
     console.warn("[analyze_pending] ANALYZE_DAILY_LIMIT=0 のため解析を行いません");
-    return { analyzed: 0, failed: 0, deferred: 0, estimatedYen: 0, noticeDateFrom };
+    return { analyzed: 0, failed: 0, deferred: 0, estimatedYen: 0, noticeDateFrom, outOfScope: 0 };
+  }
+
+  // 分類がまだなら、解析対象は0件になる。黙って0件で終わらせない
+  const { count: classified } = await client
+    .from("agencies")
+    .select("id", { count: "exact", head: true })
+    .not("gov_scope", "is", null);
+  if (!classified) {
+    console.warn(
+      "[analyze_pending] 発注機関がまだ分類されていません（agencies.gov_scope が空）。" +
+        "統一資格の範囲を判定できないため解析しません。先に `pnpm --filter worker agencies:classify apply` を実行してください",
+    );
+    return { analyzed: 0, failed: 0, deferred: 0, estimatedYen: 0, noticeDateFrom, outOfScope: 0 };
   }
 
   // 上限より1件多く引いて、次回に回した分があるかを知る。
+  //
+  // 統一資格の範囲（国の機関・工事以外）だけをDB側で絞る。ここで絞らずに後から落とすと、
+  // 上限ぶん引いた中身が対象外ばかりで、解析が進まなくなる。
+  // 絞り込みの条件は judgeQualificationScope と同じ意味になるようにし、取り出したあとに
+  // もう一度ドメイン側で確かめる（食い違えばログに出る）。
   let query = client
     .from("tenders")
-    .select("id, name, tender_documents!inner(id)")
+    .select("id, name, procurement, agencies!inner(gov_scope), tender_documents!inner(id)")
     .eq("collect_status", "取得済")
+    .eq("agencies.gov_scope", "国")
+    .neq("procurement", "工事")
     .not("tender_documents.extracted_text", "is", null)
     // 提出期限を過ぎた案件に費用をかけない。期限が取れていない案件は残す（推測しない）
     .or(`submit_deadline.is.null,submit_deadline.gte.${now.toISOString()}`)
@@ -101,7 +135,21 @@ export async function runAnalyzePending(
   if (error) throw new Error(`解析待ちの案件の取得に失敗しました: ${error.message}`);
 
   // inner join のぶん同じ案件が重複しうるので、ここで一意にする。
-  const unique = [...new Map((pending ?? []).map((t) => [t.id, t])).values()];
+  const deduped = [...new Map((pending ?? []).map((t) => [t.id, t])).values()];
+
+  // 判定の正はドメイン側に置く。DBの絞り込みと食い違ったら黙って解析しない
+  let outOfScope = 0;
+  const unique = deduped.filter((tender) => {
+    const decision = judgeQualificationScope({
+      govScope: (one(tender.agencies)?.gov_scope ?? "不明") as never,
+      procurement: tender.procurement,
+    });
+    if (shouldAnalyze(decision)) return true;
+    outOfScope++;
+    console.warn(`[analyze_pending] 統一資格の範囲外のため解析しません（${tender.name}）：${decision.reason}`);
+    return false;
+  });
+
   const targets = unique.slice(0, limit);
   const deferred = Math.max(0, unique.length - targets.length);
 
@@ -151,7 +199,7 @@ export async function runAnalyzePending(
     }
   }
 
-  return { analyzed, failed, deferred, estimatedYen, noticeDateFrom };
+  return { analyzed, failed, deferred, estimatedYen, noticeDateFrom, outOfScope };
 }
 
 /** 複数案件ぶんのトークン消費をまとめた集計（ログ用）。 */
