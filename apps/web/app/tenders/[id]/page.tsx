@@ -25,6 +25,7 @@ import {
   type MarketRate,
   type MatchedAward,
 } from "@ai-nyusatsu-bu/domain";
+import { createServiceClient } from "@ai-nyusatsu-bu/db";
 import { AppShell } from "@/components/AppShell";
 import { CopyButton } from "@/components/CopyButton";
 import { CollectPill, Field, Panel, ProposePill } from "@/components/ui";
@@ -204,15 +205,28 @@ async function loadInbox(
     return {};
   }
 
+  // 署名の発行だけはservice_roleで行う。
+  // Storageにはポリシーを置いていないため、利用者の権限のままでは署名を発行できない
+  // （発行に失敗すると画面に「開けません」とだけ出る）。
+  // 上のSELECTはRLSを通っているので、ここに来る storageKey は自社の返信のものだけ。
+  const storage = createServiceClient().storage.from(ATTACHMENT_BUCKET);
+
   const byQuote: Record<string, QuoteInboxMessage[]> = {};
   for (const row of data ?? []) {
     if (!row.quote_id) continue;
     const attachments = await Promise.all(
       (row.attachments ?? []).map(async (a) => {
-        const { data: signed } = await supabase.storage
-          .from(ATTACHMENT_BUCKET)
-          .createSignedUrl(a.storageKey, ATTACHMENT_URL_TTL_SECONDS, { download: a.filename });
-        return { filename: a.filename, url: signed?.signedUrl ?? null };
+        const { data: signed, error: signError } = await storage.createSignedUrl(
+          a.storageKey,
+          ATTACHMENT_URL_TTL_SECONDS,
+          { download: a.filename },
+        );
+        if (signError || !signed?.signedUrl) {
+          // 開けない理由が分かるように残す（画面には「開けません」としか出せない）
+          console.error(`[tenders] 添付の署名付きURLを発行できませんでした（${a.storageKey}）`, signError);
+          return { filename: a.filename, url: null };
+        }
+        return { filename: a.filename, url: signed.signedUrl };
       }),
     );
     (byQuote[row.quote_id] ??= []).push({
