@@ -49,4 +49,5 @@ export * from "./coverage";
 export * from "./daily_digest";
 export * from "./proposal_status";
 export * from "./instant_notice";
+export * from "./qualification_scope";
 export * from "./award_match";

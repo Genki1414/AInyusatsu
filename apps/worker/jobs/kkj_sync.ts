@@ -5,7 +5,7 @@
 // 資料一式のダウンロードは調達ポータル（GEPS）側の役割。§CLAUDE.md「本部が必ず資料を取得する」）。
 // ここではtendersへのupsertのみ行い、source_urlに公告掲載URLを保持する。
 
-import { agencyIdFromName, dedupeKey, type NormalizedKkjTender } from "@ai-nyusatsu-bu/domain";
+import { agencyIdFromName, classifyAgencyScope, dedupeKey, type NormalizedKkjTender } from "@ai-nyusatsu-bu/domain";
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
 import { recordAgencySuccess } from "./coverage_check";
 
@@ -29,6 +29,10 @@ async function ensureAgency(client: ReturnType<typeof createServiceClient>, agen
         id: agencyId,
         name: agencyName,
         category: "発注機関", // KKJ経由で発見した機関。個別クロール対象ではないため詳細分類はしない
+        // 全省庁統一資格の範囲かどうか。ここで入れておかないと、新しく見つけた機関の案件が
+        // 分類待ちのまま解析されない（analyze_pending は gov_scope が null の機関を解析しない）。
+        // 判定を直したときは `agencies:classify apply` で全機関を付け直せる
+        gov_scope: classifyAgencyScope(agencyName),
         parent_id: null,
         sources: [],
         active: true,
