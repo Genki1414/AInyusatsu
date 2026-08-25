@@ -132,6 +132,9 @@ DATABASE_URL=                     # pg-boss 用
 # AI
 ANTHROPIC_API_KEY=
 
+# 運営（本部）用の管理画面に入れるアドレス。カンマ区切り。未設定なら誰も入れない
+ADMIN_EMAILS=
+
 # 決済
 STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
