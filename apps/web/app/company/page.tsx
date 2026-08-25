@@ -2,9 +2,10 @@
 import { AppShell } from "@/components/AppShell";
 import { requireOrgContext } from "@/lib/auth";
 import { CompanyForm } from "./company-form";
+import { UserForm } from "./user-form";
 
 export default async function CompanyPage() {
-  const { supabase, orgId, orgName, userEmail } = await requireOrgContext();
+  const { supabase, orgId, orgName, userName, userEmail } = await requireOrgContext();
 
   const { data: org } = await supabase
     .from("organizations")
@@ -21,6 +22,7 @@ export default async function CompanyPage() {
         replyTo={org?.reply_to ?? ""}
         ownerEmail={userEmail}
       />
+      <UserForm userName={userName} userEmail={userEmail} />
     </AppShell>
   );
 }
