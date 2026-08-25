@@ -23,7 +23,8 @@
     "coverage:check": "tsx --env-file=.env.local scripts/run-coverage-check.ts",
     "quotes:remind": "tsx --env-file=.env.local scripts/run-remind-quotes.ts",
     "inbound:reparse": "tsx --env-file=.env.local scripts/run-reparse-inbound.ts",
-    "notify:digest": "tsx --env-file=.env.local scripts/run-notify-digest.ts"
+    "notify:digest": "tsx --env-file=.env.local scripts/run-notify-digest.ts",
+    "notify:instant": "tsx --env-file=.env.local scripts/run-notify-instant.ts"
   },
   "dependencies": {
     "@ai-nyusatsu-bu/ai": "workspace:*",
