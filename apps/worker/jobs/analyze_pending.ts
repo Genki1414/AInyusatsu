@@ -32,6 +32,7 @@
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
 import { estimateCostYen, summarizeUsage, type UsageSummary } from "@ai-nyusatsu-bu/ai";
 import { judgeQualificationScope, noticeDateCutoff, parseMaxNoticeAgeDays, shouldAnalyze, toDateIso } from "@ai-nyusatsu-bu/domain";
+import { includeIncorporatedFromEnv } from "./classify_agencies";
 import { analyzeTender } from "./analyze_tender";
 import { runTenderLifecycle } from "./tender_lifecycle";
 
@@ -108,6 +109,10 @@ export async function runAnalyzePending(
     return { analyzed: 0, failed: 0, deferred: 0, estimatedYen: 0, noticeDateFrom, outOfScope: 0 };
   }
 
+  // 独立行政法人等を含めるかは設定で切り替える（既定は含めない）
+  const includeIncorporated = includeIncorporatedFromEnv();
+  const allowedScopes = includeIncorporated ? ["国", "独立行政法人等"] : ["国"];
+
   // 上限より1件多く引いて、次回に回した分があるかを知る。
   //
   // 統一資格の範囲（国の機関・工事以外）だけをDB側で絞る。ここで絞らずに後から落とすと、
@@ -118,7 +123,7 @@ export async function runAnalyzePending(
     .from("tenders")
     .select("id, name, procurement, agencies!inner(gov_scope), tender_documents!inner(id)")
     .eq("collect_status", "取得済")
-    .eq("agencies.gov_scope", "国")
+    .in("agencies.gov_scope", allowedScopes)
     .neq("procurement", "工事")
     .not("tender_documents.extracted_text", "is", null)
     // 提出期限を過ぎた案件に費用をかけない。期限が取れていない案件は残す（推測しない）
@@ -143,7 +148,7 @@ export async function runAnalyzePending(
     const decision = judgeQualificationScope({
       govScope: (one(tender.agencies)?.gov_scope ?? "不明") as never,
       procurement: tender.procurement,
-    });
+    }, { includeIncorporated });
     if (shouldAnalyze(decision)) return true;
     outOfScope++;
     console.warn(`[analyze_pending] 統一資格の範囲外のため解析しません（${tender.name}）：${decision.reason}`);

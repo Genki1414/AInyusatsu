@@ -6,7 +6,7 @@
 //
 // 参照：docs/reference/ローカル実行手順.md
 
-import { runClassifyAgencies } from "../jobs/classify_agencies";
+import { includeIncorporatedFromEnv, runClassifyAgencies } from "../jobs/classify_agencies";
 import { cliArgs, CliUsageError, rejectExtraArgs, runCli } from "./_args";
 
 const USAGE = "pnpm --filter worker agencies:classify [apply]";
@@ -58,6 +58,10 @@ async function main() {
 
   console.log("");
   console.log("■ AI解析の見込み（実測 約69円/件）");
+  console.log(
+    `  独立行政法人等：${includeIncorporatedFromEnv() ? "対象に含める" : "対象外"}` +
+      "（INCLUDE_INCORPORATED_AGENCIES=true で含められます）",
+  );
   console.log(`  対象 ${result.targetPerDay.toFixed(1)}件/日 → 月 約${result.estimatedMonthlyYen.toLocaleString("ja-JP")}円`);
   console.log("  ※ 実際に解析されるのは資料が取れた案件だけなので、これは上限の目安です");
 
