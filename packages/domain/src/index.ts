@@ -34,6 +34,7 @@ export * from "./fit";
 export * from "./quote_request";
 export * from "./quote_response";
 export * from "./quote_reminder";
+export * from "./quote_reply";
 export * from "./sender_identity";
 export * from "./cost_estimate";
 export * from "./submission_checklist";

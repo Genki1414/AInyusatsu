@@ -16,12 +16,13 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
-import { sendEmail } from "@ai-nyusatsu-bu/notifications";
+import { inboundEmailDomain, sendEmail } from "@ai-nyusatsu-bu/notifications";
 import { loadSenderIdentity } from "@/lib/sender";
 import {
   buildDocumentsEmail,
   documentFilenames,
   signedUrlTtlSeconds,
+  replyToList,
   sortDocumentsByKind,
   type QuoteResponseChoice,
 } from "@ai-nyusatsu-bu/domain";
@@ -59,6 +60,8 @@ type QuoteRequestRef = {
 
 type QuoteContext = {
   id: string;
+  /** 回答ページのトークン。返信先に入れる受信アドレスの組み立てに使う */
+  responseToken: string;
   partner: { name: string; email: string | null } | null;
   request: {
     trade: string;
@@ -111,6 +114,8 @@ export async function submitQuoteResponse(
   const req = one(quoteRow.quote_requests);
   const ctx: QuoteContext = {
     id: quoteRow.id,
+    // 返信先に「この見積あての受信アドレス」を入れるのに使う（タスク4-3）
+    responseToken: token,
     partner: one(quoteRow.partners),
     request: req
       ? {
@@ -218,7 +223,13 @@ async function sendDocuments(supabase: Supabase, ctx: QuoteContext): Promise<str
   });
 
   try {
-    await sendEmail({ to: ctx.partner.email, subject, text: body, from: sender.from, replyTo: sender.replyTo });
+    await sendEmail({
+      to: ctx.partner.email,
+      subject,
+      text: body,
+      from: sender.from,
+      replyTo: replyToList(sender.replyTo, ctx.responseToken, inboundEmailDomain()),
+    });
   } catch (err) {
     console.error("[quote-response] 資料送付メールの送信に失敗しました", err);
     return `資料の自動送付に失敗しました：${err instanceof Error ? err.message : "原因不明"}`;

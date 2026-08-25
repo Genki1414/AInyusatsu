@@ -8,9 +8,10 @@
 // 本来の依頼まで届かなくなる。期限を過ぎたものにも送らない（今から間に合わないため）。
 
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
-import { sendEmail, serviceFromAddress } from "@ai-nyusatsu-bu/notifications";
+import { inboundEmailDomain, sendEmail, serviceFromAddress } from "@ai-nyusatsu-bu/notifications";
 import {
   buildQuoteReminderEmail,
+  replyToList,
   resolveSenderIdentity,
   shouldRemind,
   type SenderIdentity,
@@ -169,7 +170,13 @@ export async function runQuoteReminders(now: Date = new Date()): Promise<RemindQ
     });
 
     try {
-      await sendEmail({ to: partner.email, subject, text: body, from: sender.from, replyTo: sender.replyTo });
+      await sendEmail({
+        to: partner.email,
+        subject,
+        text: body,
+        from: sender.from,
+        replyTo: replyToList(sender.replyTo, row.response_token, inboundEmailDomain()),
+      });
     } catch (err) {
       // 1件の失敗で他の催促を止めない。失敗は握りつぶさずログに残す（CLAUDE.md）。
       summary.failed++;
