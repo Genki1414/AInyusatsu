@@ -177,7 +177,10 @@ async function reparseOne(
 
   const parsed = parseQuoteReply(body.text);
 
-  if (body.path === null) notes.push("本文らしい項目が見つかりません（下の「届いたJSONの形」を見て項目名を足してください）");
+  // webhookには本文が入っていない。取得まで成功したうえで空だったときだけ、項目名を疑う
+  if (body.path === null && fetchedFrom !== null) {
+    notes.push("取得できましたが本文らしい項目がありません（下の「届いたJSONの形」を見て項目名を足してください）");
+  }
   if (attachments.length === 0 && attachmentsHit.entries.length > 0) {
     notes.push(`webhookには添付が${attachmentsHit.entries.length}件ありますが、中身を取得できませんでした`);
   }
