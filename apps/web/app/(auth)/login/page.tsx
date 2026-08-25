@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useActionState } from "react";
 import { login, type LoginState } from "./actions";
 
@@ -46,11 +45,10 @@ export default function LoginPage() {
           {pending ? "ログイン中..." : "ログイン"}
         </button>
       </form>
-      <p className="text-sm text-slate-600">
-        アカウントをお持ちでない方は{" "}
-        <Link href="/signup" className="underline">
-          新規登録
-        </Link>
+      {/* 支払いは請求書払いのみで、アカウントは本部が発行する（ユーザー決定 2026-08-25）。
+          自分で登録する導線は置かない。問い合わせ先が分からないと迷子になるため、案内だけ残す */}
+      <p className="text-sm leading-relaxed text-slate-600">
+        アカウントは運営が発行します。ご利用をご希望の方、ログインできない方は、担当者までご連絡ください。
       </p>
     </main>
   );

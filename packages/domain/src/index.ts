@@ -53,4 +53,5 @@ export * from "./qualification_scope";
 export * from "./billing";
 export * from "./admin_console";
 export * from "./goldset";
+export * from "./org_access";
 export * from "./award_match";

@@ -11,6 +11,7 @@
 // 【取れていないことを隠さない】
 // CLAUDE.md 最重要の前提7。対応が要るものを先に、対応不要なものは件数だけ出す。
 
+import Link from "next/link";
 import {
   billingAttention,
   billingSummary,
@@ -90,7 +91,10 @@ export default async function AdminPage() {
     <div className="mx-auto max-w-5xl space-y-3 p-4">
       <header className="flex flex-wrap items-center gap-2">
         <h1 className="text-sm font-semibold text-slate-800">運営</h1>
-        <span className="text-xs text-slate-400">{email}</span>
+        <Link href="/admin/accounts" className="text-xs text-slate-500 underline hover:text-slate-700">
+          アカウント
+        </Link>
+        <span className="ml-auto text-xs text-slate-400">{email}</span>
       </header>
 
       {stalled.length > 0 && (
