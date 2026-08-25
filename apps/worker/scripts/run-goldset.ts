@@ -50,19 +50,22 @@ async function main() {
     const limit = args[0] === undefined ? DEFAULT_LIMIT : requirePositiveInt(args[0], "件数");
 
     const result = await writeGoldsetTemplate(GOLDSET_PATH, limit);
-    console.log(`${result.path} に${result.tenders}件ぶんの記入欄を作りました。`);
+    console.log(`${result.path} に${result.tenders}件ぶんを書き出しました。`);
     console.log("");
-    console.log("公告（sourceUrl）を見て、分かる項目だけ expected に書いてください。");
-    console.log("書かなかった項目は測定から外れるので、全部を埋める必要はありません。");
-    console.log('公告に書かれていない項目は null と書いてください（未記入とは違う意味になります）。');
+    console.log("各案件に「AIの答え」と、その根拠になった引用・出典が入っています。");
+    console.log("引用を読んで、合っているかどうかを判断してください。原文を開く必要はほとんどありません。");
     console.log("");
-    console.log("記入例:");
-    console.log('  "expected": {');
-    console.log('    "submitDeadline": "2026-09-25T17:00:00+09:00",');
-    console.log('    "qaDeadline": null,');
-    console.log('    "qualCategory": "役務の提供等",');
-    console.log('    "trades": ["清掃", "警備"]');
-    console.log("  }");
+    console.log("1. 確認した項目を checked に書く（合っていた項目も含めて）");
+    console.log('     "checked": ["期限"]            期限3項目を確認した');
+    console.log('     "checked": ["期限", "業種"]    まとめて指定できる');
+    console.log('     "checked": ["すべて"]          全項目を確認した');
+    console.log("");
+    console.log("2. 間違えていた項目だけ expected に正しい値を書く");
+    console.log('     "expected": { "submitDeadline": "2026-09-25T17:00:00+09:00" }');
+    console.log("");
+    console.log("合っていた項目は何も書かなくて構いません。");
+    console.log("checked が空の案件は1項目も測りません（見ていないものを正解に数えないため）。");
+    console.log("「引用なし＝未確認」と出ている項目は、原文で確かめてください。");
     return;
   }
 

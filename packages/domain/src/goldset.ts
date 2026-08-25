@@ -8,10 +8,20 @@
 // 期限の誤りは失格に直結する（CLAUDE.md 最重要の前提5）ので、
 // ここだけは「だいたい合っている」では済まない。
 //
-// 【記入した項目だけを測る】
-// 20件すべての項目を人が埋めるのは重い。未記入の項目は測定から外し、
-// 埋めたところだけで数字を出す。分母を水増ししないので、
-// 「期限だけ20件」でも意味のある数字になる。
+// 【全部を手で書かせない】
+// 20件×8項目を人が書き写すのは現実的でない。解析結果には項目ごとに
+// 引用と出典が付いている（CLAUDE.md 最重要の前提3）ので、それを読んで
+// 「合っている／違う」を判断してもらう。合っていれば何も書かなくてよい。
+//
+//   checked   … 人が確認した項目（合っていたものも含む）
+//   expected  … AIが間違えていた項目の、正しい値
+//
+// checked に入っていて expected に書かれていない項目は「人が見て合っていた」。
+// checked に入っていない項目は測らない。
+//
+// 【確認していないものを正解に数えない】
+// checked を空のままにすると、その案件は1項目も測らない。
+// 「見ていないが多分合っている」を正解に数えると、数字が意味を失う。
 //
 // 【「値が無い」と「未記入」を分ける】
 // 期限が公告に書かれていない案件では、正解は null（取れないのが正しい）。
@@ -44,12 +54,37 @@ export type GoldExpected = {
   trades?: Gold<string[]>;
 };
 
+/** checked に書ける名前。まとめて指定できるようにしてある。 */
+export const FIELD_GROUPS: Record<string, (keyof GoldExpected)[]> = {
+  期限: ["submitDeadline", "qaDeadline", "bidOpenAt"],
+  参加資格: ["qualCategory", "item", "grade", "areas"],
+  業種: ["trades"],
+  すべて: ["submitDeadline", "qaDeadline", "bidOpenAt", "qualCategory", "item", "grade", "areas", "trades"],
+};
+
 export type GoldEntry = {
   tenderId: string;
   tenderName: string;
-  expected: GoldExpected;
+  /**
+   * 人が確認した項目。グループ名（期限／参加資格／業種／すべて）でも、
+   * 項目名（submitDeadline など）でも書ける。
+   */
+  checked?: string[];
+  /** AIが間違えていた項目の正しい値。合っていた項目は書かなくてよい */
+  expected?: GoldExpected;
   note?: string;
 };
+
+/** checked の指定を、項目名の集合に開く。知らない名前は無視せず、そのまま項目名として扱う。 */
+export function expandChecked(checked: string[] | undefined): Set<string> {
+  const fields = new Set<string>();
+  for (const entry of checked ?? []) {
+    const group = FIELD_GROUPS[entry.trim()];
+    if (group) for (const field of group) fields.add(field);
+    else fields.add(entry.trim());
+  }
+  return fields;
+}
 
 /** DBに入っている解析結果。 */
 export type ActualValues = {
@@ -157,42 +192,48 @@ const QUALIFICATION_FIELDS = ["資格区分", "営業品目", "等級", "競争�
 
 /**
  * 1件を突き合わせる。
- * 未記入（undefined）の項目は比較しない。
+ *
+ * 測るのは「人が確認した（checked）項目」と「正しい値を書いた（expected）項目」だけ。
+ * 確認した項目で expected が書かれていなければ、AIの答えが正しかったということ。
  */
 export function compareTender(entry: GoldEntry, actual: ActualValues): TenderResult {
+  const checked = expandChecked(entry.checked);
+  const expected = entry.expected ?? {};
   const fields: FieldComparison[] = [];
 
-  const instant = (field: string, expected: Gold<string | null>, got: string | null) => {
-    if (expected === undefined) return;
-    fields.push({ field, expected: showInstant(expected), actual: showInstant(got), correct: sameInstant(expected, got) });
+  /** その項目を測るか。expected に書いてあれば必ず測る（checked の書き忘れを救う）。 */
+  const measured = (key: keyof GoldExpected) => expected[key] !== undefined || checked.has(key);
+
+  const instant = (label: string, key: "submitDeadline" | "qaDeadline" | "bidOpenAt", got: string | null) => {
+    if (!measured(key)) return;
+    // 確認して合っていた項目は、正解＝AIの答え
+    const want = expected[key] !== undefined ? (expected[key] as string | null) : got;
+    fields.push({ field: label, expected: showInstant(want), actual: showInstant(got), correct: sameInstant(want, got) });
   };
-  const text = (field: string, expected: Gold<string | null>, got: string | null) => {
-    if (expected === undefined) return;
-    fields.push({
-      field,
-      expected: expected ?? "（無し）",
-      actual: got ?? "（無し）",
-      correct: sameText(expected, got),
-    });
+  const text = (label: string, key: "qualCategory" | "item" | "grade", got: string | null) => {
+    if (!measured(key)) return;
+    const want = expected[key] !== undefined ? (expected[key] as string | null) : got;
+    fields.push({ field: label, expected: want ?? "（無し）", actual: got ?? "（無し）", correct: sameText(want, got) });
   };
-  const set = (field: string, expected: Gold<string[]>, got: string[]) => {
-    if (expected === undefined) return;
+  const set = (label: string, key: "areas" | "trades", got: string[]) => {
+    if (!measured(key)) return;
+    const want = expected[key] !== undefined ? (expected[key] as string[]) : got;
     fields.push({
-      field,
-      expected: expected.length === 0 ? "（無し）" : expected.join("、"),
+      field: label,
+      expected: want.length === 0 ? "（無し）" : want.join("、"),
       actual: got.length === 0 ? "（無し）" : got.join("、"),
-      correct: sameSet(expected, got),
+      correct: sameSet(want, got),
     });
   };
 
-  instant("提出期限", entry.expected.submitDeadline, actual.submitDeadline);
-  instant("質問期限", entry.expected.qaDeadline, actual.qaDeadline);
-  instant("開札", entry.expected.bidOpenAt, actual.bidOpenAt);
-  text("資格区分", entry.expected.qualCategory, actual.qualCategory);
-  text("営業品目", entry.expected.item, actual.item);
-  text("等級", entry.expected.grade, actual.grade);
-  set("競争参加地域", entry.expected.areas, actual.areas);
-  set("業種", entry.expected.trades, actual.trades);
+  instant("提出期限", "submitDeadline", actual.submitDeadline);
+  instant("質問期限", "qaDeadline", actual.qaDeadline);
+  instant("開札", "bidOpenAt", actual.bidOpenAt);
+  text("資格区分", "qualCategory", actual.qualCategory);
+  text("営業品目", "item", actual.item);
+  text("等級", "grade", actual.grade);
+  set("競争参加地域", "areas", actual.areas);
+  set("業種", "trades", actual.trades);
 
   return {
     tenderId: entry.tenderId,
@@ -248,8 +289,8 @@ export function evaluateGoldset(pairs: { entry: GoldEntry; actual: ActualValues 
 
   const trades = tradeF1(
     pairs
-      .filter(({ entry }) => entry.expected.trades !== undefined)
-      .map(({ entry, actual }) => ({ expected: entry.expected.trades ?? [], actual: actual.trades })),
+      .filter(({ entry }) => entry.expected?.trades !== undefined || expandChecked(entry.checked).has("trades"))
+      .map(({ entry, actual }) => ({ expected: entry.expected?.trades ?? actual.trades, actual: actual.trades })),
   );
 
   return {
