@@ -29,6 +29,7 @@ import { AppShell } from "@/components/AppShell";
 import { CopyButton } from "@/components/CopyButton";
 import { CollectPill, Field, Panel, ProposePill } from "@/components/ui";
 import { requireOrgContext } from "@/lib/auth";
+import { loadSenderIdentity } from "@/lib/sender";
 import { AnalysisTab, type AnalysisTabAnalysis } from "./analysis-tab";
 import { DocsTab, type TenderDocumentRow, type TenderLotRow } from "./docs-tab";
 import { CostTab, type CostTabQuote } from "./cost-tab";
@@ -354,6 +355,11 @@ export default async function TenderDetailPage({
   const marketRate = tab === "cost" ? await loadMarketRate(supabase, tender.item, agencyName(tender.agencies), tender.budget) : null;
   const pastAwards = tab === "fit" ? await loadPastAwards(supabase, tender.name) : [];
 
+  // 依頼文のプレビューに出す連絡先は、実際に送るときと同じ「返信先」にする
+  // （送信時は actions.ts が同じ値を使う）。ここだけ別の値だと、画面で見た文面と
+  // 届く文面が食い違う。
+  const sender = tab === "request" ? await loadSenderIdentity(supabase, orgId, orgName, userEmail) : null;
+
   const { data: org } =
     tab === "cost"
       ? await supabase.from("organizations").select("overhead_rate, profit_rate").eq("id", orgId).maybeSingle<OrgRates>()
@@ -464,7 +470,7 @@ export default async function TenderDetailPage({
           tenderId={id}
           senderOrgName={orgName}
           senderContactName={userName}
-          senderContactEmail={userEmail}
+          senderContactEmail={sender?.replyTo ?? null}
           tenderName={tender.name}
           agencyName={agencyName(tender.agencies)}
           place={tender.place}

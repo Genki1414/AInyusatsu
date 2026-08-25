@@ -38,7 +38,10 @@ export function groupLotsByTrade<T extends QuoteRequestLot>(lots: T[]): TradeLot
 export type QuoteRequestEmailInput = {
   senderOrgName: string; // 送信元（自社）の名称。挨拶文・署名に使う
   senderContactName: string; // 送信元の担当者名（署名に使う）
-  senderContactEmail: string; // 送信元の連絡先メールアドレス（署名に使う）
+  // 協力会社が返信できる連絡先。無ければ署名から省く。
+  // 返信先（Reply-To）と同じ値を入れる。本文の連絡先と返信ボタンの宛先が食い違うと、
+  // 受け取った側がどちらに連絡すればよいか分からなくなる。
+  senderContactEmail: string | null;
   tenderName: string;
   agencyName: string;
   place: string | null;
@@ -87,7 +90,7 @@ export function buildQuoteRequestEmail(input: QuoteRequestEmailInput): { subject
     "--",
     input.senderOrgName,
     input.senderContactName,
-    input.senderContactEmail,
+    ...(input.senderContactEmail ? [input.senderContactEmail] : []),
   ];
   return { subject, body: lines.join("\n") };
 }
