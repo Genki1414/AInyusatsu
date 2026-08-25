@@ -5,6 +5,9 @@
 // 一般管理費率・目標利益率は原価集計（タスク4-5）で応札価格の案を出すのに使う。
 // 返信先は、協力会社へ送るメールに Reply-To として付ける。協力会社が返信すると
 // ここへ届く。未設定なら登録者のアドレスに落ちるので、返信が宙に浮くことはない。
+//
+// 担当者名（users.name）は、協力会社へ送るメールの署名に使う。新規登録時に空欄だと
+// メールアドレスが入るため（20260803000001_auth_signup_trigger.sql）、あとから直せるようにする。
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { looksLikeEmail } from "@ai-nyusatsu-bu/domain";
@@ -68,6 +71,38 @@ export async function saveCompanyName(_prevState: CompanyNameState, formData: Fo
   }
 
   // ヘッダーの表示名は全画面で使うため、まとめて再検証する。
+  revalidatePath("/", "layout");
+  return { error: null, saved: true };
+}
+
+
+const userNameSchema = z.object({
+  name: z.string().trim().min(1, "担当者名を入力してください").max(50, "担当者名は50文字以内で入力してください"),
+});
+
+export type UserNameState = { error: string | null; saved: boolean };
+
+/**
+ * ログイン中のユーザーの担当者名を変更する。
+ *
+ * usersのRLSは「同じorgなら誰の行でも触れる」ため、ここでは必ず自分の行だけに絞る
+ * （他のメンバーの名前を書き換えられないようにする）。
+ */
+export async function saveUserName(_prevState: UserNameState, formData: FormData): Promise<UserNameState> {
+  const parsed = userNameSchema.safeParse({ name: formData.get("user_name") });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "入力内容を確認してください", saved: false };
+  }
+
+  const { userId } = await requireOrgContext();
+  const supabase = await createClient();
+  const { error } = await supabase.from("users").update({ name: parsed.data.name }).eq("id", userId);
+  if (error) {
+    console.error("[company] 担当者名の保存に失敗しました", error);
+    return { error: "保存に失敗しました。時間をおいて再度お試しください。", saved: false };
+  }
+
+  // 署名に使う値なので、案件画面のプレビューも含めて再検証する
   revalidatePath("/", "layout");
   return { error: null, saved: true };
 }
