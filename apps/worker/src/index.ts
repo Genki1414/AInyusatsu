@@ -15,7 +15,7 @@
 //   NEXT_PUBLIC_SUPABASE_URL  / SUPABASE_SERVICE_ROLE_KEY
 //   ANTHROPIC_API_KEY         AI解析
 //   RESEND_API_KEY / RESEND_FROM_ADDRESS  催促メール
-//   NEXT_PUBLIC_APP_URL       協力会社の回答ページのURL
+//   APP_URL                   協力会社の回答ページのURL（旧 NEXT_PUBLIC_APP_URL も可）
 //   GEPS_CONTACT_*            調達ポータルの資料取得
 //   ANALYZE_DAILY_LIMIT       1回の解析で処理する件数の上限（既定50）
 //   DISABLED_JOBS             止めたいジョブ名をカンマ区切りで（例: analyze-pending）
