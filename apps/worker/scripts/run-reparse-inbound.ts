@@ -23,6 +23,16 @@ async function main() {
   }
   const apply = mode === "apply";
 
+  // 本文と添付はResendのAPIから取る。キーが無いと何も取れないので、始める前に止める
+  if (!process.env.RESEND_API_KEY) {
+    throw new CliUsageError(
+      "RESEND_API_KEY が設定されていません。\n" +
+        "本文と見積書はResendのAPIから取りに行くため、このキーが必要です。\n" +
+        "apps/worker/.env.local に次の行を足してください（受信メールを読める権限のキー）:\n" +
+        "  RESEND_API_KEY=re_xxxxxxxx",
+    );
+  }
+
   console.log(
     apply
       ? "受信済みの返信を読み直して書き戻します（金額は候補のまま。quotes.amount には書きません）"
