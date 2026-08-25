@@ -13,13 +13,40 @@
 // 【金額は自動で確定させない】
 // 抽出できても quotes.amount には書かない。画面で元の文面と並べて見せ、
 // 人が「取り込む」を押して初めて反映する（実装仕様書 §4.4）。
+//
+// 【返信が来たことは記録する】
+// これまで quotes.replied_at を立てるのは「担当者が金額を手入力したとき」と
+// 「協力会社が回答ページを操作したとき」だけだった。メールで見積書を送り返してきた
+// 協力会社は未回答のままで、回答期限の24時間前に催促が飛んでいた。
+// 返信が届いた事実だけは確実なので、ここで記録して催促を止める。
+//
+// 【見送りは自動で確定させない】
+// 本文から辞退を読み取れても quotes.declined は変えない。読み違えると原価集計から
+// 外れてしまう。人が画面で見て判断する。
 
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
-import { parseInboundAddress, parseQuoteReply, verifyWebhookSignature } from "@ai-nyusatsu-bu/domain";
+import {
+  attachmentStorageKey,
+  extractAttachments,
+  MAX_ATTACHMENT_BYTES,
+  parseInboundAddress,
+  parseQuoteReply,
+  verifyWebhookSignature,
+  type InboundAttachment,
+} from "@ai-nyusatsu-bu/domain";
 
 /** 本文をそのまま読む必要があるため、キャッシュも静的化もしない。 */
 export const dynamic = "force-dynamic";
+
+/**
+ * 見積書の保存先。本部が取得した資料（tender-documents）とは分ける。
+ * あちらは顧客企業に配らない方針、こちらは顧客企業自身の商談の書類で見せてよいもの。
+ * 同じ入れ物に混ぜると、取り違えたときに配ってはいけない資料が出てしまう。
+ */
+const ATTACHMENT_BUCKET = process.env.QUOTE_ATTACHMENTS_BUCKET || "quote-attachments";
+
+type StoredAttachment = { filename: string; storageKey: string; contentType: string | null; bytes: number };
 
 type QuoteRow = {
   id: string;
@@ -118,6 +145,10 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   const request_ = one(quote?.quote_requests);
   const parsed = parseQuoteReply(messageBody(payload));
+  const stored = await storeAttachments(client, extractAttachments(payload), {
+    quoteId: quote?.id ?? null,
+    messageId: messageId ?? "unknown",
+  });
 
   const { error } = await client.from("inbound_messages").insert({
     org_id: request_?.org_id ?? null,
@@ -128,6 +159,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     channel: "メール",
     body: parsed.text,
     parsed_amount: parsed.amount,
+    attachments: stored,
     status: "未取込",
     // 解釈を誤っていても元に戻せるよう、届いた内容をそのまま残す
     raw: payload as Record<string, unknown>,
@@ -138,5 +170,79 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: "storage failed" }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true, matched: quote !== null, amount: parsed.amount });
+  // 返信が届いた事実を記録して催促を止める。金額と見送りは人の確認に委ねる
+  if (quote) {
+    const { error: repliedError } = await client
+      .from("quotes")
+      .update({ replied_at: new Date().toISOString() })
+      .eq("id", quote.id)
+      .is("replied_at", null);
+    if (repliedError) {
+      // 記録に失敗しても受信そのものは成功している。再送させると二重に保存されるため成功を返す
+      console.error(`[inbound] 返信日時の記録に失敗しました（quote=${quote.id}）`, repliedError);
+    }
+  }
+
+  return NextResponse.json({
+    ok: true,
+    matched: quote !== null,
+    amount: parsed.amount,
+    attachments: stored.length,
+  });
+}
+
+/**
+ * 添付をStorageへ保存する。
+ *
+ * 1件でも失敗したら他を諦める、ということはしない（見積書が1つでも残るほうがよい）。
+ * 保存できなかったものはログに残す（握りつぶさない）。
+ */
+async function storeAttachments(
+  client: ReturnType<typeof createServiceClient>,
+  attachments: InboundAttachment[],
+  scope: { quoteId: string | null; messageId: string },
+): Promise<StoredAttachment[]> {
+  const stored: StoredAttachment[] = [];
+
+  for (const [index, attachment] of attachments.entries()) {
+    try {
+      const bytes = await attachmentBytes(attachment);
+      if (bytes === null) continue;
+      if (bytes.byteLength > MAX_ATTACHMENT_BYTES) {
+        console.warn(`[inbound] 添付が大きすぎるため保存しませんでした（${attachment.filename} / ${bytes.byteLength}バイト）`);
+        continue;
+      }
+
+      const storageKey = attachmentStorageKey(scope, index, attachment.filename);
+      const { error } = await client.storage.from(ATTACHMENT_BUCKET).upload(storageKey, bytes, {
+        contentType: attachment.contentType ?? "application/octet-stream",
+        upsert: true,
+      });
+      if (error) throw new Error(error.message);
+
+      stored.push({
+        filename: attachment.filename,
+        storageKey,
+        contentType: attachment.contentType,
+        bytes: bytes.byteLength,
+      });
+    } catch (err) {
+      console.error(`[inbound] 添付の保存に失敗しました（${attachment.filename}）`, err);
+    }
+  }
+
+  return stored;
+}
+
+/** 添付の中身を取り出す。base64で入っていればそれを、URLなら取りに行く。 */
+async function attachmentBytes(attachment: InboundAttachment): Promise<Buffer | null> {
+  if (attachment.base64 !== null) {
+    return Buffer.from(attachment.base64, "base64");
+  }
+  if (attachment.url !== null) {
+    const response = await fetch(attachment.url);
+    if (!response.ok) throw new Error(`取得に失敗しました（HTTP ${response.status}）`);
+    return Buffer.from(await response.arrayBuffer());
+  }
+  return null;
 }
