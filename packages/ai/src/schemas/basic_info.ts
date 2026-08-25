@@ -1,6 +1,6 @@
 // AI解析プロンプト集.md §1「基本情報と期限」の出力スキーマ。
 import { z } from "zod";
-import { evidencedField, evidenceShape, maybe } from "./common";
+import { evidencedField, evidenceShape, maybe, toJstTimestamp } from "./common";
 
 export const QUAL_CATEGORIES = ["役務の提供等", "物品の販売", "物品の製造"] as const;
 
@@ -10,15 +10,21 @@ export const QUAL_CATEGORIES = ["役務の提供等", "物品の販売", "物品
  */
 const budgetValue = maybe(z.number()).transform((v) => (v === null ? null : Math.round(v)));
 
+/**
+ * 期限（timestamptz の列に入る3項目）。日本時間であることを明示してから保存する。
+ * これをやらないとPostgresがUTCとして解釈し、表示が9時間あとにずれる（toJstTimestamp参照）。
+ */
+const deadlineValue = maybe(z.string()).transform(toJstTimestamp);
+
 export const basicInfoSchema = z.object({
   name: evidencedField(maybe(z.string())),
   agency: evidencedField(maybe(z.string())),
   org_unit: evidencedField(maybe(z.string())),
   notice_no: evidencedField(maybe(z.string())),
   notice_date: evidencedField(maybe(z.string())),
-  submit_deadline: evidencedField(maybe(z.string())),
-  qa_deadline: evidencedField(maybe(z.string())),
-  bid_open_at: evidencedField(maybe(z.string())),
+  submit_deadline: evidencedField(deadlineValue),
+  qa_deadline: evidencedField(deadlineValue),
+  bid_open_at: evidencedField(deadlineValue),
   term_from: evidencedField(maybe(z.string())),
   term_to: evidencedField(maybe(z.string())),
   place: evidencedField(maybe(z.string())),
