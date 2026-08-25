@@ -187,6 +187,39 @@ export function findRecipients(payload: unknown): string[] {
   return [...new Set(addresses)];
 }
 
+/** 受信メールのidとしてありうる項目名。 */
+const EMAIL_ID_KEYS = ["email_id", "emailid", "message_uuid"];
+
+/**
+ * 受信メールのidを取り出す。
+ *
+ * Resendの受信Webhookは本文も添付の中身も送ってこない。このidを使って
+ * 別途APIから取りに行く（packages/notifications/adapters/resend_inbound.ts）。
+ * これが取れないと本文と見積書が永久に空のままになるので、専用に探す。
+ */
+export function findEmailId(payload: unknown): string | null {
+  const found: { id: string | null } = { id: null };
+
+  walk(
+    payload,
+    (node) => {
+      const map = byLowerKey(node);
+      for (const candidate of EMAIL_ID_KEYS) {
+        const hit = map.get(candidate);
+        if (hit && typeof hit.value === "string" && hit.value.trim() !== "") {
+          found.id = hit.value.trim();
+          return true;
+        }
+      }
+      return false;
+    },
+    // 添付にも id はあるが、それは添付のidであってメールのidではない
+    new Set([...ATTACHMENT_KEYS, "headers", "header"]),
+  );
+
+  return found.id;
+}
+
 /** 文字列からメールアドレスだけを取り出す。カンマ区切りや `名前 <addr>` に耐える。 */
 export function emailAddresses(value: string): string[] {
   const matches = value.match(/[^\s<>,;"]+@[^\s<>,;"]+/g);
