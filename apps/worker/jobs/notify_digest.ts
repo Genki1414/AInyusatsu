@@ -9,7 +9,7 @@
 // DBの読み書きとメール送信だけを行う。
 //
 // 【1日1通を守る】
-// notification_log の (org_id, kind, target_date) を送信前に確保する。
+// notification_log の (org_id, dedupe_key) を送信前に確保する。
 // 二重に走っても2通目は一意制約で弾かれる。全部の宛先で送信に失敗したときは
 // その行を消して、次の実行でやり直せるようにする（送っていないのに送った記録を残さない）。
 //
@@ -24,10 +24,12 @@ import {
   buildDigestEmail,
   buildFromHeader,
   dateOnly,
+  digestDedupeKey,
   type DigestDeadline,
   type DigestProposal,
   type DigestWaitingQuote,
 } from "@ai-nyusatsu-bu/domain";
+import { appUrl, claimNotification, loadRecipients, recordRecipients, releaseNotification } from "./notification_log";
 
 /** 通知の種類。notification_log.kind に入れる。 */
 const KIND = "daily_digest";
@@ -52,7 +54,6 @@ export type NotifyDigestSummary = {
 };
 
 type OrgRow = { id: string; name: string };
-type UserRow = { email: string };
 
 type ProposalRow = {
   tender_id: string;
@@ -83,10 +84,6 @@ type WaitingQuoteRow = {
 function one<T>(value: T | T[] | null | undefined): T | null {
   if (!value) return null;
   return Array.isArray(value) ? (value[0] ?? null) : value;
-}
-
-function appUrl(): string {
-  return (process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3001").replace(/\/+$/, "");
 }
 
 export type NotifyDigestOptions = {
@@ -177,16 +174,13 @@ async function notifyOne(
   }
 
   // 送る前に「本日ぶん」を確保する。二重に走っても2通目は一意制約で弾かれる
-  const { data: claim, error: claimError } = await client
-    .from("notification_log")
-    .insert({ org_id: org.id, kind: KIND, target_date: ctx.targetDate, recipients: 0 })
-    .select("id")
-    .maybeSingle<{ id: string }>();
-  if (claimError) {
-    // 一意制約に当たった＝今日はもう送っている
-    if (claimError.code === "23505") return { sent: false, reason: "本日は送信済み", failed: false };
-    throw new Error(`通知の記録に失敗しました: ${claimError.message}`);
-  }
+  const claim = await claimNotification(client, {
+    orgId: org.id,
+    kind: KIND,
+    dedupeKey: digestDedupeKey(ctx.targetDate),
+    targetDate: ctx.targetDate,
+  });
+  if (!claim.claimed) return { sent: false, reason: "本日は送信済み", failed: false };
 
   let delivered = 0;
   for (const to of recipients) {
@@ -200,11 +194,11 @@ async function notifyOne(
 
   if (delivered === 0) {
     // 送っていないのに送った記録を残さない。消して次の実行でやり直せるようにする
-    if (claim) await client.from("notification_log").delete().eq("id", claim.id);
+    await releaseNotification(client, claim.id);
     return { sent: false, reason: "すべての宛先で送信に失敗", failed: true };
   }
 
-  if (claim) await client.from("notification_log").update({ recipients: delivered }).eq("id", claim.id);
+  await recordRecipients(client, claim.id, delivered);
 
   // 知らせた提案を配信済にする。次のダイジェストで同じものを新着として出さない
   if (digest.newProposals.length > 0) {
@@ -260,10 +254,4 @@ async function loadWaitingQuotes(client: ReturnType<typeof createServiceClient>,
     });
   }
   return waiting;
-}
-
-async function loadRecipients(client: ReturnType<typeof createServiceClient>, orgId: string): Promise<string[]> {
-  const { data, error } = await client.from("users").select("email").eq("org_id", orgId).returns<UserRow[]>();
-  if (error) throw new Error(`宛先の取得に失敗しました: ${error.message}`);
-  return (data ?? []).map((u) => u.email).filter((email) => email.trim() !== "");
 }

@@ -25,6 +25,7 @@ export type JobName =
   | "tender-lifecycle"
   | "match-tenders"
   | "notify-digest"
+  | "notify-instant"
   | "coverage-check"
   | "remind-quotes"
   | "import-awards"
@@ -50,6 +51,9 @@ export const SCHEDULE: readonly ScheduledJob[] = [
   // 毎朝1通のダイジェスト（実装仕様書 §8）。前日の提案（11:00 / 19:00）をまとめて知らせる。
   // その日の11:00ぶんは翌朝に回る。急ぎの期限は即時通知で拾う想定（未実装）。
   { name: "notify-digest", cron: "0 7 * * *", description: "新着の提案・近い期限・未回答の見積を1通にまとめて送る" },
+  // 即時通知（実装仕様書 §8）。期限48時間前と、届いた見積の返信を知らせる。
+  // 毎時走るが、1件につき1回しか送らない（notification_log の dedupe_key で記録する）。
+  { name: "notify-instant", cron: "20 * * * *", description: "期限48時間前と、届いた見積の返信を知らせる" },
   { name: "coverage-check", cron: "0 6 * * *", description: "機関ごとに、想定頻度に対して取得できているかを確かめる" },
   { name: "remind-quotes", cron: "0 * * * *", description: "回答期限24時間前の未回答へ催促する" },
   { name: "import-awards", cron: "0 3 1 * *", description: "落札実績オープンデータの差分を取り込む（月次）" },
