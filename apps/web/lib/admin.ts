@@ -18,7 +18,7 @@
 
 import { notFound } from "next/navigation";
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
-import { isAdminEmail } from "@ai-nyusatsu-bu/domain";
+import { adminEmails, isAdminEmail } from "@ai-nyusatsu-bu/domain";
 import { createClient } from "@/lib/supabase/server";
 
 export type AdminContext = {
@@ -35,6 +35,14 @@ export async function requireAdmin(): Promise<AdminContext> {
   } = await supabase.auth.getUser();
 
   if (!isAdminEmail(user?.email, process.env.ADMIN_EMAILS)) {
+    // 画面には何も出さないが、設定の誤りに気づけるようログには残す。
+    // 404しか返らないと、設定漏れなのかURL違いなのか運営自身も分からなくなる。
+    // アドレスの一覧そのものは出さない（件数だけ）。
+    const configured = adminEmails(process.env.ADMIN_EMAILS).length;
+    console.warn(
+      `[admin] 権限がありません（ログイン中: ${user?.email ?? "未ログイン"} / ADMIN_EMAILS の登録数: ${configured}）` +
+        (configured === 0 ? " ※ADMIN_EMAILS が未設定です。設定して再デプロイしてください" : ""),
+    );
     // 権限が無いことも、画面があることも知らせない
     notFound();
   }
