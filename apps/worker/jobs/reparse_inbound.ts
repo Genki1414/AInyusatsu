@@ -6,9 +6,15 @@
 //
 // 【何をするか】
 // 1. 届いたJSONの形を出す（項目名と型だけ。base64の中身は出さない）
-// 2. 本文・金額・添付を読み直す
-// 3. 宛先から見積を特定し直す（受信時に結びつかなかったものを拾う）
-// 4. --apply を付けたときだけ書き戻す（既定は下見だけ）
+// 2. 本文と添付をResendのAPIから取り直す（webhookには入っていないため）
+// 3. 本文・金額・添付を読み直す
+// 4. 宛先から見積を特定し直す（受信時に結びつかなかったものを拾う）
+// 5. apply を付けたときだけ書き戻す（既定は下見だけ）
+//
+// 【なぜAPIから取り直すのか】
+// Resendの受信webhookはメタ情報しか送ってこない。本文も添付の中身も入っていない。
+// webhookの email_id を使って別途取りに行く必要がある
+// （packages/notifications/adapters/resend_inbound.ts）。
 //
 // 【金額は自動で確定させない】
 // parsed_amount は「候補」。quotes.amount には書かない（実装仕様書 §4.4）。
@@ -20,6 +26,7 @@ import {
   describePayload,
   extractAttachments,
   findAttachments,
+  findEmailId,
   findMessageBody,
   findRecipients,
   MAX_ATTACHMENT_BYTES,
@@ -27,6 +34,7 @@ import {
   parseQuoteReply,
   type InboundAttachment,
 } from "@ai-nyusatsu-bu/domain";
+import { fetchInboundContent } from "@ai-nyusatsu-bu/notifications";
 
 const ATTACHMENT_BUCKET = process.env.QUOTE_ATTACHMENTS_BUCKET || "quote-attachments";
 
@@ -145,16 +153,35 @@ async function reparseOne(
     };
   }
 
-  const body = findMessageBody(payload);
+  // まず、保存してあるwebhookの内容から読めるところを読む
+  let body = findMessageBody(payload);
   const attachmentsHit = findAttachments(payload);
-  const attachments = extractAttachments(payload);
+  let attachments = extractAttachments(payload);
+  let fetchedFrom: string | null = null;
+
+  // webhookには本文も添付の中身も入っていないので、APIから取り直す
+  const emailId = findEmailId(payload);
+  if (emailId === null) {
+    notes.push("受信メールのidが見つからないため、本文と添付を取りに行けません");
+  } else {
+    try {
+      const fetched = await fetchInboundContent(emailId, { maxBytes: MAX_ATTACHMENT_BYTES });
+      if (body.text === "") body = findMessageBody(fetched.body);
+      if (fetched.attachments.length > 0) attachments = fetched.attachments;
+      for (const reason of fetched.skipped) notes.push(reason);
+      fetchedFrom = emailId;
+    } catch (err) {
+      notes.push(`Resendから本文と添付を取得できませんでした: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   const parsed = parseQuoteReply(body.text);
 
   if (body.path === null) notes.push("本文らしい項目が見つかりません（下の「届いたJSONの形」を見て項目名を足してください）");
-  if (attachmentsHit.path === null) notes.push("添付の一覧が見つかりません");
-  else if (attachments.length === 0 && attachmentsHit.entries.length > 0) {
-    notes.push(`添付は${attachmentsHit.entries.length}件ありますが、中身も取得先URLも読めませんでした`);
+  if (attachments.length === 0 && attachmentsHit.entries.length > 0) {
+    notes.push(`webhookには添付が${attachmentsHit.entries.length}件ありますが、中身を取得できませんでした`);
   }
+  if (fetchedFrom !== null && !options.apply) notes.push("apply を付けると、取得した本文と見積書を保存します");
 
   // 受信時に結びつかなかったものを、宛先から拾い直す
   let quote: QuoteRow | null = null;

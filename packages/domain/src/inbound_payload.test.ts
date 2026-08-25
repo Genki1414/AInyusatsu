@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { describePayload, emailAddresses, findAttachments, findMessageBody, findRecipients, htmlToText } from "./inbound_payload";
+import {
+  describePayload,
+  emailAddresses,
+  findAttachments,
+  findEmailId,
+  findMessageBody,
+  findRecipients,
+  htmlToText,
+} from "./inbound_payload";
 
 describe("findMessageBody", () => {
   it("data.text にある本文を読む", () => {
@@ -127,5 +135,22 @@ describe("describePayload", () => {
     const lines = describePayload({ amount: null, count: 3 });
     expect(lines).toContain("$.amount : null");
     expect(lines).toContain("$.count : number 3");
+  });
+});
+
+describe("findEmailId", () => {
+  it("受信メールのidを取り出す", () => {
+    const payload = { type: "email.received", data: { email_id: "1ea341ff-472e-4c52-9b24-41ae1310dbaf" } };
+    expect(findEmailId(payload)).toBe("1ea341ff-472e-4c52-9b24-41ae1310dbaf");
+  });
+
+  it("添付のidをメールのidと取り違えない", () => {
+    const payload = { data: { attachments: [{ id: "添付のid", email_id: "まぎらわしい値" }] } };
+    expect(findEmailId(payload)).toBeNull();
+  });
+
+  it("無ければ null（推測しない）", () => {
+    expect(findEmailId({ data: { id: "これはメールのidとは限らない" } })).toBeNull();
+    expect(findEmailId(null)).toBeNull();
   });
 });

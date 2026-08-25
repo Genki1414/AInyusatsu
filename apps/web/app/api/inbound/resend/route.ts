@@ -20,6 +20,13 @@
 // 協力会社は未回答のままで、回答期限の24時間前に催促が飛んでいた。
 // 返信が届いた事実だけは確実なので、ここで記録して催促を止める。
 //
+// 【本文と添付はwebhookに入っていない】
+// Resendの受信webhookはメタ情報しか送ってこない（差出人・宛先・件名・添付のファイル名まで）。
+// 本文も添付の中身も入っていないので、webhookの email_id を使ってAPIから取りに行く。
+// 添付の取得先URLは期限付きなので、届いたその場で自分のStorageへ写す。
+// 取りに行けなかった場合も受信そのものは記録し、あとから
+// `pnpm --filter worker inbound:reparse apply` で取り直せるようにする。
+//
 // 【項目名を決め打ちしない】
 // 最初の1通は記録できたのに本文が空・添付ゼロだった（2026-08-25）。data.text / data.attachments と
 // 決め打ちしていたためで、中身は raw に残っていた。今はJSON全体をたどって探す（findMessageBody / findAttachments）。
@@ -35,6 +42,7 @@ import {
   attachmentStorageKey,
   extractAttachments,
   findAttachments,
+  findEmailId,
   findMessageBody,
   findRecipients,
   MAX_ATTACHMENT_BYTES,
@@ -43,9 +51,16 @@ import {
   verifyWebhookSignature,
   type InboundAttachment,
 } from "@ai-nyusatsu-bu/domain";
+import { fetchInboundContent } from "@ai-nyusatsu-bu/notifications";
 
 /** 本文をそのまま読む必要があるため、キャッシュも静的化もしない。 */
 export const dynamic = "force-dynamic";
+
+/**
+ * 本文と添付をResendのAPIから取りに行くぶん、既定の実行時間では足りないことがある。
+ * 途中で打ち切られると見積書が入らないまま記録だけが残るので、余裕を持たせる。
+ */
+export const maxDuration = 60;
 
 /**
  * 見積書の保存先。本部が取得した資料（tender-documents）とは分ける。
@@ -55,6 +70,14 @@ export const dynamic = "force-dynamic";
 const ATTACHMENT_BUCKET = process.env.QUOTE_ATTACHMENTS_BUCKET || "quote-attachments";
 
 type StoredAttachment = { filename: string; storageKey: string; contentType: string | null; bytes: number };
+
+type ExistingRow = { id: string; body: string | null; attachments: unknown };
+
+/** 本文か添付のどちらかが入っていれば、取り込みは済んでいるとみなす。 */
+function isComplete(row: ExistingRow): boolean {
+  const hasAttachments = Array.isArray(row.attachments) && row.attachments.length > 0;
+  return (row.body ?? "").trim() !== "" || hasAttachments;
+}
 
 type QuoteRow = {
   id: string;
@@ -102,13 +125,15 @@ export async function POST(request: Request): Promise<NextResponse> {
   const messageId = request.headers.get("svix-id");
   const client = createServiceClient();
 
-  // 再送で二重に取り込まない。既に保存済みなら成功として返す（再送を止めるため）
+  // 再送で二重に取り込まない。
+  // ただし、前回に本文も添付も入らなかった記録だけが残っている場合は、再送を取り直しの機会として使う
+  // （Resendの取得APIが一時的に失敗したときに、放置されないようにするため）。
   const { data: existing } = await client
     .from("inbound_messages")
-    .select("id")
+    .select("id, body, attachments")
     .eq("provider_message_id", messageId)
-    .maybeSingle<{ id: string }>();
-  if (existing) {
+    .maybeSingle<ExistingRow>();
+  if (existing && isComplete(existing)) {
     return NextResponse.json({ ok: true, duplicated: true });
   }
 
@@ -131,19 +156,38 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   const request_ = one(quote?.quote_requests);
 
-  const body = findMessageBody(payload);
-  const attachmentsHit = findAttachments(payload);
-  // 読めなかったときに「なぜ空なのか」が後から分かるようにする
+  // webhookに入っている分をまず読む（providerが本文を同梱するようになっても動くように）
+  let body = findMessageBody(payload);
+  let attachments = extractAttachments(payload);
+
+  // 本文と添付はAPIから取りに行く。失敗しても受信そのものは記録する
+  const emailId = findEmailId(payload);
+  if (emailId === null) {
+    console.warn(`[inbound] 受信メールのidが見つかりません。本文と添付を取りに行けません（${messageId ?? "id不明"}）`);
+  } else {
+    try {
+      const fetched = await fetchInboundContent(emailId, { maxBytes: MAX_ATTACHMENT_BYTES });
+      if (body.text === "") body = findMessageBody(fetched.body);
+      if (fetched.attachments.length > 0) attachments = fetched.attachments;
+      for (const reason of fetched.skipped) console.warn(`[inbound] 添付を取り込めませんでした（${emailId}）: ${reason}`);
+    } catch (err) {
+      // ここで失敗しても受信は記録する。あとから inbound:reparse apply で取り直せる
+      console.error(`[inbound] 本文と添付を取得できませんでした（${emailId}）`, err);
+    }
+  }
+
   if (body.text === "") console.warn(`[inbound] 本文を見つけられませんでした（${messageId ?? "id不明"}）`);
-  if (attachmentsHit.path === null) console.info(`[inbound] 添付の項目が見当たりません（${messageId ?? "id不明"}）`);
+  if (attachments.length === 0 && findAttachments(payload).entries.length > 0) {
+    console.warn(`[inbound] 添付があるのに1件も取り込めませんでした（${messageId ?? "id不明"}）`);
+  }
 
   const parsed = parseQuoteReply(body.text);
-  const stored = await storeAttachments(client, extractAttachments(payload), {
+  const stored = await storeAttachments(client, attachments, {
     quoteId: quote?.id ?? null,
     messageId: messageId ?? "unknown",
   });
 
-  const { error } = await client.from("inbound_messages").insert({
+  const row = {
     org_id: request_?.org_id ?? null,
     tender_id: request_?.tender_id ?? null,
     partner_id: quote?.partner_id ?? null,
@@ -156,7 +200,11 @@ export async function POST(request: Request): Promise<NextResponse> {
     status: "未取込",
     // 解釈を誤っていても元に戻せるよう、届いた内容をそのまま残す
     raw: payload as Record<string, unknown>,
-  });
+  };
+
+  const { error } = existing
+    ? await client.from("inbound_messages").update(row).eq("id", existing.id)
+    : await client.from("inbound_messages").insert(row);
   if (error) {
     // 保存できなければ再送してもらう（500を返すとSvixが再試行する）
     console.error("[inbound] 受信の保存に失敗しました", error);
@@ -181,6 +229,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     matched: quote !== null,
     amount: parsed.amount,
     attachments: stored.length,
+    repaired: Boolean(existing),
   });
 }
 
