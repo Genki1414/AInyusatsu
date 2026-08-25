@@ -52,4 +52,5 @@ export * from "./instant_notice";
 export * from "./qualification_scope";
 export * from "./billing";
 export * from "./admin_console";
+export * from "./goldset";
 export * from "./award_match";
