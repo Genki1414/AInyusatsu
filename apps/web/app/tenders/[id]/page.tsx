@@ -32,7 +32,7 @@ import { requireOrgContext } from "@/lib/auth";
 import { loadSenderIdentity } from "@/lib/sender";
 import { AnalysisTab, type AnalysisTabAnalysis } from "./analysis-tab";
 import { DocsTab, type TenderDocumentRow, type TenderLotRow } from "./docs-tab";
-import { CostTab, type CostTabQuote } from "./cost-tab";
+import { CostTab, type CostTabQuote, type QuoteInboxMessage } from "./cost-tab";
 import { FormsTab } from "./forms-tab";
 import { FitTab, type FitTabProposal } from "./fit-tab";
 import { getPartnerRecommendations, type PartnerRecommendationResult } from "./recommend";
@@ -162,6 +162,69 @@ async function loadPastAwards(
     })),
     tenderName,
   );
+}
+
+/** 見積書の保存先。本部が取得した資料とは分けている（配ってよいものかが違う）。 */
+const ATTACHMENT_BUCKET = process.env.QUOTE_ATTACHMENTS_BUCKET || "quote-attachments";
+
+/** 添付を開くための署名付きURLの有効期間（秒）。画面を開いているあいだ足りればよい。 */
+const ATTACHMENT_URL_TTL_SECONDS = 60 * 60;
+
+type InboundRow = {
+  id: string;
+  quote_id: string | null;
+  received_at: string;
+  body: string;
+  parsed_amount: number | null;
+  status: string;
+  attachments: { filename: string; storageKey: string }[] | null;
+};
+
+/**
+ * 見積ごとに、届いた返信と添付（見積書）を集める。
+ *
+ * 添付は署名付きURLにして渡す。inbound_messages のRLSは自組織に絞っているので、
+ * 他社の見積書が混ざることはない。
+ */
+async function loadInbox(
+  supabase: Awaited<ReturnType<typeof requireOrgContext>>["supabase"],
+  quoteIds: string[],
+): Promise<Record<string, QuoteInboxMessage[]>> {
+  if (quoteIds.length === 0) return {};
+
+  const { data, error } = await supabase
+    .from("inbound_messages")
+    .select("id, quote_id, received_at, body, parsed_amount, status, attachments")
+    .in("quote_id", quoteIds)
+    .order("received_at", { ascending: false })
+    .returns<InboundRow[]>();
+  if (error) {
+    // 返信が出ないだけで見積の画面は使える。握りつぶさずログには残す
+    console.error(`[tenders] 受信した返信の取得に失敗しました: ${error.message}`);
+    return {};
+  }
+
+  const byQuote: Record<string, QuoteInboxMessage[]> = {};
+  for (const row of data ?? []) {
+    if (!row.quote_id) continue;
+    const attachments = await Promise.all(
+      (row.attachments ?? []).map(async (a) => {
+        const { data: signed } = await supabase.storage
+          .from(ATTACHMENT_BUCKET)
+          .createSignedUrl(a.storageKey, ATTACHMENT_URL_TTL_SECONDS, { download: a.filename });
+        return { filename: a.filename, url: signed?.signedUrl ?? null };
+      }),
+    );
+    (byQuote[row.quote_id] ??= []).push({
+      id: row.id,
+      receivedAt: row.received_at,
+      body: row.body,
+      parsedAmount: row.parsed_amount,
+      status: row.status,
+      attachments,
+    });
+  }
+  return byQuote;
 }
 
 type SentQuoteRequestRow = {
@@ -351,6 +414,10 @@ export default async function TenderDetailPage({
     memo: q.memo,
   }));
 
+  // 協力会社から届いた返信（タスク4-3）。見積書は添付で届くことが多いので、
+  // 見積の行から開けるようにする。署名付きURLはサーバー側でだけ作る。
+  const inboxByQuote = tab === "cost" ? await loadInbox(supabase, costQuotes.map((q) => q.id)) : {};
+
   // 同種案件の落札率（勝てそうかの目安）。営業品目・機関区分・金額帯がそろわないと引けない。
   const marketRate = tab === "cost" ? await loadMarketRate(supabase, tender.item, agencyName(tender.agencies), tender.budget) : null;
   const pastAwards = tab === "fit" ? await loadPastAwards(supabase, tender.name) : [];
@@ -493,6 +560,7 @@ export default async function TenderDetailPage({
           item={tender.item}
           marketRate={marketRate}
           decidedBidPrice={companyTender?.bid_price ?? null}
+          inboxByQuote={inboxByQuote}
         />
       )}
       {tab === "forms" && (

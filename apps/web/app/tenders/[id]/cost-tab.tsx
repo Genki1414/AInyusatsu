@@ -10,7 +10,7 @@
 // （正式な見積書として弱い。ユーザー決定 2026-08-21）。
 
 import { useActionState, useState } from "react";
-import { AlertTriangle, CheckCircle2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Paperclip } from "lucide-react";
 import { aggregateCost, bidGuide, type MarketRate, type QuoteForCosting } from "@ai-nyusatsu-bu/domain";
 import { Panel, Pill, btnClass } from "@/components/ui";
 import { adoptQuote, decideBidPrice, setQuoteAmount, type CostActionState } from "./cost-actions";
@@ -70,6 +70,75 @@ function AmountForm({ tenderId, quoteId, amount }: { tenderId: string; quoteId: 
 
 export type CostTabQuote = QuoteForCosting & { repliedAt: string | null; memo: string | null };
 
+/** 協力会社から届いた返信（タスク4-3）。見積書は添付で届くことが多い。 */
+export type QuoteInboxMessage = {
+  id: string;
+  receivedAt: string;
+  body: string;
+  parsedAmount: number | null;
+  status: string;
+  attachments: { filename: string; url: string | null }[];
+};
+
+/**
+ * 届いた返信を、見積の行の下に出す。
+ *
+ * 金額は自動で入れない（実装仕様書 §4.4）。抽出できた金額は「入れる」ボタンとして出し、
+ * 押されたときだけ入力欄に反映する。元の文面を必ず並べて、誤りに気づけるようにする。
+ */
+function InboxMessages({ messages }: { messages: QuoteInboxMessage[] }) {
+  if (messages.length === 0) return null;
+  return (
+    <div className="border-t border-slate-100 bg-slate-50 px-3 py-2">
+      <div className="text-xs font-medium text-slate-700">届いた返信（{messages.length}件）</div>
+      <ul className="mt-1 space-y-2">
+        {messages.map((m) => (
+          <li key={m.id} className="rounded border border-slate-200 bg-white p-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-slate-500">
+                {new Date(m.receivedAt).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}
+              </span>
+              {m.parsedAmount !== null && <Pill tone="blue">本文から {yen(m.parsedAmount)}</Pill>}
+              {m.attachments.length > 0 && <Pill tone="violet">添付 {m.attachments.length}件</Pill>}
+            </div>
+
+            {m.attachments.length > 0 && (
+              <ul className="mt-1.5 flex flex-wrap gap-2">
+                {m.attachments.map((a) => (
+                  <li key={a.filename}>
+                    {a.url ? (
+                      <a
+                        href={a.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 rounded border border-slate-300 px-2 py-1 text-xs text-blue-800 hover:bg-slate-50"
+                      >
+                        <Paperclip size={11} />
+                        {a.filename}
+                      </a>
+                    ) : (
+                      <span className="text-xs text-slate-400">{a.filename}（開けません）</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {m.body.trim() !== "" && (
+              <pre className="mt-1.5 max-h-32 overflow-y-auto whitespace-pre-wrap break-words text-xs text-slate-600">
+                {m.body}
+              </pre>
+            )}
+          </li>
+        ))}
+      </ul>
+      <p className="mt-1.5 text-xs text-slate-500">
+        金額は自動で入れていません。見積書を確認して、上の欄に入力してください。
+      </p>
+    </div>
+  );
+}
+
 export function CostTab({
   tenderId,
   quotes,
@@ -78,6 +147,7 @@ export function CostTab({
   item,
   marketRate,
   decidedBidPrice,
+  inboxByQuote,
 }: {
   tenderId: string;
   quotes: CostTabQuote[];
@@ -86,6 +156,8 @@ export function CostTab({
   item: string | null;
   marketRate: MarketRate | null;
   decidedBidPrice: number | null;
+  /** 見積IDごとの、届いた返信 */
+  inboxByQuote: Record<string, QuoteInboxMessage[]>;
 }) {
   const [state, formAction, pending] = useActionState(decideBidPrice.bind(null, tenderId), initialState);
 
@@ -166,6 +238,9 @@ export function CostTab({
                 </tbody>
               </table>
             </div>
+            {rows.map((q) => (
+              <InboxMessages key={q.id} messages={inboxByQuote[q.id] ?? []} />
+            ))}
           </Panel>
         );
       })}
