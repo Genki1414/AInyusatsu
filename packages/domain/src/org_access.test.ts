@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildInitialPassword,
+  SUSPEND_REASONS,
   INITIAL_PASSWORD_ALPHABET,
   INITIAL_PASSWORD_LENGTH,
   isActive,
@@ -30,6 +31,19 @@ describe("suspendedMessage", () => {
   it("理由が無ければ連絡先を案内する", () => {
     expect(suspendedMessage(null)).toContain("運営までご連絡ください");
     expect(suspendedMessage("  ")).toContain("運営までご連絡ください");
+  });
+});
+
+describe("SUSPEND_REASONS", () => {
+  it("未入金がいちばん上（ほとんどがこれ）", () => {
+    expect(SUSPEND_REASONS[0]).toContain("お支払い");
+  });
+
+  it("どれも「理由：」に続けて読める文になっている", () => {
+    for (const reason of SUSPEND_REASONS) {
+      expect(suspendedMessage(reason)).toBe(`ご利用を停止しています。理由：${reason}`);
+      expect(reason.endsWith("ため")).toBe(true);
+    }
   });
 });
 

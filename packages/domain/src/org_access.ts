@@ -20,6 +20,22 @@ export function isActive(status: string | null | undefined): boolean {
   return status === "利用中";
 }
 
+/**
+ * 停止の理由の定型。
+ *
+ * 請求書払いなので、止める理由はほとんどが未入金。毎回入力させると
+ * 表現がぶれ、顧客に見せる文面が人によって変わる。よく使うものは選べるようにする。
+ * 定型に無い理由は自由入力で書ける。
+ *
+ * 文面は「ご利用を停止しています。理由：◯◯」と続けて読めるようにする
+ * （suspendedMessage が組み立てる）。
+ */
+export const SUSPEND_REASONS = [
+  "お支払いの確認が取れていないため",
+  "ご解約のお手続きが完了したため",
+  "お客様のご依頼による一時停止のため",
+] as const;
+
 /** 停止中の画面に出す案内。理由が入っていればそれを見せる。 */
 export function suspendedMessage(reason: string | null | undefined): string {
   const detail = reason?.trim();

@@ -7,7 +7,8 @@
 // 控え忘れたときは「パスワード再発行」で作り直す運用にする（作り直せば済むので、
 // 保存しておくより安全）。伝えやすいようにコピーボタンを付ける。
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
+import { SUSPEND_REASONS } from "@ai-nyusatsu-bu/domain";
 import { btnClass, Panel, Pill } from "@/components/ui";
 import { CopyButton } from "@/components/CopyButton";
 import { issueAccount, updateAccount, type AccountActionState } from "./actions";
@@ -91,8 +92,13 @@ export type AccountRow = {
   createdAt: string | null;
 };
 
+/** 定型に無い理由を書くときに選ぶ値。空文字にすると select の初期選択と紛れる */
+const OTHER = "__other__";
+
 export function AccountRowForms({ row }: { row: AccountRow }) {
   const [state, formAction, pending] = useActionState(updateAccount, EMPTY_STATE);
+  // 停止のほとんどは未入金なので、それを既定で選んでおく
+  const [reason, setReason] = useState<string>(SUSPEND_REASONS[0]);
   const active = row.status === "利用中";
 
   return (
@@ -115,8 +121,26 @@ export function AccountRowForms({ row }: { row: AccountRow }) {
             <input type="hidden" name="op" value="停止" />
             <label className="flex flex-col gap-0.5 text-xs">
               <span className="text-slate-500">停止の理由（本人の画面に表示されます）</span>
-              <input type="text" name="reason" required className={`${input} w-72`} />
+              <select
+                name="reason"
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+                className={`${input} w-72`}
+              >
+                {SUSPEND_REASONS.map((preset) => (
+                  <option key={preset} value={preset}>
+                    {preset}
+                  </option>
+                ))}
+                <option value={OTHER}>その他（自分で書く）</option>
+              </select>
             </label>
+            {reason === OTHER && (
+              <label className="flex flex-col gap-0.5 text-xs">
+                <span className="text-slate-500">理由を書く</span>
+                <input type="text" name="reason_other" required className={`${input} w-72`} />
+              </label>
+            )}
             <button type="submit" disabled={pending} className={btnClass("default", "sm")}>
               停止する
             </button>

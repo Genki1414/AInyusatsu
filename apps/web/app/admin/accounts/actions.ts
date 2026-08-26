@@ -20,6 +20,7 @@ import { randomInt } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import {
   buildInitialPassword,
+  SUSPEND_REASONS,
   INITIAL_PASSWORD_ALPHABET,
   INITIAL_PASSWORD_LENGTH,
   validateIssueAccount,
@@ -142,8 +143,15 @@ export async function updateAccount(
   const now = new Date().toISOString();
 
   if (op === "停止") {
-    const reason = text(formData, "reason").trim();
-    if (reason === "") return fail("停止の理由を入力してください（画面に表示されます）");
+    // 定型（reason）か、「その他」を選んだときの自由入力（reason_other）。
+    // 定型を選んでいれば reason_other は送られてこない
+    const other = text(formData, "reason_other").trim();
+    const reason = other !== "" ? other : text(formData, "reason").trim();
+    // 定型に無い値をそのまま通さない。UIが壊れて "__other__" が入ると顧客に見えてしまう
+    const known = (SUSPEND_REASONS as readonly string[]).includes(reason);
+    if (reason === "" || (!known && other === "")) {
+      return fail("停止の理由を選ぶか、入力してください（本人の画面に表示されます）");
+    }
     const { error } = await admin
       .from("org_access")
       .upsert({ org_id: orgId, status: "停止", suspended_at: now, suspended_reason: reason, updated_at: now });
