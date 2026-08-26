@@ -10,7 +10,11 @@
 import { useActionState } from "react";
 import { btnClass, Panel, Pill } from "@/components/ui";
 import { CopyButton } from "@/components/CopyButton";
-import { emptyAccountState, issueAccount, updateAccount, type AccountActionState } from "./actions";
+import { issueAccount, updateAccount, type AccountActionState } from "./actions";
+
+// "use server" のファイルからは async 関数しか export できないため、初期値はこちらに置く。
+// 参照：https://nextjs.org/docs/messages/invalid-use-server-value
+const EMPTY_STATE: AccountActionState = { error: null, message: null, password: null, email: null };
 
 const input =
   "rounded border border-slate-300 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300";
@@ -45,7 +49,7 @@ function Result({ state }: { state: AccountActionState }) {
 }
 
 export function IssueForm() {
-  const [state, formAction, pending] = useActionState(issueAccount, emptyAccountState);
+  const [state, formAction, pending] = useActionState(issueAccount, EMPTY_STATE);
 
   return (
     <Panel title="アカウントを発行する">
@@ -87,7 +91,7 @@ export type AccountRow = {
 };
 
 export function AccountRowForms({ row }: { row: AccountRow }) {
-  const [state, formAction, pending] = useActionState(updateAccount, emptyAccountState);
+  const [state, formAction, pending] = useActionState(updateAccount, EMPTY_STATE);
   const active = row.status === "利用中";
 
   return (

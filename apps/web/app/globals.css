@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+/* ダークモードは持たない。
+   画面の配色は docs/ai-nyusatsu-bu-prototype-v7.jsx の明るい配色に合わせて作っており、
+   暗い背景に置くと文字も入力欄も読めなくなる（実際に /admin で起きた）。
+   顧客向けの画面は AppShell が bg-slate-100 を敷いていて気づけなかったが、
+   /admin・/login・/suspended は body の色がそのまま出る。 */
 :root {
   --background: #ffffff;
   --foreground: #171717;
@@ -10,13 +15,6 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
