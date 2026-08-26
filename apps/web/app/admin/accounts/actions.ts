@@ -36,10 +36,12 @@ export type AccountActionState = {
   email: string | null;
 };
 
-export const emptyAccountState: AccountActionState = { error: null, message: null, password: null, email: null };
+// "use server" のファイルからは async 関数しか export できない（Next.jsの制約）。
+// 初期値は呼び出し側（account-forms.tsx）に置いている。
+const EMPTY: AccountActionState = { error: null, message: null, password: null, email: null };
 
 function fail(error: string): AccountActionState {
-  return { ...emptyAccountState, error };
+  return { ...EMPTY, error };
 }
 
 /** 暗号論的乱数から初期パスワードを作る。組み立て自体は packages/domain（テスト済み）。 */
@@ -147,7 +149,7 @@ export async function updateAccount(
       .upsert({ org_id: orgId, status: "停止", suspended_at: now, suspended_reason: reason, updated_at: now });
     if (error) return fail(`停止できませんでした：${error.message}`);
     revalidatePath("/admin/accounts");
-    return { ...emptyAccountState, message: "停止しました。次に画面を開いたときから使えなくなります" };
+    return { ...EMPTY, message: "停止しました。次に画面を開いたときから使えなくなります" };
   }
 
   if (op === "再開") {
@@ -156,7 +158,7 @@ export async function updateAccount(
       .upsert({ org_id: orgId, status: "利用中", activated_at: now, suspended_at: null, suspended_reason: null, updated_at: now });
     if (error) return fail(`再開できませんでした：${error.message}`);
     revalidatePath("/admin/accounts");
-    return { ...emptyAccountState, message: "再開しました" };
+    return { ...EMPTY, message: "再開しました" };
   }
 
   if (op === "パスワード再発行") {
