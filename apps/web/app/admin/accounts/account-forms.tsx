@@ -86,6 +86,7 @@ export type AccountRow = {
   suspendedReason: string | null;
   /** 代表のログイン。パスワード再発行の対象 */
   userId: string | null;
+  userName: string | null;
   email: string | null;
   createdAt: string | null;
 };
@@ -99,6 +100,8 @@ export function AccountRowForms({ row }: { row: AccountRow }) {
       <div className="flex flex-wrap items-center gap-2">
         <Pill tone={active ? "green" : "rose"}>{row.status}</Pill>
         <span className="text-xs font-medium text-slate-800">{row.orgName}</span>
+        {/* 同じ会社名で複数のアカウントが並ぶことがあるため、担当者名で見分けられるようにする */}
+        <span className="text-xs text-slate-700">{row.userName ?? "（担当者名なし）"}</span>
         <span className="text-xs text-slate-500">{row.email ?? "（ログイン未作成）"}</span>
       </div>
       {!active && row.suspendedReason && (

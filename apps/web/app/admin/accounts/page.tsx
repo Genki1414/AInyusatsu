@@ -18,7 +18,7 @@ import { requireAdmin } from "@/lib/admin";
 import { AccountRowForms, IssueForm, type AccountRow } from "./account-forms";
 
 type OrgRow = { id: string; name: string; created_at: string };
-type UserRow = { id: string; org_id: string; email: string; role: string; created_at: string };
+type UserRow = { id: string; org_id: string; email: string; name: string; role: string; created_at: string };
 type AccessRow = { org_id: string; status: string; suspended_reason: string | null };
 
 function jst(at: string | null): string {
@@ -33,7 +33,7 @@ export default async function AdminAccountsPage() {
 
   const [orgs, users, access] = await Promise.all([
     admin.from("organizations").select("id, name, created_at").order("created_at", { ascending: false }).returns<OrgRow[]>(),
-    admin.from("users").select("id, org_id, email, role, created_at").returns<UserRow[]>(),
+    admin.from("users").select("id, org_id, email, name, role, created_at").returns<UserRow[]>(),
     admin.from("org_access").select("org_id, status, suspended_reason").returns<AccessRow[]>(),
   ]);
 
@@ -62,6 +62,7 @@ export default async function AdminAccountsPage() {
       status: state?.status ?? "停止",
       suspendedReason: state?.suspended_reason ?? null,
       userId: owner?.id ?? null,
+      userName: owner?.name ?? null,
       email: owner?.email ?? null,
       createdAt: org.created_at,
     };
