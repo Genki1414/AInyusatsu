@@ -50,7 +50,7 @@ async function main() {
     const limit = args[0] === undefined ? DEFAULT_LIMIT : requirePositiveInt(args[0], "件数");
 
     const result = await writeGoldsetTemplate(GOLDSET_PATH, limit);
-    console.log(`${result.path} に${result.tenders}件ぶんを書き出しました。`);
+    console.log(`${result.path} に${result.tenders}件ぶんを書き出しました（解析の新しい順）。`);
     console.log("");
     console.log("各案件に「保存されている値」と、その根拠になった引用・出典が入っています。");
     console.log("引用を読んで、合っているかどうかを判断してください。原文を開く必要はほとんどありません。");

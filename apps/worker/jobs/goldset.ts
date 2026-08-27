@@ -22,6 +22,11 @@
 // 書き込みの途中でずれる不具合（タイムゾーンの取り違えなど）を見逃す。
 // そこで値は保存値を日本時間で出し、生の抽出値とずれていたら「注意」を付ける。
 //
+// 【新しく解析したものから選ぶ】
+// 測りたいのは「いまのプロンプトの実力」。公告日の新しい順に選ぶと、古いプロンプトで
+// 解析した案件が混ざり、直す前と直したあとの結果を1つの数字に混ぜてしまう。
+// 解析した日時（tender_analyses.created_at）の新しい順に選ぶ。
+//
 // 【上書きしない】
 // テンプレートを作り直すと、人が書き込んだ正解が消える。
 // 既にファイルがあるときは作らずに止める。
@@ -138,20 +143,42 @@ export async function writeGoldsetTemplate(path: string, limit: number): Promise
   }
 
   const client = createServiceClient();
+
+  // 新しく解析したものから選ぶ。同じ案件が複数版ある場合は、いちばん新しい解析の日時で並べる
+  const { data: recent, error: recentError } = await client
+    .from("tender_analyses")
+    .select("tender_id, created_at")
+    .order("created_at", { ascending: false })
+    .limit(limit * 5)
+    .returns<{ tender_id: string; created_at: string }[]>();
+  if (recentError) throw new Error(`解析結果の取得に失敗しました: ${recentError.message}`);
+
+  // 降順で来るので、最初に出てきたものが最新。重複を落として上位 limit 件
+  const order = new Map<string, number>();
+  for (const row of recent ?? []) {
+    if (!order.has(row.tender_id)) order.set(row.tender_id, order.size);
+  }
+  const recentIds = [...order.keys()].slice(0, limit);
+  if (recentIds.length === 0) {
+    throw new Error(
+      "解析済みの案件がありません。先に `pnpm --filter worker analyze:pending -- 20` で解析してください（実測 約62円/件）",
+    );
+  }
+
   // 保存されている値も引く。テンプレートに出すのは「製品が実際に使う値」
   const { data, error } = await client
     .from("tenders")
     .select("id, name, source_url, submit_deadline, qa_deadline, bid_open_at, qual_category, item, grade, areas")
+    .in("id", recentIds)
     .in("collect_status", ANALYZED_STATUSES)
-    .order("notice_date", { ascending: false })
-    .limit(limit)
     .returns<TenderRow[]>();
   if (error) throw new Error(`案件の取得に失敗しました: ${error.message}`);
 
-  const tenders = data ?? [];
+  // 解析の新しい順に戻す（DBの返す順に依存しない）
+  const tenders = (data ?? []).sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
   if (tenders.length === 0) {
     throw new Error(
-      "解析済みの案件がありません。先に `pnpm --filter worker analyze:pending -- 20` で解析してください（実測 約69円/件）",
+      "解析済みの案件がありません。先に `pnpm --filter worker analyze:pending -- 20` で解析してください（実測 約62円/件）",
     );
   }
 
