@@ -26,17 +26,30 @@ async function main() {
     console.log("解析済みの案件がありません。");
     return;
   }
+  const showUnexplained = () => {
+    if (result.unexplained.length === 0) return;
+    console.log("");
+    console.log(`■ 違いはあるが、この不具合とは言えないもの（${result.unexplained.length}項目・書き換えません）`);
+    console.log("  コネクタが取得した確定値が入っている可能性があります。原文と照らして判断してください。");
+    for (const item of result.unexplained) {
+      console.log(`  ${item.tenderName}`);
+      console.log(`    ${item.label}：保存値 ${item.stored} ／ 解析結果 ${item.fromAnalysis}`);
+    }
+  };
+
   if (result.diffs.length === 0) {
-    console.log(`${result.checked}件を確認しました。ずれている期限はありません。`);
+    console.log(`${result.checked}件を確認しました。タイムゾーンでずれている期限はありません。`);
+    showUnexplained();
     return;
   }
 
-  console.log(`${result.checked}件のうち、${result.diffs.length}項目がずれています（日本時間で表示）。`);
+  console.log(`${result.checked}件のうち、${result.diffs.length}項目がタイムゾーンでずれています（日本時間で表示）。`);
   console.log("");
   for (const diff of result.diffs) {
     console.log(`  ${diff.tenderName}`);
     console.log(`    ${diff.label}：いま ${diff.stored} → 入れ直すと ${diff.fixed}`);
   }
+  showUnexplained();
   console.log("");
 
   if (!apply) {
