@@ -77,3 +77,38 @@ export function validateTenderDates(dates: TenderDates): DateValidationIssue[] {
 
   return issues;
 }
+
+// --- 保存前の正規化 ---------------------------------------------------------
+//
+// 【なぜ必要か】
+// 解析プロンプトは "YYYY-MM-DDTHH:mm" を返す（packages/ai/prompts/basic_info.ts）。
+// タイムゾーンが付いていない。これを timestamptz の列にそのまま入れると、
+// Postgres は「セッションのタイムゾーン」で解釈する。その設定は運用側のもので、
+// アプリからは見えないし、変わっても気づけない。UTCなら日本時間より9時間ずれる。
+//
+// 期限の誤りは失格に直結する（CLAUDE.md 最重要の前提5）。
+// サーバーの設定に結果が左右される書き方を残さない。
+//
+// 対象は日本の官公庁の公告なので、タイムゾーンの無い日時は日本時間として保存する。
+
+/** すでにタイムゾーンが付いているか（Z / +09:00 / +0900）。 */
+const HAS_ZONE = /(Z|[+-]\d{2}:?\d{2})$/;
+
+/** 日付だけ（YYYY-MM-DD）。時刻が無いものは日付のまま扱う。 */
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * タイムゾーンの無い日時に日本時間（+09:00）を付ける。
+ *
+ * - すでにタイムゾーンが付いていれば、そのまま返す（付け替えない）
+ * - 日付だけ（YYYY-MM-DD）は日付のまま返す（date 型の列に入るため）
+ * - null・空文字はそのまま返す
+ */
+export function toJstInstant(value: string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const trimmed = value.trim();
+  if (trimmed === "") return null;
+  if (DATE_ONLY.test(trimmed)) return trimmed;
+  if (HAS_ZONE.test(trimmed)) return trimmed;
+  return `${trimmed}+09:00`;
+}
