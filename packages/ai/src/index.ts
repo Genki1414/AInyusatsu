@@ -6,6 +6,8 @@ export * from "./usage";
 export * from "./batch_plan";
 export * from "./document_budget";
 export * from "./recommend";
+// 期限の日本時間への固定（toJstTimestamp）は、解析以外（保存済みの入れ直しなど）からも使う
+export * from "./schemas/common";
 export * from "./schemas/basic_info";
 export * from "./schemas/qualifications";
 export * from "./schemas/lots";

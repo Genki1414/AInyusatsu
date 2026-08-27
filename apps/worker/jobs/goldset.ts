@@ -29,6 +29,7 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
+import { toJstTimestamp } from "@ai-nyusatsu-bu/ai";
 import { evaluateGoldset, showInstant, type ActualValues, type GoldEntry, type GoldsetReport } from "@ai-nyusatsu-bu/domain";
 
 /** 解析が済んでいる案件だけを対象にする。 */
@@ -68,18 +69,6 @@ function showValue(value: unknown): string {
   return String(value);
 }
 
-/**
- * タイムゾーンの付いていない日時をJSTとして読む。
- *
- * 解析プロンプトは "YYYY-MM-DDTHH:mm" を返す（packages/ai/prompts/basic_info.ts）。
- * 日本の公告なのでJSTのつもりだが、文字列にはその情報が無い。
- * 保存値と比べるときは、意図どおりJSTとして解釈する。
- */
-function asJstInstant(value: string): number {
-  const hasZone = /(Z|[+-]\d{2}:?\d{2})$/.test(value.trim());
-  return Date.parse(hasZone ? value : `${value.trim()}+09:00`);
-}
-
 /** 日時の項目か（保存値を日本時間で見せるもの）。 */
 const INSTANT_FIELDS = new Set(["submit_deadline", "qa_deadline", "bid_open_at"]);
 
@@ -105,7 +94,7 @@ function toAnswer(key: string, raw: unknown, stored: unknown): AiAnswer | null {
 
   // 保存の途中でずれていないか。ずれていたら黙って隠さず、必ず見せる
   if (isInstant && typeof entry.value === "string" && typeof stored === "string") {
-    const wanted = asJstInstant(entry.value);
+    const wanted = Date.parse(toJstTimestamp(entry.value) ?? "");
     const got = Date.parse(stored);
     if (!Number.isNaN(wanted) && !Number.isNaN(got) && Math.floor(wanted / 60_000) !== Math.floor(got / 60_000)) {
       answer.注意 =

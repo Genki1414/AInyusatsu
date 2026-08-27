@@ -4,7 +4,13 @@
 // 解析プロンプトは "YYYY-MM-DDTHH:mm" を返す（packages/ai/prompts/basic_info.ts）。
 // これをタイムゾーンを付けずに timestamptz の列へ入れると、Postgres は
 // 「セッションのタイムゾーン」で解釈する。UTCなら日本時間より9時間ずれる。
-// 保存前に +09:00 を付けるよう直したが、すでに保存済みの案件は直らない。
+// 保存前に日本時間へ固定するよう直したが（#84 の toJstTimestamp）、
+// それ以前に解析した案件は保存済みの値がずれたまま残る。
+//
+// 【解析と同じ関数を使う】
+// 「日本時間に固定する」規則を2か所に書くと、片方だけ直したときに食い違う。
+// 実際、日付だけの値（時刻の記載が無い期限）を取りこぼした。
+// 判定は解析と同じ toJstTimestamp に任せる。
 //
 // 【なぜ解析し直さないか】
 // 解析は有料（実測 約62円/件）。正しい値は tender_analyses.raw に残っているので、
@@ -29,7 +35,8 @@
 // 何がどう変わるかを見てから apply する。
 
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
-import { showInstant, toJstInstant } from "@ai-nyusatsu-bu/domain";
+import { toJstTimestamp } from "@ai-nyusatsu-bu/ai";
+import { showInstant } from "@ai-nyusatsu-bu/domain";
 
 /** 直す対象の列と、解析結果の生出力での名前。 */
 const DEADLINE_FIELDS = [
@@ -93,12 +100,14 @@ function sameMinute(a: number, b: number): boolean {
  * 「タイムゾーンの無い文字列がUTCとして解釈された」ものか。
  *
  * この不具合なら、保存値は必ず『AIの読み取りをUTCとして読んだ値』に一致する。
+ * 時刻の無い日付（"2026-09-10"）も同じで、UTCの0時＝日本時間の9時になる。
  * すでにタイムゾーンが付いている読み取りは、この不具合の対象ではない。
  */
-function looksLikeUtcMisread(raw: string, storedAt: number): boolean {
+export function looksLikeUtcMisread(raw: string, storedAt: number): boolean {
   const trimmed = raw.trim();
   if (/(Z|[+-]\d{2}:?\d{2})$/.test(trimmed)) return false;
-  const asUtc = Date.parse(`${trimmed}Z`);
+  // "2026-09-10" は Date.parse がUTCの0時として読む。"2026-09-10T09:00" は末尾にZを足す
+  const asUtc = /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? Date.parse(trimmed) : Date.parse(`${trimmed}Z`);
   return !Number.isNaN(asUtc) && sameMinute(asUtc, storedAt);
 }
 
@@ -136,7 +145,7 @@ export async function repairDeadlines(apply: boolean): Promise<RepairResult> {
     for (const { column, label } of DEADLINE_FIELDS) {
       const stored = tender[column];
       const raw = rawValue(basicInfo, column);
-      const want = toJstInstant(raw);
+      const want = toJstTimestamp(raw);
       // 生出力に値が無い項目は触らない（コネクタが入れた確定値かもしれない）
       if (raw === null || want === null || stored === null) continue;
 
