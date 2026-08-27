@@ -27,7 +27,8 @@
     "notify:instant": "tsx --env-file=.env.local scripts/run-notify-instant.ts",
     "agencies:classify": "tsx --env-file=.env.local scripts/run-classify-agencies.ts",
     "goldset:template": "tsx --env-file=.env.local scripts/run-goldset.ts template",
-    "goldset:measure": "tsx --env-file=.env.local scripts/run-goldset.ts measure"
+    "goldset:measure": "tsx --env-file=.env.local scripts/run-goldset.ts measure",
+    "deadlines:repair": "tsx --env-file=.env.local scripts/run-repair-deadlines.ts"
   },
   "dependencies": {
     "@ai-nyusatsu-bu/ai": "workspace:*",

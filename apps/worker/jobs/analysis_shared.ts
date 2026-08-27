@@ -10,6 +10,7 @@ import { createServiceClient } from "@ai-nyusatsu-bu/db";
 import {
   dedupeLotsByLineNo,
   mergeBasicInfoIntoTender,
+  toJstInstant,
   validateTenderDates,
   type LotRow,
   type TenderBasicFields,
@@ -190,9 +191,11 @@ export async function persistAnalysis(
   const extractedFields: Partial<ExtractedTenderBasicFields> = basicInfo
     ? {
         org_unit: basicInfo.org_unit.value,
-        submit_deadline: basicInfo.submit_deadline.value,
-        qa_deadline: basicInfo.qa_deadline.value,
-        bid_open_at: basicInfo.bid_open_at.value,
+        // 期限はタイムゾーンを付けてから保存する。プロンプトは "YYYY-MM-DDTHH:mm" を返すため、
+        // そのまま timestamptz に入れるとDBのセッションのタイムゾーン次第で9時間ずれる
+        submit_deadline: toJstInstant(basicInfo.submit_deadline.value),
+        qa_deadline: toJstInstant(basicInfo.qa_deadline.value),
+        bid_open_at: toJstInstant(basicInfo.bid_open_at.value),
         term_from: basicInfo.term_from.value,
         term_to: basicInfo.term_to.value,
         place: basicInfo.place.value,

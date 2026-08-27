@@ -14,6 +14,14 @@
 // 付いている（CLAUDE.md 最重要の前提3）ので、それをテンプレートに並べる。
 // 人は引用を読んで「合っている／違う」を判断し、違うものだけ書けばよい。
 //
+// 【見せるのは「保存された値」。AIの生の抽出値ではない】
+// measure が突き合わせるのは tenders の列（＝製品が実際に使う値）。
+// テンプレートにAIの生の抽出値だけを出すと、生の値と保存値がずれていても
+// 「合っていた」と印が付き、その印は保存値のほうに適用されてしまう
+// （compareTender は checked かつ expected 未記入なら 正解＝保存値 とする）。
+// 書き込みの途中でずれる不具合（タイムゾーンの取り違えなど）を見逃す。
+// そこで値は保存値を日本時間で出し、生の抽出値とずれていたら「注意」を付ける。
+//
 // 【上書きしない】
 // テンプレートを作り直すと、人が書き込んだ正解が消える。
 // 既にファイルがあるときは作らずに止める。
@@ -21,7 +29,7 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
-import { evaluateGoldset, type ActualValues, type GoldEntry, type GoldsetReport } from "@ai-nyusatsu-bu/domain";
+import { evaluateGoldset, showInstant, type ActualValues, type GoldEntry, type GoldsetReport } from "@ai-nyusatsu-bu/domain";
 
 /** 解析が済んでいる案件だけを対象にする。 */
 const ANALYZED_STATUSES = ["解析完了", "公開中", "終了"];
@@ -44,8 +52,15 @@ type LotRow = { tender_id: string; trade: string | null };
 /** 解析結果の生出力。項目ごとに値・引用・出典が入っている */
 type AnalysisRow = { tender_id: string; raw: { basicInfo?: Record<string, unknown> } | null };
 
-/** テンプレートに並べる「AIの答えと、その根拠」。 */
-type AiAnswer = { 値: string; 引用: string; 出典: string };
+/** テンプレートに並べる「保存された値と、その根拠」。 */
+type AiAnswer = {
+  /** DBに保存されている値（＝製品が実際に使う値）。日時は日本時間 */
+  値: string;
+  引用: string;
+  出典: string;
+  /** 保存値とAIの生の抽出値がずれているときだけ入る */
+  注意?: string;
+};
 
 function showValue(value: unknown): string {
   if (value === null || value === undefined) return "（無し）";
@@ -54,17 +69,51 @@ function showValue(value: unknown): string {
 }
 
 /**
- * basicInfo の1項目を、人が読める形に直す。
- * 引用が無い項目は「未確認」として扱う（CLAUDE.md 最重要の前提3）。
+ * タイムゾーンの付いていない日時をJSTとして読む。
+ *
+ * 解析プロンプトは "YYYY-MM-DDTHH:mm" を返す（packages/ai/prompts/basic_info.ts）。
+ * 日本の公告なのでJSTのつもりだが、文字列にはその情報が無い。
+ * 保存値と比べるときは、意図どおりJSTとして解釈する。
  */
-function toAnswer(field: unknown): AiAnswer | null {
-  if (typeof field !== "object" || field === null) return null;
-  const entry = field as { value?: unknown; quote?: unknown; source?: unknown };
-  return {
-    値: showValue(entry.value),
+function asJstInstant(value: string): number {
+  const hasZone = /(Z|[+-]\d{2}:?\d{2})$/.test(value.trim());
+  return Date.parse(hasZone ? value : `${value.trim()}+09:00`);
+}
+
+/** 日時の項目か（保存値を日本時間で見せるもの）。 */
+const INSTANT_FIELDS = new Set(["submit_deadline", "qa_deadline", "bid_open_at"]);
+
+/**
+ * 1項目を、人が読める形に直す。
+ *
+ * 値はDBに保存されているもの（＝製品が実際に使う値）を出す。
+ * 引用・出典は解析結果の生出力から取る。引用が無い項目は「未確認」として扱う
+ * （CLAUDE.md 最重要の前提3）。
+ */
+function toAnswer(key: string, raw: unknown, stored: unknown): AiAnswer | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const entry = raw as { value?: unknown; quote?: unknown; source?: unknown };
+  const isInstant = INSTANT_FIELDS.has(key);
+  const storedText =
+    isInstant && typeof stored === "string" ? showInstant(stored) : showValue(stored ?? null);
+
+  const answer: AiAnswer = {
+    値: storedText,
     引用: typeof entry.quote === "string" && entry.quote.trim() !== "" ? entry.quote : "（引用なし＝未確認）",
     出典: typeof entry.source === "string" && entry.source.trim() !== "" ? entry.source : "（出典なし＝未確認）",
   };
+
+  // 保存の途中でずれていないか。ずれていたら黙って隠さず、必ず見せる
+  if (isInstant && typeof entry.value === "string" && typeof stored === "string") {
+    const wanted = asJstInstant(entry.value);
+    const got = Date.parse(stored);
+    if (!Number.isNaN(wanted) && !Number.isNaN(got) && Math.floor(wanted / 60_000) !== Math.floor(got / 60_000)) {
+      answer.注意 =
+        `AIは「${entry.value}（日本時間）」と読み取りましたが、保存されている値は「${storedText}」です。` +
+        "保存の途中でずれています。この項目は expected に正しい値を書いてください";
+    }
+  }
+  return answer;
 }
 
 /** テンプレートに並べる項目。人が判断するのに必要なものだけ。 */
@@ -100,13 +149,14 @@ export async function writeGoldsetTemplate(path: string, limit: number): Promise
   }
 
   const client = createServiceClient();
+  // 保存されている値も引く。テンプレートに出すのは「製品が実際に使う値」
   const { data, error } = await client
     .from("tenders")
-    .select("id, name, source_url")
+    .select("id, name, source_url, submit_deadline, qa_deadline, bid_open_at, qual_category, item, grade, areas")
     .in("collect_status", ANALYZED_STATUSES)
     .order("notice_date", { ascending: false })
     .limit(limit)
-    .returns<{ id: string; name: string; source_url: string | null }[]>();
+    .returns<TenderRow[]>();
   if (error) throw new Error(`案件の取得に失敗しました: ${error.message}`);
 
   const tenders = data ?? [];
@@ -117,7 +167,7 @@ export async function writeGoldsetTemplate(path: string, limit: number): Promise
   }
 
   // AIの答えと根拠を並べる。これを読んで判断してもらう（原文を開かなくて済むように）
-  const answers = await loadAiAnswers(client, tenders.map((tender) => tender.id));
+  const answers = await loadAiAnswers(client, tenders);
   const trades = await loadTrades(client, tenders.map((tender) => tender.id));
 
   const entries = tenders.map((tender) => ({
@@ -131,8 +181,8 @@ export async function writeGoldsetTemplate(path: string, limit: number): Promise
     // AIが間違えていた項目だけ、正しい値を書く。合っていた項目は書かなくてよい。
     // 公告に書かれていないのが正しい項目は null と書く
     expected: {},
-    // ↓ここから下はAIの答え。読むだけで、書き換えても測定には影響しない
-    AIの答え: { ...(answers.get(tender.id) ?? {}), 業種: showValue(trades.get(tender.id) ?? []) },
+    // ↓ここから下は保存されている値と、その根拠。読むだけで、書き換えても測定には影響しない
+    保存されている値: { ...(answers.get(tender.id) ?? {}), 業種: showValue(trades.get(tender.id) ?? []) },
   }));
 
   await mkdir(dirname(path), { recursive: true });
@@ -228,15 +278,19 @@ async function loadTrades(
   return new Map([...byTender.entries()].map(([id, set]) => [id, [...set]]));
 }
 
-/** 案件ごとの「AIの答えと根拠」。解析結果の生出力から作る。 */
+/**
+ * 案件ごとの「保存されている値と、その根拠」。
+ * 値は tenders の列（製品が使う値）、引用・出典は解析結果の生出力から取る。
+ */
 async function loadAiAnswers(
   client: ReturnType<typeof createServiceClient>,
-  tenderIds: string[],
+  tenders: TenderRow[],
 ): Promise<Map<string, Record<string, AiAnswer>>> {
+  const storedByTender = new Map(tenders.map((tender) => [tender.id, tender as unknown as Record<string, unknown>]));
   const { data, error } = await client
     .from("tender_analyses")
     .select("tender_id, raw")
-    .in("tender_id", tenderIds)
+    .in("tender_id", tenders.map((tender) => tender.id))
     .order("version", { ascending: true })
     .returns<AnalysisRow[]>();
   if (error) throw new Error(`解析結果の取得に失敗しました: ${error.message}`);
@@ -246,9 +300,10 @@ async function loadAiAnswers(
   for (const row of data ?? []) {
     const basicInfo = row.raw?.basicInfo;
     if (!basicInfo) continue;
+    const stored = storedByTender.get(row.tender_id) ?? {};
     const answer: Record<string, AiAnswer> = {};
     for (const { key, label } of TEMPLATE_FIELDS) {
-      const value = toAnswer((basicInfo as Record<string, unknown>)[key]);
+      const value = toAnswer(key, (basicInfo as Record<string, unknown>)[key], stored[key]);
       if (value) answer[label] = value;
     }
     byTender.set(row.tender_id, answer);

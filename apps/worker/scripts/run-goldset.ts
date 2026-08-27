@@ -52,8 +52,9 @@ async function main() {
     const result = await writeGoldsetTemplate(GOLDSET_PATH, limit);
     console.log(`${result.path} に${result.tenders}件ぶんを書き出しました。`);
     console.log("");
-    console.log("各案件に「AIの答え」と、その根拠になった引用・出典が入っています。");
+    console.log("各案件に「保存されている値」と、その根拠になった引用・出典が入っています。");
     console.log("引用を読んで、合っているかどうかを判断してください。原文を開く必要はほとんどありません。");
+    console.log("値は製品が実際に使っているもの（DBの値）です。日時は日本時間で出しています。");
     console.log("");
     console.log("1. 確認した項目を checked に書く（合っていた項目も含めて）");
     console.log('     "checked": ["期限"]            期限3項目を確認した');
@@ -66,6 +67,9 @@ async function main() {
     console.log("合っていた項目は何も書かなくて構いません。");
     console.log("checked が空の案件は1項目も測りません（見ていないものを正解に数えないため）。");
     console.log("「引用なし＝未確認」と出ている項目は、原文で確かめてください。");
+    console.log("");
+    console.log("「注意」が付いている項目は、AIの読み取りと保存されている値がずれています。");
+    console.log("`pnpm --filter worker deadlines:repair` で入れ直せます（既定は下見）。");
     return;
   }
 
