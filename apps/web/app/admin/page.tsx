@@ -92,6 +92,9 @@ export default async function AdminPage() {
         <Link href="/admin/accounts" className="text-xs text-slate-500 underline hover:text-slate-700">
           アカウント
         </Link>
+        <Link href="/admin/sales-ai" className="text-xs text-slate-500 underline hover:text-slate-700">
+          営業AI連携
+        </Link>
         <span className="ml-auto text-xs text-slate-400">{email}</span>
       </header>
 

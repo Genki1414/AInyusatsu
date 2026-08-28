@@ -125,3 +125,118 @@ export function prefectureFromPlace(place: string | null): string | null {
   }
   return null;
 }
+
+// --- 本部側の接続設定（T55の続き。/admin/sales-ai） -------------------------
+//
+// 【なぜ本部側にも要るか】
+// 「顧客は営業AIの画面を開かない」（ユーザー決定 2026-08-28。
+// docs/reference/営業AI連携_設計.md）。しかし今のsales_ai_connectionsは
+// 顧客が自分でURL/APIキーを貼る前提の画面（apps/web/app/company）しか無く、
+// 本部が顧客にキーを教えることになってしまっていた。本部が営業AIのテナントを
+// 作り、キーを顧客に見せずそのまま保存できるようにする。
+
+function looksLikeEmailAddress(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+export type ProvisionTenantInput = { orgName: string; senderEmail: string };
+export type ProvisionTenantValidation =
+  | { ok: true; value: ProvisionTenantInput }
+  | { ok: false; error: string };
+
+/** 「営業AIにテナントを作る」フォームの入力を確かめる。 */
+export function validateProvisionTenant(input: { orgName: string; senderEmail: string }): ProvisionTenantValidation {
+  const orgName = input.orgName.trim();
+  const senderEmail = input.senderEmail.trim().toLowerCase();
+  if (orgName === "") return { ok: false, error: "会社名を入力してください" };
+  if (orgName.length > 100) return { ok: false, error: "会社名は100文字以内で入力してください" };
+  if (senderEmail === "") return { ok: false, error: "送信元メールアドレスを入力してください" };
+  if (!looksLikeEmailAddress(senderEmail)) return { ok: false, error: "メールアドレスの形で入力してください" };
+  return { ok: true, value: { orgName, senderEmail } };
+}
+
+/**
+ * 問い合わせフォームに載る送信元（顧客名義）の入力。
+ *
+ * 【誰の名義か】
+ * AI入札部が自社で見積依頼を送るときの送信元（packages/domain/src/sender_identity.ts）
+ * とは別物。ここは「AI入札部の契約者が営業AIの仕組みで協力会社の開拓フォームを
+ * 送信するときに、フォームへ記載される送信元」＝**契約者本人の名義**にする
+ * （ユーザー決定 2026-08-28。AI入札部自身のアドレスにはしない）。
+ *
+ * last_name〜positionは任意（姓・名・フリガナ・郵便番号・住所・電話番号が
+ * 別欄の問い合わせフォーム向け。営業AI側のSender/sender_templatesと同じ形）。
+ */
+export type SenderIdentityInput = {
+  templateName: string;
+  senderName: string;
+  senderEmail: string;
+  senderAddress: string;
+  optoutUrl: string;
+  lastName: string;
+  firstName: string;
+  lastNameKana: string;
+  firstNameKana: string;
+  postalCode: string;
+  prefecture: string;
+  city: string;
+  block: string;
+  building: string;
+  phone: string;
+  department: string;
+  position: string;
+};
+export type SenderIdentityValidation =
+  | { ok: true; value: SenderIdentityInput }
+  | { ok: false; error: string };
+
+const SENDER_IDENTITY_OPTIONAL_KEYS = [
+  "lastName",
+  "firstName",
+  "lastNameKana",
+  "firstNameKana",
+  "postalCode",
+  "prefecture",
+  "city",
+  "block",
+  "building",
+  "phone",
+  "department",
+  "position",
+] as const;
+
+export function validateSenderIdentity(input: Record<string, string | undefined>): SenderIdentityValidation {
+  const templateName = (input.templateName ?? "").trim() || "本部設定（顧客名義）";
+  const senderName = (input.senderName ?? "").trim();
+  const senderEmail = (input.senderEmail ?? "").trim().toLowerCase();
+  const senderAddress = (input.senderAddress ?? "").trim();
+  const optoutUrl = (input.optoutUrl ?? "").trim();
+
+  if (senderName === "") return { ok: false, error: "送信元名（契約者の会社名）を入力してください" };
+  if (senderEmail === "") return { ok: false, error: "送信元メールアドレス（契約者のアドレス）を入力してください" };
+  if (!looksLikeEmailAddress(senderEmail)) return { ok: false, error: "メールアドレスの形で入力してください" };
+
+  const value: SenderIdentityInput = {
+    templateName,
+    senderName,
+    senderEmail,
+    senderAddress,
+    optoutUrl,
+    lastName: "",
+    firstName: "",
+    lastNameKana: "",
+    firstNameKana: "",
+    postalCode: "",
+    prefecture: "",
+    city: "",
+    block: "",
+    building: "",
+    phone: "",
+    department: "",
+    position: "",
+  };
+  for (const key of SENDER_IDENTITY_OPTIONAL_KEYS) {
+    value[key] = (input[key] ?? "").trim();
+  }
+  return { ok: true, value };
+}

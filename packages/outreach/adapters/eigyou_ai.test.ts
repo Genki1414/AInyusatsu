@@ -1,11 +1,13 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import {
   createTargetList,
+  createTenant,
   getQuotaStatus,
   OutreachError,
   previewTargets,
   purchaseQuota,
   sendTargetList,
+  setSenderIdentity,
 } from "./eigyou_ai";
 
 const connection = { baseUrl: "https://sales.example.com/", apiKey: "key-123" };
@@ -235,5 +237,150 @@ describe("purchaseQuota", () => {
   it("存在しないテナント等、営業AIがerrorを返したら止める", async () => {
     mockFetch(404, { error: "テナントが見つかりません" });
     await expect(purchaseQuota(opsConnection, 999, { qty: 500 })).rejects.toMatchObject({ code: "OUT_OF_SCOPE" });
+  });
+});
+
+describe("createTenant", () => {
+  it("本部の運用キーでPOSTし、テナントIDとAPIキーを返す", async () => {
+    const spy = mockFetch(200, { ok: true, tenant_id: 77, api_key: "new-tenant-key" });
+    const result = await createTenant(opsConnection, { name: "山田電気株式会社", senderEmail: "info@yamada.example" });
+    expect(result).toEqual({ tenantId: 77, apiKey: "new-tenant-key" });
+    const [url, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://sales.example.com/api/ops/tenants");
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer ops-key-456");
+    expect(JSON.parse(init.body as string)).toEqual({ name: "山田電気株式会社", sender_email: "info@yamada.example" });
+  });
+
+  it("任意項目(sender_name/sender_address/optout_url)も渡せる", async () => {
+    const spy = mockFetch(200, { ok: true, tenant_id: 77, api_key: "new-tenant-key" });
+    await createTenant(opsConnection, {
+      name: "山田電気株式会社",
+      senderEmail: "info@yamada.example",
+      senderName: "山田電気",
+      senderAddress: "東京都千代田区1-1-1",
+      optoutUrl: "https://example.com/optout",
+    });
+    const [, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({
+      name: "山田電気株式会社",
+      sender_email: "info@yamada.example",
+      sender_name: "山田電気",
+      sender_address: "東京都千代田区1-1-1",
+      optout_url: "https://example.com/optout",
+    });
+  });
+
+  it("会社名か送信元メールアドレスが空なら呼びに行かない", async () => {
+    const spy = mockFetch(200, {});
+    await expect(createTenant(opsConnection, { name: " ", senderEmail: "a@example.com" })).rejects.toThrow(OutreachError);
+    await expect(createTenant(opsConnection, { name: "山田電気", senderEmail: " " })).rejects.toThrow(OutreachError);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("APIキーが返らなければ0にせず止める", async () => {
+    mockFetch(200, { ok: true, tenant_id: 77 });
+    await expect(
+      createTenant(opsConnection, { name: "山田電気株式会社", senderEmail: "info@yamada.example" }),
+    ).rejects.toMatchObject({ code: "PARSE_INVALID" });
+  });
+
+  it("重複などの営業AI側のエラーはそのまま止める", async () => {
+    mockFetch(400, { error: "sender_emailの形式が正しくありません" });
+    await expect(
+      createTenant(opsConnection, { name: "山田電気株式会社", senderEmail: "info@yamada.example" }),
+    ).rejects.toMatchObject({ code: "OUT_OF_SCOPE" });
+  });
+});
+
+describe("setSenderIdentity", () => {
+  const senderInput = {
+    templateName: "本部設定（顧客名義）",
+    senderName: "山田電気株式会社",
+    senderEmail: "info@yamada.example",
+    senderAddress: "東京都千代田区1-1-1",
+  };
+
+  it("登録してから有効化する(2回POSTする)", async () => {
+    const spy = vi.fn(async (url: string) => {
+      if (url.endsWith("/api/tenant/sender-templates")) {
+        return new Response(JSON.stringify({ ok: true, template_id: 9 }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", spy);
+
+    const result = await setSenderIdentity(connection, senderInput);
+    expect(result).toEqual({ templateId: 9 });
+    expect(spy).toHaveBeenCalledTimes(2);
+    const [addUrl, addInit] = spy.mock.calls[0] as unknown as [string, RequestInit];
+    expect(addUrl).toBe("https://sales.example.com/api/tenant/sender-templates");
+    expect(JSON.parse(addInit.body as string)).toMatchObject({
+      name: "本部設定（顧客名義）",
+      sender_name: "山田電気株式会社",
+      sender_email: "info@yamada.example",
+      sender_address: "東京都千代田区1-1-1",
+    });
+    const [activateUrl, activateInit] = spy.mock.calls[1] as unknown as [string, RequestInit];
+    expect(activateUrl).toBe("https://sales.example.com/api/tenant/sender-templates/activate");
+    expect(JSON.parse(activateInit.body as string)).toEqual({ template_id: 9 });
+  });
+
+  it("姓・名・フリガナ・住所内訳・電話番号も渡せる", async () => {
+    const spy = vi.fn(async () => new Response(JSON.stringify({ ok: true, template_id: 9 }), { status: 200 }));
+    vi.stubGlobal("fetch", spy);
+    await setSenderIdentity(connection, {
+      ...senderInput,
+      lastName: "山田",
+      firstName: "太郎",
+      lastNameKana: "ヤマダ",
+      firstNameKana: "タロウ",
+      postalCode: "100-0001",
+      prefecture: "東京都",
+      city: "千代田区",
+      block: "1-1",
+      building: "3F",
+      phone: "03-1234-5678",
+      department: "営業部",
+      position: "部長",
+    });
+    const [, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toMatchObject({
+      last_name: "山田",
+      first_name: "太郎",
+      last_name_kana: "ヤマダ",
+      first_name_kana: "タロウ",
+      postal_code: "100-0001",
+      prefecture: "東京都",
+      city: "千代田区",
+      block: "1-1",
+      building: "3F",
+      phone: "03-1234-5678",
+      department: "営業部",
+      position: "部長",
+    });
+  });
+
+  it("送信元名か送信元メールアドレスが空なら呼びに行かない", async () => {
+    const spy = mockFetch(200, {});
+    await expect(setSenderIdentity(connection, { ...senderInput, senderName: " " })).rejects.toThrow(OutreachError);
+    await expect(setSenderIdentity(connection, { ...senderInput, senderEmail: " " })).rejects.toThrow(OutreachError);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("登録でエラーが返ったら止める(有効化は呼ばない)", async () => {
+    const spy = mockFetch(200, { error: "name・sender_name・sender_emailは必須です" });
+    await expect(setSenderIdentity(connection, senderInput)).rejects.toMatchObject({ code: "OUT_OF_SCOPE" });
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("登録は成功したが有効化でエラーが返ったら、その旨を伝えて止める", async () => {
+    const spy = vi.fn(async (url: string) => {
+      if (url.endsWith("/api/tenant/sender-templates")) {
+        return new Response(JSON.stringify({ ok: true, template_id: 9 }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: "テンプレートが見つかりません" }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", spy);
+    await expect(setSenderIdentity(connection, senderInput)).rejects.toMatchObject({ code: "OUT_OF_SCOPE" });
   });
 });

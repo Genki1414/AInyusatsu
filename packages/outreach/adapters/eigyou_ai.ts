@@ -24,7 +24,18 @@
 // - POST /api/ops/tenants/<id>/quota-purchase    … 追加購入の記録（本部専用の運用キーで呼ぶ。
 //   テナントのapi_keyとは別物）。Stripeの決済成功後に叩く想定だが、Checkout／Webhookの実装は
 //   まだ無い（ユーザー決定：決済は後回し）。呼び出し側（将来のWebhookハンドラ）を先に用意する。
-// このアダプタはpurchaseQuota()を用意するだけで、どこからも呼んでいない。
+//
+// 【本部側の接続設定（/admin/sales-ai）】
+// 「顧客は営業AIの画面を開かない」（ユーザー決定 2026-08-28）ので、テナントの発行と
+// 送信元（顧客名義）の設定は本部が代行する。ここも本部専用の運用キーで呼ぶ。
+// - POST /api/ops/tenants                        … テナントを作る。api_keyは一度だけ返る
+// - POST /api/tenant/sender-templates (+/activate) … 送信元（顧客名義）を登録して有効化する。
+//   ここはテナントごとのapi_key（作ったテナント自身のキー）で呼ぶ。運用キーではない。
+//
+// 【送信元は契約者本人の名義にする】
+// AI入札部が自社で見積依頼を送る送信元（packages/domain/src/sender_identity.ts）とは別物。
+// 協力会社開拓の問い合わせフォームに載る送信元は、AI入札部自身のアドレスではなく
+// **契約者本人の名義**にする（ユーザー決定 2026-08-28）。
 
 const REQUEST_TIMEOUT_MS = 20_000;
 
@@ -320,8 +331,8 @@ export async function getQuotaStatus(connection: SalesAiConnection): Promise<Quo
  * 送信系（preview/lists/send）と違い、テナントごとの api_key ではなく
  * 本部だけが持つ運用キー（SalesAiOpsConnection.opsApiKey）で呼ぶ。
  * どのテナントかはURLの tenantId（営業AI側の内部tenant.id、数値）で指定する。
- * この数値をAI入札部側のどこに保存するかは、まだ決めていない
- * （本部側の接続設定画面 `/admin/accounts` が未実装のため）。
+ * この数値は `sales_ai_connections.tenant_id` に保存する（本部側の接続設定画面
+ * `/admin/sales-ai` が createTenant() を呼んだときに書き込む）。
  *
  * 【二重計上しない】
  * externalRef に Stripe の決済ID等を入れると、Webhookが再送されても
@@ -362,4 +373,138 @@ function toQuotaStatus(payload: Record<string, unknown>): QuotaStatus {
     remaining30d: requireNumber(q.remaining_30d, "remaining_30d"),
     planName: typeof q.plan_name === "string" ? q.plan_name : null,
   };
+}
+
+/** 新規テナントを作るときの入力。参照：eigyouAI api.py `POST /api/ops/tenants` */
+export type CreateTenantInput = {
+  /** 契約者の会社名（営業AI側の tenants.name） */
+  name: string;
+  /** 契約者の送信元メールアドレス（テナントの既定値。個別の送信元は sender-templates で上書きする） */
+  senderEmail: string;
+  senderName?: string;
+  senderAddress?: string;
+  optoutUrl?: string;
+};
+export type CreatedTenant = { tenantId: number; apiKey: string };
+
+/**
+ * 本部が営業AIに新しいテナントを作る（契約者1社につき1テナント）。
+ *
+ * 【一度しか返らないAPIキー】
+ * 応答のapiKeyはこの呼び出しの中でしか見えない（営業AI側もハッシュ等では保存していないが、
+ * 画面には出さない設計にしている）。呼び出し側で `sales_ai_connections` へすぐ保存すること。
+ * 顧客の画面には一切出さない（「顧客は営業AIの画面を開かない」ユーザー決定 2026-08-28）。
+ *
+ * kindは指定しない（営業AI側の既定 "client"＝販売先。AI入札部の契約者は全員これでよい）。
+ *
+ * 参照：eigyouAI api.py `POST /api/ops/tenants`
+ */
+export async function createTenant(
+  connection: SalesAiOpsConnection,
+  input: CreateTenantInput,
+): Promise<CreatedTenant> {
+  if (input.name.trim() === "") {
+    throw new OutreachError("OUT_OF_SCOPE", "会社名（name）が必要です");
+  }
+  if (input.senderEmail.trim() === "") {
+    throw new OutreachError("OUT_OF_SCOPE", "送信元メールアドレス（senderEmail）が必要です");
+  }
+  const payload = (await postOps(connection, "/api/ops/tenants", {
+    name: input.name,
+    sender_email: input.senderEmail,
+    ...(input.senderName ? { sender_name: input.senderName } : {}),
+    ...(input.senderAddress ? { sender_address: input.senderAddress } : {}),
+    ...(input.optoutUrl ? { optout_url: input.optoutUrl } : {}),
+  })) as Record<string, unknown>;
+
+  if (typeof payload.error === "string") {
+    throw new OutreachError("OUT_OF_SCOPE", `テナントを作れませんでした：${payload.error}`);
+  }
+  const tenantId = requireNumber(payload.tenant_id, "テナントID");
+  if (typeof payload.api_key !== "string" || payload.api_key === "") {
+    throw new OutreachError("PARSE_INVALID", "営業AIの応答にAPIキーがありません");
+  }
+  return { tenantId, apiKey: payload.api_key };
+}
+
+/**
+ * 送信元（顧客名義）を登録して、そのまま有効化する。
+ *
+ * 【契約者本人の名義にする】
+ * 協力会社開拓の問い合わせフォームに載る送信元は、AI入札部自身のアドレスではなく
+ * **契約者本人の名義**にする（ユーザー決定 2026-08-28）。AI入札部が自社で見積依頼を
+ * 送るときの送信元（packages/domain/src/sender_identity.ts）とは別の仕組み。
+ *
+ * 【テナントのapi_keyで呼ぶ】
+ * 本部専用の運用キーではなく、createTenant() で作ったそのテナント自身のapi_keyを使う
+ * （sender-templatesはテナントスコープのAPIのため）。
+ *
+ * 【登録だけでなく有効化まで行う】
+ * 営業AI側は登録しただけでは送信に使われず、「有効にする」を別に呼ぶ必要がある
+ * （eigyouAI api.py の h_tenant_sender_templates_activate）。本部がここで両方まとめて行う。
+ *
+ * 参照：eigyouAI api.py `POST /api/tenant/sender-templates` `POST /api/tenant/sender-templates/activate`
+ */
+export async function setSenderIdentity(
+  connection: SalesAiConnection,
+  input: {
+    templateName: string;
+    senderName: string;
+    senderEmail: string;
+    senderAddress: string;
+    optoutUrl?: string;
+    lastName?: string;
+    firstName?: string;
+    lastNameKana?: string;
+    firstNameKana?: string;
+    postalCode?: string;
+    prefecture?: string;
+    city?: string;
+    block?: string;
+    building?: string;
+    phone?: string;
+    department?: string;
+    position?: string;
+  },
+): Promise<{ templateId: number }> {
+  if (input.senderName.trim() === "" || input.senderEmail.trim() === "") {
+    throw new OutreachError("OUT_OF_SCOPE", "送信元名（senderName）と送信元メールアドレス（senderEmail）が必要です");
+  }
+  const body = {
+    name: input.templateName,
+    sender_name: input.senderName,
+    sender_email: input.senderEmail,
+    sender_address: input.senderAddress,
+    ...(input.optoutUrl ? { optout_url: input.optoutUrl } : {}),
+    ...(input.lastName ? { last_name: input.lastName } : {}),
+    ...(input.firstName ? { first_name: input.firstName } : {}),
+    ...(input.lastNameKana ? { last_name_kana: input.lastNameKana } : {}),
+    ...(input.firstNameKana ? { first_name_kana: input.firstNameKana } : {}),
+    ...(input.postalCode ? { postal_code: input.postalCode } : {}),
+    ...(input.prefecture ? { prefecture: input.prefecture } : {}),
+    ...(input.city ? { city: input.city } : {}),
+    ...(input.block ? { block: input.block } : {}),
+    ...(input.building ? { building: input.building } : {}),
+    ...(input.phone ? { phone: input.phone } : {}),
+    ...(input.department ? { department: input.department } : {}),
+    ...(input.position ? { position: input.position } : {}),
+  };
+
+  const added = (await post(connection, "/api/tenant/sender-templates", body)) as Record<string, unknown>;
+  if (typeof added.error === "string") {
+    throw new OutreachError("OUT_OF_SCOPE", `送信元を登録できませんでした：${added.error}`);
+  }
+  const templateId = requireNumber(added.template_id, "テンプレートID");
+
+  const activated = (await post(connection, "/api/tenant/sender-templates/activate", {
+    template_id: templateId,
+  })) as Record<string, unknown>;
+  if (typeof activated.error === "string") {
+    throw new OutreachError(
+      "OUT_OF_SCOPE",
+      `送信元は登録できましたが、有効化できませんでした：${activated.error}` +
+        "（このままだと従来の送信元のまま送信されます。営業AIの画面から手動で有効化してください）",
+    );
+  }
+  return { templateId };
 }
