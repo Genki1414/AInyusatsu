@@ -20,7 +20,7 @@ import { useActionState, useCallback, useRef, useState } from "react";
 import Link from "next/link";
 import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
 import { CopyButton } from "@/components/CopyButton";
-import { createOutreachList, previewOutreachTargets, type OutreachState } from "./outreach-actions";
+import { previewOutreachTargets, sendOutreach, type OutreachState } from "./outreach-actions";
 import { btnClass, Panel, Pill } from "@/components/ui";
 import { buildOutreachMessage, buildQuoteRequestEmail, groupLotsByTrade, type QuoteRequestLot } from "@ai-nyusatsu-bu/domain";
 import { AREA_OPTIONS, PREFECTURE_OPTIONS, TRADE_OPTIONS } from "@/lib/catalog";
@@ -90,12 +90,13 @@ const EMPTY_OUTREACH: OutreachState = { error: null, message: null, count: null,
  */
 function SalesAiBlock({ tenderId, trade }: { tenderId: string; trade: string }) {
   const [state, formAction, pending] = useActionState(previewOutreachTargets, EMPTY_OUTREACH);
-  const [listState, listAction, listPending] = useActionState(createOutreachList, EMPTY_OUTREACH);
-  const shown = listState.message || listState.error ? listState : state;
+  const [sendState, sendFormAction, sending] = useActionState(sendOutreach, EMPTY_OUTREACH);
+  const shown = sendState.message || sendState.error ? sendState : state;
+  const found = state.count ?? 0;
 
   return (
     <div className="rounded border border-violet-200 bg-violet-50 px-2 py-1.5">
-      <p className="text-xs font-medium text-violet-900">営業AIで候補を探す</p>
+      <p className="text-xs font-medium text-violet-900">営業AIで候補を探して送る</p>
       <div className="mt-1 flex flex-wrap gap-2">
         <form action={formAction}>
           <input type="hidden" name="tender_id" value={tenderId} />
@@ -104,13 +105,19 @@ function SalesAiBlock({ tenderId, trade }: { tenderId: string; trade: string }) 
             {pending ? "問い合わせ中..." : "何社いるか見る"}
           </button>
         </form>
-        {state.count !== null && state.count > 0 && (
-          <form action={listAction}>
+
+        {/* 何社いるかを見てからでないと送れない。件数を知らずに送らせない */}
+        {found > 0 && !sendState.message && (
+          <form action={sendFormAction}>
             <input type="hidden" name="tender_id" value={tenderId} />
             <input type="hidden" name="trade" value={trade} />
-            <button type="submit" disabled={listPending} className={btnClass("primary", "sm")}>
-              {listPending ? "作成中..." : "送信先リストを作る"}
-            </button>
+            <ConfirmSubmitButton
+              className={btnClass("primary", "sm")}
+              disabled={sending}
+              confirmMessage={`${found}社の問い合わせフォームへ、${trade}のお取引の打診を送ります。送信は取り消せません。よろしいですか。`}
+            >
+              {sending ? "送信中..." : `${found}社へ送信する`}
+            </ConfirmSubmitButton>
           </form>
         )}
       </div>
@@ -121,7 +128,7 @@ function SalesAiBlock({ tenderId, trade }: { tenderId: string; trade: string }) 
         </p>
       )}
       {shown.message && <p className="mt-1 text-xs leading-relaxed text-violet-900">{shown.message}</p>}
-      {state.sample.length > 0 && !listState.message && (
+      {state.sample.length > 0 && !sendState.message && (
         <ul className="mt-1 space-y-0.5">
           {state.sample.map((company, i) => (
             <li key={`${company.name}-${i}`} className="text-xs text-slate-600">
@@ -132,7 +139,8 @@ function SalesAiBlock({ tenderId, trade }: { tenderId: string; trade: string }) 
         </ul>
       )}
       <p className="mt-1 text-xs leading-relaxed text-slate-500">
-        リストを作るだけで、この製品からは送信しません。営業AIの画面で内容を確かめてから送ってください。
+        送るのは下の打診文です。実際にフォームへ送るのは営業AIで、送信先の除外・回数の上限・
+        停止の設定はすべて営業AI側の設定が効きます。
       </p>
     </div>
   );

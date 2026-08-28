@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { createTargetList, OutreachError, previewTargets } from "./eigyou_ai";
+import { createTargetList, OutreachError, previewTargets, sendTargetList } from "./eigyou_ai";
 
 const connection = { baseUrl: "https://sales.example.com/", apiKey: "key-123" };
 const filters = { prefs: ["宮城県"], trades: ["denki"] };
@@ -85,5 +85,37 @@ describe("createTargetList", () => {
     const spy = mockFetch(200, {});
     await expect(createTargetList(connection, "x", { prefs: [], trades: [] })).rejects.toThrow(OutreachError);
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe("sendTargetList", () => {
+  it("dry_run を false にして送信を頼む", async () => {
+    const spy = mockFetch(200, { sent: 12 });
+    const result = await sendTargetList(connection, 7, { subject: "件名", body: "本文" });
+    expect(result).toEqual({ requested: 12, note: null });
+    const [url, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://sales.example.com/api/tenant/lists/7/send");
+    expect(JSON.parse(init.body as string)).toMatchObject({ dry_run: false, subject: "件名", body: "本文" });
+  });
+
+  it("件名か本文が空なら呼びに行かない", async () => {
+    const spy = mockFetch(200, {});
+    await expect(sendTargetList(connection, 7, { subject: " ", body: "本文" })).rejects.toThrow(OutreachError);
+    await expect(sendTargetList(connection, 7, { subject: "件名", body: " " })).rejects.toThrow(OutreachError);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("件数が返らなければ0にせず止める", async () => {
+    mockFetch(200, { ok: true });
+    await expect(sendTargetList(connection, 7, { subject: "件名", body: "本文" })).rejects.toMatchObject({
+      code: "PARSE_INVALID",
+    });
+  });
+
+  it("営業AIがerrorを返したら止める", async () => {
+    mockFetch(200, { error: "送信が停止されています" });
+    await expect(sendTargetList(connection, 7, { subject: "件名", body: "本文" })).rejects.toMatchObject({
+      code: "OUT_OF_SCOPE",
+    });
   });
 });

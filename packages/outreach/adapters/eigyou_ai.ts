@@ -1,10 +1,12 @@
 // 営業AI（Genki1414/eigyouAI）への接続。外部呼び出しはこのファイル経由のみ（CLAUDE.md）。
 //
 // 【何をして、何をしないか】
-// する：条件に合う会社が何社いるかを見る（preview）／送信先リストを作る（lists）
-// しない：送信。フォームへの送信は営業AI側の画面から人が実行する
-//         （CLAUDE.md「やらないこと：問い合わせフォームへの自動送信」）。
-//         このファイルに送信のエンドポイントは書かない。
+// する：条件に合う会社が何社いるかを見る（preview）／送信先リストを作る（lists）／
+//       利用者がボタンを押したときに送信を頼む（send）
+// しない：無人での送信。定期実行やジョブからここを呼ばない
+//         （CLAUDE.md「やらないこと：問い合わせフォームへの無人の自動送信」）。
+//         実際にフォームへ送るのは営業AI側で、送信先の除外・回数の上限・
+//         停止スイッチもすべて営業AIが持っている。こちらで作り直さない。
 //
 // 【認証】
 // テナントごとの api_key を Authorization: Bearer で送る。
@@ -61,6 +63,13 @@ export type PreviewResult = {
 };
 
 export type CreatedList = { listId: number; count: number };
+
+export type SendResult = {
+  /** 送信を頼んだ会社の数 */
+  requested: number;
+  /** 営業AI側が返したメッセージ（そのまま画面に出す） */
+  note: string | null;
+};
 
 function endpoint(connection: SalesAiConnection, path: string): string {
   return `${connection.baseUrl.replace(/\/+$/, "")}${path}`;
@@ -170,4 +179,52 @@ export async function createTargetList(
     throw new OutreachError("OUT_OF_SCOPE", `リストを作れませんでした：${payload.error}`);
   }
   return { listId: requireNumber(payload.list_id, "リストID"), count: requireNumber(payload.count, "件数") };
+}
+
+/**
+ * 送信先リストへ送信を頼む。
+ *
+ * 【呼んでよい場面】
+ * 利用者が画面のボタンを押したときだけ。定期実行やジョブから呼ばないこと
+ * （CLAUDE.md「やらないこと」）。
+ *
+ * 【安全装置はすべて営業AI側にある】
+ * 送信先の除外（suppression / tenant_exclusions）、回数の上限、停止スイッチは
+ * 営業AIの send_campaign() が持っている。こちらで作り直すと二重になり、
+ * 片方だけ直したときに食い違う。
+ *
+ * 参照：eigyouAI api.py `POST /api/tenant/lists/<id>/send`
+ */
+export async function sendTargetList(
+  connection: SalesAiConnection,
+  listId: number,
+  message: { subject: string; body: string },
+): Promise<SendResult> {
+  if (message.subject.trim() === "" || message.body.trim() === "") {
+    // 空の本文を送ると、受け取った会社に何の用件か分からない
+    throw new OutreachError("OUT_OF_SCOPE", "件名と本文の両方が要ります");
+  }
+  const payload = (await post(connection, `/api/tenant/lists/${listId}/send`, {
+    subject: message.subject,
+    body: message.body,
+    // 営業AI側の既定は dry_run:true（送らない）。実際に送るので明示的に false にする
+    dry_run: false,
+  })) as Record<string, unknown>;
+
+  if (typeof payload.error === "string") {
+    throw new OutreachError("OUT_OF_SCOPE", `送信できませんでした：${payload.error}`);
+  }
+  // 件数の呼び名は営業AI側の実装に依存するので、読めたものを使う。読めなければ0にせず止める
+  const requested =
+    typeof payload.sent === "number"
+      ? payload.sent
+      : typeof payload.count === "number"
+        ? payload.count
+        : typeof payload.requested === "number"
+          ? payload.requested
+          : null;
+  if (requested === null) {
+    throw new OutreachError("PARSE_INVALID", "営業AIの応答に送信した件数がありません");
+  }
+  return { requested, note: typeof payload.message === "string" ? payload.message : null };
 }
