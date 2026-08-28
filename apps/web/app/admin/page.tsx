@@ -1,4 +1,4 @@
-// 運営（本部）用の管理画面（タスク4-8）。契約・請求・収集キュー。
+// 運営（本部）用の管理画面（タスク4-8）。利用状況・収集キュー。
 //
 // 【なぜ必要か】
 // 収集が止まったことに気づけないのが最大のリスク（docs/本番環境_推奨構成.md）。
@@ -13,15 +13,15 @@
 
 import Link from "next/link";
 import {
-  billingAttention,
-  billingSummary,
+  accessSummary,
   evaluateCoverage,
   groupCollectionIssues,
   LAYOUT_CHANGED_ALERT_HOURS,
   stalledIssues,
-  type BillingRow,
+  suspendedOrgs,
   type CollectionIssue,
   type CoverageAgency,
+  type OrgAccessRow,
 } from "@ai-nyusatsu-bu/domain";
 import { Panel, Pill } from "@/components/ui";
 import { requireAdmin } from "@/lib/admin";
@@ -49,13 +49,11 @@ type AgencyRow = {
   sources: { connector?: string }[] | null;
 };
 
-type SubscriptionRow = {
+type AccessRow = {
   org_id: string;
   status: string;
-  payment_method: string | null;
-  trial_ends_at: string | null;
-  current_period_end: string | null;
-  cancel_at_period_end: boolean;
+  suspended_at: string | null;
+  suspended_reason: string | null;
   organizations: { name: string } | { name: string }[] | null;
 };
 
@@ -75,16 +73,16 @@ export default async function AdminPage() {
   const { email, admin } = await requireAdmin();
   const now = new Date();
 
-  const [issues, billing, coverage] = await Promise.all([
+  const [issues, access, coverage] = await Promise.all([
     loadIssues(admin),
-    loadBilling(admin),
+    loadAccess(admin),
     loadCoverage(admin),
   ]);
 
   const groups = groupCollectionIssues(issues);
   const stalled = stalledIssues(groups, now);
-  const attention = billingAttention(billing, now);
-  const summary = billingSummary(billing);
+  const summary = accessSummary(access);
+  const suspended = suspendedOrgs(access);
   const coverageResult = evaluateCoverage(coverage, now);
 
   return (
@@ -171,33 +169,40 @@ export default async function AdminPage() {
         )}
       </Panel>
 
-      <Panel title="契約・請求">
-        <div className="flex flex-wrap gap-3 text-xs">
-          {Object.keys(summary).length === 0 ? (
-            <span className="text-slate-500">契約はまだありません。</span>
-          ) : (
-            Object.entries(summary).map(([status, count]) => (
-              <span key={status} className="text-slate-600">
-                {status} <span className="font-semibold tabular-nums">{count}</span>
-              </span>
-            ))
-          )}
+      <Panel title="利用状況">
+        {/* 支払いは請求書払いのみ。実際に使えるかを決めているのは org_access だけで、
+            subscriptions（Stripe）はいま何も止めていない。混乱を避けるため、ここでは
+            org_access だけを見る（apps/web/app/billing/page.tsx と同じ根拠） */}
+        <div className="flex flex-wrap gap-3 text-xs text-slate-600">
+          <span>
+            利用中 <span className="font-semibold tabular-nums">{summary.active}</span>
+          </span>
+          <span>
+            停止 <span className="font-semibold tabular-nums">{summary.suspended}</span>
+          </span>
+          <span className="text-slate-400">お支払いは請求書払い（銀行振込）のみ</span>
         </div>
 
-        {attention.length > 0 && (
+        {suspended.length === 0 ? (
+          <p className="mt-2 text-xs text-slate-500">停止中の組織はありません。</p>
+        ) : (
           <ul className="mt-2 space-y-1">
-            {attention.map((row) => (
+            {suspended.slice(0, LIST_LIMIT).map((row) => (
               <li key={row.orgId} className="text-xs text-slate-700">
                 ・{row.orgName}
-                <span className="ml-1 text-amber-700">{row.reason}</span>
-                {row.currentPeriodEnd && <span className="ml-1 text-slate-400">期限 {jst(row.currentPeriodEnd)}</span>}
+                {row.suspendedReason && <span className="ml-1 text-amber-700">{row.suspendedReason}</span>}
+                {row.suspendedAt && <span className="ml-1 text-slate-400">{jst(row.suspendedAt)}</span>}
               </li>
             ))}
+            {suspended.length > LIST_LIMIT && (
+              <li className="text-xs text-slate-400">ほか{suspended.length - LIST_LIMIT}件</li>
+            )}
           </ul>
         )}
-        {attention.length === 0 && Object.keys(summary).length > 0 && (
-          <p className="mt-2 text-xs text-slate-500">対応が必要な契約はありません。</p>
-        )}
+
+        <p className="mt-2 text-xs text-slate-400">
+          発行・停止・再開は <Link href="/admin/accounts" className="underline">アカウント</Link> から行う。
+        </p>
       </Panel>
     </div>
   );
@@ -253,23 +258,21 @@ async function loadIssues(admin: Admin): Promise<CollectionIssue[]> {
   return issues;
 }
 
-async function loadBilling(admin: Admin): Promise<BillingRow[]> {
+async function loadAccess(admin: Admin): Promise<OrgAccessRow[]> {
   const { data, error } = await admin
-    .from("subscriptions")
-    .select("org_id, status, payment_method, trial_ends_at, current_period_end, cancel_at_period_end, organizations(name)")
-    .returns<SubscriptionRow[]>();
+    .from("org_access")
+    .select("org_id, status, suspended_at, suspended_reason, organizations(name)")
+    .returns<AccessRow[]>();
   if (error) {
-    console.error(`[admin] 契約の取得に失敗しました: ${error.message}`);
+    console.error(`[admin] 利用状況の取得に失敗しました: ${error.message}`);
     return [];
   }
   return (data ?? []).map((row) => ({
     orgId: row.org_id,
     orgName: one(row.organizations)?.name ?? "（組織名不明）",
     status: row.status,
-    paymentMethod: row.payment_method,
-    trialEndsAt: row.trial_ends_at,
-    currentPeriodEnd: row.current_period_end,
-    cancelAtPeriodEnd: row.cancel_at_period_end,
+    suspendedAt: row.suspended_at,
+    suspendedReason: row.suspended_reason,
   }));
 }
 

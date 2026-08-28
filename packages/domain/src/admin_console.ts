@@ -209,6 +209,16 @@ export function billingAttention(rows: BillingRow[], now: Date): BillingAttentio
   return attention;
 }
 
+// --- Stripe（いまは動いていない） -------------------------------------------
+//
+// 支払いは請求書払いのみになった（ユーザー決定 2026-08-25）。実際に使えるかを
+// 決めているのは org_access だけで、subscriptions は何も止めていない。
+// 運営画面もこの下の関数ではなく accessSummary / suspendedOrgs を見ている。
+//
+// 消さずに残しているのは、カード払いを足すときに使うため。
+// 使い始めるときは、org_access と連動させるかどうかをそのとき決めること。
+// 「支払い遅延なら止める」を無条件に入れると、締切直前に締め出す事故になる。
+
 /** 状態ごとの件数。運営が全体を一目で見るため。 */
 export function billingSummary(rows: BillingRow[]): Record<string, number> {
   const counts: Record<string, number> = {};
