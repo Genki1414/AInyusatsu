@@ -154,6 +154,35 @@ async function loadOutreachTrades(
     .map(([trade]) => trade);
 }
 
+/**
+ * すでに営業AIへ送った業種と、最後に送信した日時。
+ * リストの番号は outreach_sends に控えてある（同じリストへ送り直すため）。
+ */
+async function loadOutreachSends(
+  supabase: Awaited<ReturnType<typeof requireOrgContext>>["supabase"],
+  orgId: string,
+  tenderId: string,
+): Promise<Record<string, string | null>> {
+  const { data, error } = await supabase
+    .from("outreach_sends")
+    .select("trade, last_sent_at")
+    .eq("org_id", orgId)
+    .eq("tender_id", tenderId)
+    .returns<{ trade: string; last_sent_at: string | null }[]>();
+  if (error) {
+    // 控えが読めなくても見積依頼はできる。握りつぶさずログには残す
+    console.error(`[tenders] 営業AIの送信控えを読めませんでした（tender=${tenderId}）: ${error.message}`);
+    return {};
+  }
+  const out: Record<string, string | null> = {};
+  for (const row of data ?? []) {
+    out[row.trade] = row.last_sent_at
+      ? new Date(row.last_sent_at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })
+      : null;
+  }
+  return out;
+}
+
 async function loadPastAwards(
   supabase: Awaited<ReturnType<typeof requireOrgContext>>["supabase"],
   tenderName: string,
@@ -404,7 +433,7 @@ export default async function TenderDetailPage({
   const tradeGroups = groupLotsByTrade(lots ?? []);
   //
   // 見積依頼タブで要るものは同時に引く。順番に待つ理由が無い
-  const [recommendations, sender, outreachTrades] = await Promise.all([
+  const [recommendations, sender, outreachTrades, outreachSends] = await Promise.all([
     tab === "request" && officialStatus === "取得済" && tradeGroups.length > 0
       ? getPartnerRecommendations(supabase, orgId, id, tender.item, tender.place, tradeGroups, partners ?? [])
       : Promise.resolve({} as Record<string, PartnerRecommendationResult | null>),
@@ -415,6 +444,11 @@ export default async function TenderDetailPage({
     // 営業AIの対応表にある業種だけ、候補を探せる。対応の無い業種を投げると営業AI側で
     // 条件が捨てられ、その県の全社が対象になってしまう
     tab === "request" ? loadOutreachTrades(supabase, orgId) : Promise.resolve([] as string[]),
+    // すでに営業AIへ送った業種。依頼先が埋まったあとも、送った会社を見て
+    // 協力会社として登録できるようにする（返信は数日後に来る）
+    tab === "request"
+      ? loadOutreachSends(supabase, orgId, id)
+      : Promise.resolve({} as Record<string, string | null>),
   ]);
 
   // 送信済みの見積依頼と、協力会社からの回答状況（見積状況タブに一覧表示する）。
@@ -596,6 +630,7 @@ export default async function TenderDetailPage({
           officialStatus={officialStatus}
           recommendations={recommendations}
           outreachTrades={outreachTrades}
+          outreachSends={outreachSends}
         />
       )}
       {tab === "quote-status" && <SentRequestsTab sentRequests={sentRequests} />}

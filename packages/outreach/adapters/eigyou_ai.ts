@@ -278,3 +278,116 @@ export async function sendTargetList(
     dryRun: payload.dry_run === true,
   };
 }
+
+/** 営業AIのリストに入っている会社1社。協力会社として登録するのに要るものだけ。 */
+export type OutreachCompany = {
+  /** 営業AI側の companies.id。返信の記録に使う */
+  companyId: number;
+  name: string;
+  pref: string | null;
+  tel: string | null;
+  email: string | null;
+  contactUrl: string | null;
+  websiteUrl: string | null;
+  /** すでに「返信あり」を記録済みか */
+  replied: boolean;
+};
+
+async function get(connection: SalesAiConnection, path: string): Promise<unknown> {
+  let response: Response;
+  try {
+    response = await fetch(endpoint(connection, path), {
+      headers: { Authorization: `Bearer ${connection.apiKey}` },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch (err) {
+    throw new OutreachError("UNREACHABLE", `営業AIに接続できませんでした（${String(err)}）`);
+  }
+  if (response.status === 401 || response.status === 403) {
+    throw new OutreachError("AUTH_REQUIRED", "APIキーが正しくないか、権限がありません");
+  }
+  if (response.status === 404) {
+    throw new OutreachError("OUT_OF_SCOPE", "営業AI側にこのリストがありません");
+  }
+  if (response.status === 429) {
+    throw new OutreachError("RATE_LIMITED", "営業AI側で回数制限に達しました。時間をおいて試してください");
+  }
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new OutreachError("OUT_OF_SCOPE", `営業AIがエラーを返しました（HTTP ${response.status}）${detail.slice(0, 200)}`);
+  }
+  try {
+    return await response.json();
+  } catch {
+    throw new OutreachError("PARSE_INVALID", "営業AIの応答をJSONとして読めませんでした");
+  }
+}
+
+function text(value: unknown): string | null {
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+}
+
+/**
+ * 実際にフォームへ送れた会社を引く。
+ *
+ * 【なぜ status=replied ではないか】
+ * 営業AIの `replied` は**人が手で立てるフラグ**で、
+ * `POST /api/tenant/lists/<id>/outcome` からしかセットされない
+ * （api.py `h_tenant_list_member_outcome`：「β版。メール自動取得等はしない」）。
+ * 営業AIはメールボックスを見ていないので、待っていても永遠に立たない。
+ *
+ * 返信は打診文に書いた連絡先＝**利用者自身のメールに届く**。
+ * だから「送った会社」を出して、返信をもらった会社を利用者に選んでもらう。
+ *
+ * 参照：eigyouAI api.py `GET /api/tenant/lists/<id>?status=success`
+ */
+export async function listSentCompanies(
+  connection: SalesAiConnection,
+  listId: number,
+): Promise<OutreachCompany[]> {
+  const payload = (await get(connection, `/api/tenant/lists/${listId}?status=success&limit=200`)) as Record<
+    string,
+    unknown
+  >;
+  const members = Array.isArray(payload.members) ? payload.members : [];
+  return members.map((row) => {
+    const record = (row ?? {}) as Record<string, unknown>;
+    return {
+      companyId: typeof record.id === "number" ? record.id : 0,
+      name: text(record.name) ?? "（社名不明）",
+      pref: text(record.pref),
+      tel: text(record.phone),
+      email: text(record.email),
+      contactUrl: text(record.contact_url),
+      websiteUrl: text(record.website_url),
+      replied: record.replied === 1 || record.replied === true,
+    };
+  });
+}
+
+/**
+ * 「返信があった」を営業AI側にも記録する。
+ *
+ * 協力会社として登録したときに呼ぶ。**両方の記録を揃えるため。**
+ * 営業AIのダッシュボードは `target_list_members.replied` を数えていて
+ * （`h_tenant_dashboard`）、こちらだけで登録すると営業AI側は
+ * 「1件も返信が無い」ままになる。
+ *
+ * 参照：eigyouAI api.py `POST /api/tenant/lists/<id>/outcome`
+ */
+export async function markReplied(
+  connection: SalesAiConnection,
+  listId: number,
+  companyId: number,
+  memo: string | null,
+): Promise<void> {
+  const payload = (await post(connection, `/api/tenant/lists/${listId}/outcome`, {
+    company_id: companyId,
+    field: "replied",
+    value: true,
+    ...(memo ? { memo } : {}),
+  })) as Record<string, unknown>;
+  if (typeof payload.error === "string") {
+    throw new OutreachError("OUT_OF_SCOPE", `返信を記録できませんでした：${payload.error}`);
+  }
+}
