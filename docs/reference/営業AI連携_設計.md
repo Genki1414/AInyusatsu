@@ -164,6 +164,10 @@ AI入札部：POST /api/tenant/lists/<id>/outcome で replied も立てる（両
 
 ## 営業AI側に足してほしいもの
 
+> **A と B はパッチを書いてある。** `docs/reference/営業AI連携_依頼.md` と
+> `docs/reference/営業AI連携_パッチ.diff`。営業AIの自己テストが通ること
+> （343/343）まで確認済み。営業AI側のセッションで当てるだけ。
+
 ### A. 業種の語彙を返すAPI
 
 ```
