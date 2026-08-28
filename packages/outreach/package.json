@@ -1,0 +1,19 @@
+{
+  "name": "@ai-nyusatsu-bu/outreach",
+  "version": "0.0.0",
+  "private": true,
+  "description": "営業AI（eigyouAI）のアダプタ。外部呼び出しはこのパッケージ経由のみ。",
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@ai-nyusatsu-bu/domain": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5",
+    "vitest": "^3.2.7"
+  }
+}

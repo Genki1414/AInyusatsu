@@ -20,7 +20,8 @@ import { useActionState, useCallback, useRef, useState } from "react";
 import Link from "next/link";
 import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
 import { CopyButton } from "@/components/CopyButton";
-import { Panel, Pill } from "@/components/ui";
+import { createOutreachList, previewOutreachTargets, type OutreachState } from "./outreach-actions";
+import { btnClass, Panel, Pill } from "@/components/ui";
 import { buildOutreachMessage, buildQuoteRequestEmail, groupLotsByTrade, type QuoteRequestLot } from "@ai-nyusatsu-bu/domain";
 import { AREA_OPTIONS, PREFECTURE_OPTIONS, TRADE_OPTIONS } from "@/lib/catalog";
 import { sendQuoteRequests, type SendQuoteRequestsState } from "./actions";
@@ -76,7 +77,70 @@ function replyByLabel(dueAt: string | null): string | null {
   return `${year}年${Number(month)}月${Number(day)}日`;
 }
 
+// "use server" のファイルからは async 関数しか export できないため、初期値はこちらに置く
+// （apps/web/AGENTS.md「実際に踏んだ落とし穴」）
+const EMPTY_OUTREACH: OutreachState = { error: null, message: null, count: null, sample: [], listId: null };
+
+/**
+ * 営業AIで候補企業を探す。
+ *
+ * ここでやるのは「何社いるか見る」と「送信先リストを作る」まで。
+ * 送信は営業AIの画面から人が行う（CLAUDE.md「やらないこと：問い合わせフォームへの自動送信」）。
+ * 業種が対応表に無い組織ではボタン自体を出さない（呼んでも止まるが、押させない）。
+ */
+function SalesAiBlock({ tenderId, trade }: { tenderId: string; trade: string }) {
+  const [state, formAction, pending] = useActionState(previewOutreachTargets, EMPTY_OUTREACH);
+  const [listState, listAction, listPending] = useActionState(createOutreachList, EMPTY_OUTREACH);
+  const shown = listState.message || listState.error ? listState : state;
+
+  return (
+    <div className="rounded border border-violet-200 bg-violet-50 px-2 py-1.5">
+      <p className="text-xs font-medium text-violet-900">営業AIで候補を探す</p>
+      <div className="mt-1 flex flex-wrap gap-2">
+        <form action={formAction}>
+          <input type="hidden" name="tender_id" value={tenderId} />
+          <input type="hidden" name="trade" value={trade} />
+          <button type="submit" disabled={pending} className={btnClass("default", "sm")}>
+            {pending ? "問い合わせ中..." : "何社いるか見る"}
+          </button>
+        </form>
+        {state.count !== null && state.count > 0 && (
+          <form action={listAction}>
+            <input type="hidden" name="tender_id" value={tenderId} />
+            <input type="hidden" name="trade" value={trade} />
+            <button type="submit" disabled={listPending} className={btnClass("primary", "sm")}>
+              {listPending ? "作成中..." : "送信先リストを作る"}
+            </button>
+          </form>
+        )}
+      </div>
+
+      {shown.error && (
+        <p role="alert" className="mt-1 text-xs leading-relaxed text-rose-700">
+          {shown.error}
+        </p>
+      )}
+      {shown.message && <p className="mt-1 text-xs leading-relaxed text-violet-900">{shown.message}</p>}
+      {state.sample.length > 0 && !listState.message && (
+        <ul className="mt-1 space-y-0.5">
+          {state.sample.map((company, i) => (
+            <li key={`${company.name}-${i}`} className="text-xs text-slate-600">
+              ・{company.name}
+              {company.pref && <span className="ml-1 text-slate-400">{company.pref}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-1 text-xs leading-relaxed text-slate-500">
+        リストを作るだけで、この製品からは送信しません。営業AIの画面で内容を確かめてから送ってください。
+      </p>
+    </div>
+  );
+}
+
 function OutreachBlock(props: {
+  tenderId: string;
+  outreachTrade: boolean;
   trade: string;
   senderOrgName: string;
   senderContactName: string;
@@ -99,6 +163,8 @@ function OutreachBlock(props: {
         </Link>
         から登録するか、下の文面で新しい会社に打診してください。
       </p>
+
+      {props.outreachTrade && <SalesAiBlock tenderId={props.tenderId} trade={props.trade} />}
 
       <div className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5">
         <div className="flex flex-wrap items-center gap-2">
@@ -300,6 +366,7 @@ export function RequestTab({
   suggestedDueAt,
   officialStatus,
   recommendations,
+  outreachTrades,
 }: {
   tenderId: string;
   senderOrgName: string;
@@ -316,6 +383,8 @@ export function RequestTab({
   suggestedDueAt: string | null;
   officialStatus: "未取得" | "申請中" | "取得済";
   recommendations: Record<string, PartnerRecommendationResult | null>;
+  /** 営業AIの対応表にある業種。ここに無い業種では候補を探せない */
+  outreachTrades: string[];
 }) {
   const boundAction = sendQuoteRequests.bind(null, tenderId);
   const [state, formAction, pending] = useActionState(boundAction, initialState);
@@ -443,6 +512,8 @@ export function RequestTab({
               <div className="text-xs font-medium text-slate-700">依頼先</div>
               {candidates.length === 0 ? (
                 <OutreachBlock
+                  tenderId={tenderId}
+                  outreachTrade={outreachTrades.includes(group.trade)}
                   trade={group.trade}
                   senderOrgName={senderOrgName}
                   senderContactName={senderContactName}

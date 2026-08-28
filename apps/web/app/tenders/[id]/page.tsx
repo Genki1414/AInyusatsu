@@ -355,6 +355,21 @@ export default async function TenderDetailPage({
 
   if (!tender) notFound();
 
+  // 営業AIの対応表にある業種だけ、候補を探せる。
+  // 対応の無い業種を投げると営業AI側で条件が捨てられ、その県の全社が対象になってしまう
+  const { data: salesAi, error: salesAiError } = await supabase
+    .from("sales_ai_connections")
+    .select("trade_map")
+    .eq("org_id", orgId)
+    .maybeSingle<{ trade_map: Record<string, string> }>();
+  if (salesAiError) {
+    // 設定が読めなくても案件画面は使える。握りつぶさずログには残す
+    console.error(`[tenders] 営業AIの設定を読めませんでした（org=${orgId}）: ${salesAiError.message}`);
+  }
+  const outreachTrades = Object.entries(salesAi?.trade_map ?? {})
+    .filter(([, code]) => typeof code === "string" && code.trim() !== "")
+    .map(([trade]) => trade);
+
   const officialStatus: OfficialStatus = companyTender?.official_status ?? "未取得";
   // 資料が無い理由（機関が出していない／取得失敗）を分けて判定する（CLAUDE.md 最重要の前提7）
   const documentCheck: DocumentCheck = {
@@ -563,6 +578,7 @@ export default async function TenderDetailPage({
           suggestedDueAt={suggestedDueAt}
           officialStatus={officialStatus}
           recommendations={recommendations}
+          outreachTrades={outreachTrades}
         />
       )}
       {tab === "quote-status" && <SentRequestsTab sentRequests={sentRequests} />}
