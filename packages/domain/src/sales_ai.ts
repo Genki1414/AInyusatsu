@@ -125,3 +125,47 @@ export function prefectureFromPlace(place: string | null): string | null {
   }
   return null;
 }
+
+/**
+ * 本部の一覧に出す、その組織の設定の状態。
+ *
+ * 【なぜ「設定済み」を細かく分けるか】
+ * 契約したのに設定が途中で止まっている組織を、一覧を開いただけで見つけたい。
+ * キーだけ入れて対応表が空、保存したが疎通確認をしていない、確認したが失敗した——
+ * このどれも「案件画面にボタンが出ない」という同じ結果になり、
+ * 顧客からは「使えません」としか言えない。本部側で区別できるようにする。
+ */
+export type SalesAiSetupState =
+  | "未設定"
+  | "対応表が空"
+  | "未確認"
+  | "確認に失敗"
+  | "設定済み";
+
+export type SalesAiSetupInput = {
+  baseUrl: string | null;
+  hasKey: boolean;
+  tradeCount: number;
+  checkedAt: string | null;
+  checkError: string | null;
+};
+
+/** 直すべき順に判定する。手前で止まっているものを先に出す。 */
+export function salesAiSetupState(input: SalesAiSetupInput): SalesAiSetupState {
+  // URLとキーの両方が要る。片方だけでは呼べない
+  if (!input.baseUrl || input.baseUrl.trim() === "" || !input.hasKey) return "未設定";
+  // 対応表が空だと、どの業種でもボタンが出ない
+  if (input.tradeCount === 0) return "対応表が空";
+  // 失敗の記録が残っているなら、確認済みでも直っていない
+  if (input.checkError !== null && input.checkError !== "") return "確認に失敗";
+  if (input.checkedAt === null) return "未確認";
+  return "設定済み";
+}
+
+/** その状態で、利用者が案件画面から候補を探せるか。 */
+export function canOutreach(state: SalesAiSetupState): boolean {
+  // 「未確認」でも呼べる。確認していないだけで設定は揃っている。
+  // 「確認に失敗」も止めない。前回の失敗が一時的なもの（営業AIの再起動など）のことがあり、
+  // 押してみて初めて直っていると分かる。理由は押したときに出る
+  return state === "設定済み" || state === "未確認" || state === "確認に失敗";
+}
