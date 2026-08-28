@@ -19,6 +19,16 @@
 
 const REQUEST_TIMEOUT_MS = 20_000;
 
+/**
+ * 直近この日数以内に送った会社は、今回の送信から外す。
+ *
+ * 営業AIの can_contact() には接触の頻度・回数の制限がもう無い
+ * （eigyouAI HANDOFF.md T44 で撤廃。残っているのは配信停止・テナント除外・重複のみ）。
+ * 企業データは全テナント共有なので、何もしないと同じ会社へ何度も届く。
+ * 相手はこれから協力会社になってもらう会社なので、そこは守る。
+ */
+export const DEFAULT_CANCEL_RECENT_DAYS = 30;
+
 export type OutreachErrorCode =
   | "AUTH_REQUIRED"
   | "RATE_LIMITED"
@@ -64,11 +74,39 @@ export type PreviewResult = {
 
 export type CreatedList = { listId: number; count: number };
 
+/**
+ * 送信の結果。営業AI側の応答をそのまま写す。
+ *
+ * 【なぜ「頼んだ数」と「送れた数」を分けるか】
+ * 営業AIは1回の呼び出しで全件を送るとは限らない。1回あたりの上限
+ * （config.FORM_MAX_PER_RUN）・テナントの月/日/時間の上限・Kill Switch・
+ * 配信停止のどれかに当たると、対象に入っていても送られない。
+ * requested だけを見せると「50社へ送信しました」と出したのに実際は12社、
+ * ということが起きる。
+ *
+ * 参照：eigyouAI target_lists.send_list() の戻り値と senders.send_campaign() の stats。
+ */
 export type SendResult = {
-  /** 送信を頼んだ会社の数 */
+  /** 対象になった会社の数（送信可能な会社を絞り、cancel_recent_days で外したあと） */
   requested: number;
-  /** 営業AI側が返したメッセージ（そのまま画面に出す） */
-  note: string | null;
+  /** 実際にフォームへ送れた数 */
+  sent: number;
+  /** 送信を試みたが失敗した数。営業AI側の送信上限に当たった分もここに入る */
+  failed: number;
+  /** 配信停止・テナント除外などで送らなかった数 */
+  blocked: number;
+  /** 恒久的な失敗として配信停止に入れられた数 */
+  suppressed: number;
+  /** 営業AI側の停止スイッチで止まった数 */
+  stopped: number;
+  /** cancel_recent_days で対象から外れた数 */
+  cancelledRecent: number;
+  /**
+   * 営業AIが「送っていない」と言っている（dry_run のまま返ってきた）。
+   * こちらは常に false を送るので通常あり得ないが、真に受けて
+   * 「送信しました」と出すと取り返しがつかないので、必ず見る
+   */
+  dryRun: boolean;
 };
 
 function endpoint(connection: SalesAiConnection, path: string): string {
@@ -118,6 +156,11 @@ function requireNumber(value: unknown, label: string): number {
   return value;
 }
 
+/** 内訳は無くても送信自体は成立している。ここで止めずに0として扱う。 */
+function optionalNumber(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
 function toFilters(filters: OutreachFilters): Record<string, unknown> {
   return {
     prefs: filters.prefs,
@@ -159,8 +202,8 @@ export async function previewTargets(
 }
 
 /**
- * 送信先リストを作る。**送信はしない。**
- * 作ったあと、営業AIの画面で内容を確かめてから人が送る。
+ * 送信先リストを作る。**この呼び出しでは送信しない。**
+ * 送信は sendTargetList を別に呼ぶ（利用者がボタンを押したとき）。
  * 参照：eigyouAI api.py `POST /api/tenant/lists`
  */
 export async function createTargetList(
@@ -199,6 +242,7 @@ export async function sendTargetList(
   connection: SalesAiConnection,
   listId: number,
   message: { subject: string; body: string },
+  cancelRecentDays: number = DEFAULT_CANCEL_RECENT_DAYS,
 ): Promise<SendResult> {
   if (message.subject.trim() === "" || message.body.trim() === "") {
     // 空の本文を送ると、受け取った会社に何の用件か分からない
@@ -209,22 +253,28 @@ export async function sendTargetList(
     body: message.body,
     // 営業AI側の既定は dry_run:true（送らない）。実際に送るので明示的に false にする
     dry_run: false,
+    // 直近に送った会社を外す。同じ会社へ短期間に何度も送ると、
+    // これから協力会社になってもらう相手との関係が始まらない。
+    // 記録は営業AI側に一本化する（こちらに送信済みの表を持つと必ず食い違う）
+    cancel_recent_days: cancelRecentDays,
   })) as Record<string, unknown>;
 
   if (typeof payload.error === "string") {
     throw new OutreachError("OUT_OF_SCOPE", `送信できませんでした：${payload.error}`);
   }
-  // 件数の呼び名は営業AI側の実装に依存するので、読めたものを使う。読めなければ0にせず止める
-  const requested =
-    typeof payload.sent === "number"
-      ? payload.sent
-      : typeof payload.count === "number"
-        ? payload.count
-        : typeof payload.requested === "number"
-          ? payload.requested
-          : null;
-  if (requested === null) {
-    throw new OutreachError("PARSE_INVALID", "営業AIの応答に送信した件数がありません");
-  }
-  return { requested, note: typeof payload.message === "string" ? payload.message : null };
+
+  // 営業AIは {campaign_id, target_count, dry_run, stats:{sent,failed,blocked,suppressed,stopped},
+  // cancelled_recent} を返す（target_lists.send_list()）。
+  // 上位に sent は無い。ここを読み違えると、送ったのに「送れませんでした」と出る
+  const stats = (payload.stats ?? {}) as Record<string, unknown>;
+  return {
+    requested: requireNumber(payload.target_count, "対象の件数（target_count）"),
+    sent: requireNumber(stats.sent, "送信できた件数（stats.sent）"),
+    failed: optionalNumber(stats.failed),
+    blocked: optionalNumber(stats.blocked),
+    suppressed: optionalNumber(stats.suppressed),
+    stopped: optionalNumber(stats.stopped),
+    cancelledRecent: optionalNumber(payload.cancelled_recent),
+    dryRun: payload.dry_run === true,
+  };
 }

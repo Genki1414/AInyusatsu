@@ -169,3 +169,81 @@ export function canOutreach(state: SalesAiSetupState): boolean {
   // 押してみて初めて直っていると分かる。理由は押したときに出る
   return state === "設定済み" || state === "未確認" || state === "確認に失敗";
 }
+
+/**
+ * 送信の結果を、利用者に見せる1文にする。
+ *
+ * 【なぜ「頼んだ数」をそのまま出さないか】
+ * 営業AIは1回の呼び出しで全件を送るとは限らない。1回あたりの上限
+ * （eigyouAI config.FORM_MAX_PER_RUN＝50）・月/日/時間の上限・停止スイッチ・
+ * 配信停止のどれかに当たると、対象に入っていても送られない。
+ * 「50社へ送信しました」と出したのに実際は12社、では嘘になる。
+ *
+ * 送れなかった分があることは必ず伝える。**送信は取り消せないので、
+ * 利用者が「全部送った」と思い込んだまま次の案件へ進むのがいちばん困る。**
+ */
+export type OutreachSendCounts = {
+  requested: number;
+  sent: number;
+  failed: number;
+  blocked: number;
+  suppressed: number;
+  stopped: number;
+  cancelledRecent: number;
+  dryRun: boolean;
+};
+
+export type OutreachSendSummary = {
+  /** 画面に出す文 */
+  message: string;
+  /** 1社も送れていない。この場合は成功として見せない */
+  nothingSent: boolean;
+  /** 送り残しがある。もう一度押せば続きから送れる */
+  hasRemaining: boolean;
+};
+
+export function summarizeOutreachSend(counts: OutreachSendCounts): OutreachSendSummary {
+  // 営業AIが「送っていない」と言っているのに送信しましたとは書けない
+  if (counts.dryRun) {
+    return {
+      message:
+        "営業AIが送信しない設定（ドライラン）で処理しました。1社にも届いていません。本部にご連絡ください。",
+      nothingSent: true,
+      hasRemaining: true,
+    };
+  }
+
+  const parts: string[] = [];
+  if (counts.stopped > 0) parts.push(`営業AI側で送信が停止されているため${counts.stopped}社`);
+  if (counts.blocked > 0) parts.push(`配信停止・除外設定により${counts.blocked}社`);
+  if (counts.failed > 0) parts.push(`送信できず${counts.failed}社（送信上限に達した分を含みます）`);
+  const detail = parts.length > 0 ? `送れなかった内訳：${parts.join("／")}。` : "";
+  const cancelled =
+    counts.cancelledRecent > 0
+      ? `直近に送ったばかりの${counts.cancelledRecent}社は今回の対象から外れています。`
+      : "";
+
+  if (counts.sent === 0) {
+    return {
+      message: `1社にも送信できませんでした。${detail}${cancelled}`,
+      nothingSent: true,
+      hasRemaining: counts.requested > 0,
+    };
+  }
+
+  const remaining = counts.requested - counts.sent;
+  if (remaining > 0) {
+    return {
+      message:
+        `${counts.sent}社へ送信しました。残り${remaining}社はまだ送れていません。${detail}` +
+        `${cancelled}もう一度「送信する」を押すと、送れていない会社にだけ送ります。`,
+      nothingSent: false,
+      hasRemaining: true,
+    };
+  }
+  return {
+    message: `${counts.sent}社へ送信しました。${cancelled}`,
+    nothingSent: false,
+    hasRemaining: false,
+  };
+}

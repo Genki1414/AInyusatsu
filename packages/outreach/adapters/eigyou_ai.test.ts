@@ -1,5 +1,11 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { createTargetList, OutreachError, previewTargets, sendTargetList } from "./eigyou_ai";
+import {
+  createTargetList,
+  DEFAULT_CANCEL_RECENT_DAYS,
+  OutreachError,
+  previewTargets,
+  sendTargetList,
+} from "./eigyou_ai";
 
 const connection = { baseUrl: "https://sales.example.com/", apiKey: "key-123" };
 const filters = { prefs: ["宮城県"], trades: ["denki"] };
@@ -89,13 +95,58 @@ describe("createTargetList", () => {
 });
 
 describe("sendTargetList", () => {
-  it("dry_run を false にして送信を頼む", async () => {
-    const spy = mockFetch(200, { sent: 12 });
+  // 営業AIが実際に返す形（eigyouAI target_lists.send_list()）。
+  // 以前ここを {sent: 12} という架空の形でモックしていたため、
+  // 「送ったのに送れませんでした」と出る不具合をテストが見逃していた。
+  const realResponse = {
+    campaign_id: 31,
+    target_count: 12,
+    dry_run: false,
+    stats: { sent: 12, failed: 0, blocked: 0, suppressed: 0, stopped: 0 },
+    cancelled_recent: 0,
+  };
+
+  it("dry_run を false にし、直近に送った会社を外して送信を頼む", async () => {
+    const spy = mockFetch(200, realResponse);
     const result = await sendTargetList(connection, 7, { subject: "件名", body: "本文" });
-    expect(result).toEqual({ requested: 12, note: null });
+    expect(result).toEqual({
+      requested: 12,
+      sent: 12,
+      failed: 0,
+      blocked: 0,
+      suppressed: 0,
+      stopped: 0,
+      cancelledRecent: 0,
+      dryRun: false,
+    });
     const [url, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("https://sales.example.com/api/tenant/lists/7/send");
-    expect(JSON.parse(init.body as string)).toMatchObject({ dry_run: false, subject: "件名", body: "本文" });
+    expect(JSON.parse(init.body as string)).toMatchObject({
+      dry_run: false,
+      subject: "件名",
+      body: "本文",
+      cancel_recent_days: DEFAULT_CANCEL_RECENT_DAYS,
+    });
+  });
+
+  it("stats の内訳をそのまま返す（送り残しを画面で出せるように）", async () => {
+    mockFetch(200, {
+      ...realResponse,
+      target_count: 120,
+      stats: { sent: 50, failed: 70, blocked: 0, suppressed: 0, stopped: 0 },
+      cancelled_recent: 4,
+    });
+    const result = await sendTargetList(connection, 7, { subject: "件名", body: "本文" });
+    expect(result.requested).toBe(120);
+    expect(result.sent).toBe(50);
+    expect(result.failed).toBe(70);
+    expect(result.cancelledRecent).toBe(4);
+  });
+
+  it("ドライランで返ってきたらそのまま伝える（成功と混同しない）", async () => {
+    mockFetch(200, { ...realResponse, dry_run: true });
+    const result = await sendTargetList(connection, 7, { subject: "件名", body: "本文" });
+    expect(result.dryRun).toBe(true);
   });
 
   it("件名か本文が空なら呼びに行かない", async () => {
@@ -105,8 +156,15 @@ describe("sendTargetList", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it("件数が返らなければ0にせず止める", async () => {
-    mockFetch(200, { ok: true });
+  it("stats.sent が読めなければ0にせず止める", async () => {
+    mockFetch(200, { campaign_id: 1, target_count: 3, dry_run: false });
+    await expect(sendTargetList(connection, 7, { subject: "件名", body: "本文" })).rejects.toMatchObject({
+      code: "PARSE_INVALID",
+    });
+  });
+
+  it("target_count が読めなければ止める", async () => {
+    mockFetch(200, { campaign_id: 1, dry_run: false, stats: { sent: 3 } });
     await expect(sendTargetList(connection, 7, { subject: "件名", body: "本文" })).rejects.toMatchObject({
       code: "PARSE_INVALID",
     });

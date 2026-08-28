@@ -16,7 +16,12 @@
 // 変換できない業種は、ここで止める。
 
 import { createTargetList, OutreachError, previewTargets, sendTargetList } from "@ai-nyusatsu-bu/outreach";
-import { buildOutreachMessage, prefectureFromPlace, toSalesAiTrade } from "@ai-nyusatsu-bu/domain";
+import {
+  buildOutreachMessage,
+  prefectureFromPlace,
+  summarizeOutreachSend,
+  toSalesAiTrade,
+} from "@ai-nyusatsu-bu/domain";
 import { requireOrgContext } from "@/lib/auth";
 import { loadSalesAiConnection } from "@/lib/sales-ai";
 
@@ -29,6 +34,8 @@ export type OutreachState = {
   sample: { name: string; pref: string | null }[];
   /** 作ったリストの番号。作っていなければ null */
   listId: number | null;
+  /** まだ送れていない会社が残っている。もう一度押せば続きから送れる */
+  hasRemaining: boolean;
 };
 
 function text(formData: FormData, key: string): string {
@@ -37,7 +44,7 @@ function text(formData: FormData, key: string): string {
 }
 
 function fail(error: string): OutreachState {
-  return { error, message: null, count: null, sample: [], listId: null };
+  return { error, message: null, count: null, sample: [], listId: null, hasRemaining: false };
 }
 
 type Resolved = {
@@ -142,12 +149,13 @@ export async function previewOutreachTargets(_prev: OutreachState, formData: For
       error: null,
       message:
         preview.count === 0
-          ? `${where}に、条件に合う会社は見つかりませんでした。営業AI側の登録企業を増やすか、業種の対応表を見直してください。`
+          ? `${where}に、条件に合う会社は見つかりませんでした。この業種の候補が営業AIにまだ登録されていない可能性があります。本部までご連絡ください。`
           : `${where}で${preview.count}社が見つかりました。` +
             (preview.capped ? `（営業AI側の上限で${preview.countBeforeCap}社から絞られています）` : ""),
       count: preview.count,
       sample: preview.sample,
       listId: null,
+      hasRemaining: false,
     };
   } catch (err) {
     return fail(`営業AIに問い合わせできませんでした（${describe(err)}）`);
@@ -184,7 +192,7 @@ export async function sendOutreach(_prev: OutreachState, formData: FormData): Pr
   if (created.count === 0) {
     return {
       ...fail(
-        "条件に合う会社が0社でした。営業AI側の登録企業を増やすか、業種の対応表を見直してください。",
+        "条件に合う会社が0社でした。この業種の候補が営業AIにまだ登録されていない可能性があります。本部までご連絡ください。",
       ),
       listId: created.listId,
     };
@@ -193,15 +201,20 @@ export async function sendOutreach(_prev: OutreachState, formData: FormData): Pr
   const message = outreachMessage(resolved);
   try {
     const sent = await sendTargetList(resolved.connection, created.listId, message);
+    // 頼んだ数をそのまま出さない。営業AIは1回の呼び出しで全件を送るとは限らない
+    // （1回50社の上限・月/日の上限・停止スイッチ・配信停止）。
+    // 送信は取り消せないので、送れなかった分は必ず伝える
+    const summary = summarizeOutreachSend(sent);
+    if (summary.nothingSent) {
+      return { ...fail(summary.message), listId: created.listId, hasRemaining: summary.hasRemaining };
+    }
     return {
       error: null,
-      message:
-        `${sent.requested}社へ送信しました（リスト「${name}」）。` +
-        "結果は営業AIの画面で確認できます。" +
-        (sent.note ? `／${sent.note}` : ""),
-      count: sent.requested,
+      message: `${summary.message}（リスト「${name}」）`,
+      count: sent.sent,
       sample: [],
       listId: created.listId,
+      hasRemaining: summary.hasRemaining,
     };
   } catch (err) {
     // リストは作れたが送れなかった。作り直させないよう、リストの番号を残す
