@@ -193,11 +193,12 @@ export async function sendOutreach(_prev: OutreachState, formData: FormData): Pr
   const message = outreachMessage(resolved);
   try {
     const sent = await sendTargetList(resolved.connection, created.listId, message);
+    const skipped = sent.requested - sent.stats.sent;
     return {
       error: null,
       message:
-        `${sent.requested}社へ送信しました（リスト「${name}」）。` +
-        "結果は営業AIの画面で確認できます。" +
+        `${sent.requested}社へ送信を頼みました（リスト「${name}」。成功${sent.stats.sent}社` +
+        `${skipped > 0 ? `／見送り${skipped}社` : ""}）。結果は営業AIの画面で確認できます。` +
         (sent.note ? `／${sent.note}` : ""),
       count: sent.requested,
       sample: [],

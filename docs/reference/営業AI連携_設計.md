@@ -101,8 +101,47 @@ AI入札部：partners に追加 → 次の案件から見積依頼を出せる
 | 停止されているか | `GET /api/tenant/kill-switch` | 実装済み・**未使用** |
 | テナントの作成（本部） | `POST /api/ops/tenants` | 実装済み |
 | 送信の停止（本部） | `POST /api/ops/kill-switch` | 実装済み |
+| 残り送信可能数（T55） | `GET /api/tenant/quota` | 実装済み・アダプタ済み（`getQuotaStatus`）・**呼び出し元（画面）未実装** |
+| クォータ追加購入（T55、本部専用） | `POST /api/ops/tenants/<id>/quota-purchase` | 実装済み・アダプタ済み（`purchaseQuota`）・**どこからも呼んでいない**（後述） |
 
 **AI入札部が使っているのは上の3つだけ。** 残りは繋げば使える。
+
+### 直っていたバグ：送信できていなかった（`sendTargetList`）
+
+`packages/outreach/adapters/eigyou_ai.ts` の `sendTargetList()` が、営業AI側の
+`POST /api/tenant/lists/<id>/send` の実際の応答（`target_lists.send_list()`が返す
+`{campaign_id, target_count, dry_run, stats, cancelled_recent}`）ではなく、
+存在しないトップレベルの `sent` / `count` / `requested` を読もうとしていた。
+**この実装のままだと、実際の送信は毎回 `PARSE_INVALID` で失敗していた**
+（プレビューとリスト作成は通るので、途中までは動いているように見える）。
+`target_count` と `stats` を読むよう修正し、テストに実際の応答形を使った。
+
+### 追加：クォータ追加購入（T55。ユーザー決定 2026-08-28）
+
+基本プラン（500通/月）を使い切ったとき、AI入札部側からStripeで500通/¥5,000単位の
+追加購入をできるようにする（**決済まわりは後回し**というユーザー決定。まずは
+営業AI側の受け口とAI入札部側のアダプタだけ用意した）。
+
+```
+利用者：AI入札部の画面で追加購入を申し込む（未実装）
+  ↓
+AI入札部：Stripeで一回払いのCheckoutを作る（未実装。packages/billing/adapters/stripe.ts
+          は月額サブスクのみで、一回払いの型は無い）
+  ↓
+Stripe：決済成功 → Webhook（未実装）
+  ↓
+AI入札部：POST /api/ops/tenants/<id>/quota-purchase を叩く
+          （`purchaseQuota()`。external_refにStripeの決済IDを入れて冪等にする）
+  ↓
+営業AI：quota_purchasesに記録。以後30日間、実効クォータに加算される
+```
+
+**`GET /api/tenant/quota` は「3. 今月の残り通数の表示」（下の表）をそのまま満たす。**
+`GET /api/tenant/dashboard`（カレンダー月・成功数のみ）ではなく、
+`senders.py._check_quota()` の判定式（直近30日ローリング・全試行数）と
+完全に一致するこちらを使うほうがよい（表示は余裕があるのに送信はブロックされる、
+という食い違いを避けられる）。アダプタ（`getQuotaStatus`）は用意したが、
+画面（案件ページや自社情報ページ）に出す実装はまだ無い。
 
 ## 営業AI側に足してほしいもの
 
@@ -150,9 +189,10 @@ AI入札部が必要とするのは **電気・設備保守・廃棄物処理・
 |---|---|---|
 | 1 | **本部側の接続設定画面**（`/admin/accounts` からURL・APIキー・対応表） | 高。無いと本部が顧客にキーを教えることになる |
 | 2 | **結果の取り込み**（返信のあった会社を協力会社として登録） | 高。ここが繋がらないと開拓が価値にならない |
-| 3 | 今月の残り通数の表示（`GET /api/tenant/dashboard`） | 中。500通に近づいたことを知らせる |
+| 3 | 今月の残り通数の表示（`GET /api/tenant/quota`。T55でアダプタ`getQuotaStatus`済み） | 中。500通に近づいたことを知らせる。**画面はまだ無い** |
 | 4 | 停止されているかの確認（`GET /api/tenant/kill-switch`） | 中。送信ボタンを押す前に止まっていると分かる |
 | 5 | 対応表の自動取得（上のAができたら） | 低 |
+| 6 | クォータ追加購入の申し込み画面＋Stripe一回払いCheckout＋Webhook（T55の`purchaseQuota`を呼ぶ） | 中。**決済は後回しにするユーザー決定**（2026-08-28）。アダプタは用意済み |
 
 ## 決めていない論点
 
@@ -174,6 +214,21 @@ AI入札部の `company_profiles`（自社情報）と同じ情報。
 
 顧客が自社情報を変えても営業AI側は変わらない。
 **どちらを正とするか、変えたときに揃えるかを決めていない。**
+
+### クォータ追加購入の運用キー・テナントIDをどこに持つか（T55、未決定）
+
+`POST /api/ops/tenants/<id>/quota-purchase` は、テナントごとの `api_key` ではなく
+**本部だけが持つ運用キー**（営業AI側の`SALES_ENGINE_API_KEY`）と、
+**営業AI側の内部tenant.id（数値）** で呼ぶ。どちらも `sales_ai_connections`
+（組織ごと・顧客の`api_key`だけを持つ）には無い。
+
+- 運用キーは顧客に見せてはいけないので、顧客側の設定画面には置けない
+  （そもそも本部側の接続設定画面 `/admin/accounts` 自体が未実装＝上の表の1）
+- テナントIDは `POST /api/ops/tenants` の応答に含まれる（テナント作成時に本部が受け取る）ので、
+  本部側の接続設定画面ができたときに一緒に保存するのが自然
+
+**上の1（本部側の接続設定画面）ができるまでは、`purchaseQuota()` は実質呼べない。**
+Stripe連携（上の表の6）に着手するときに合わせて決める。
 
 ### 500通という数字の根拠
 

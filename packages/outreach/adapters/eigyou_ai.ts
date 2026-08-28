@@ -16,6 +16,15 @@
 // 営業AIの filters は、知らない業種の値を黙って捨てる。捨てられると業種の条件が
 // 消えて「その都道府県の全社」が対象になる。面識の無い会社への一斉送信になるので、
 // 業種が対応表に無いときは、そもそもここを呼ばないこと（呼び出し側で止める）。
+//
+// 【クォータ追加購入（T55。決済まわりはまだ無い）】
+// 契約者が基本プラン(既定500通/月)を使い切ったとき、500通/¥5,000単位で枠を
+// 追加できるAPIが営業AI側に増えた（`docs/reference/営業AI連携_設計.md`）。
+// - GET  /api/tenant/quota                      … 残り通数の表示（テナントのapi_keyで呼べる）
+// - POST /api/ops/tenants/<id>/quota-purchase    … 追加購入の記録（本部専用の運用キーで呼ぶ。
+//   テナントのapi_keyとは別物）。Stripeの決済成功後に叩く想定だが、Checkout／Webhookの実装は
+//   まだ無い（ユーザー決定：決済は後回し）。呼び出し側（将来のWebhookハンドラ）を先に用意する。
+// このアダプタはpurchaseQuota()を用意するだけで、どこからも呼んでいない。
 
 const REQUEST_TIMEOUT_MS = 20_000;
 
@@ -42,6 +51,16 @@ export type SalesAiConnection = {
   apiKey: string;
 };
 
+/**
+ * 本部専用の運用API（/api/ops/*）を呼ぶための接続情報。
+ * テナントごとの SalesAiConnection.apiKey とは別物（営業AI側の SALES_ENGINE_API_KEY 1本を
+ * 全テナント共通で使う。テナントの識別はURLのtenantIdで行う）。
+ */
+export type SalesAiOpsConnection = {
+  baseUrl: string;
+  opsApiKey: string;
+};
+
 /** 営業AIへ渡す絞り込み条件。営業AIが解釈できるキーだけを持つ。 */
 export type OutreachFilters = {
   /** 都道府県。営業AI側は47都道府県の名称で固定 */
@@ -65,26 +84,55 @@ export type PreviewResult = {
 export type CreatedList = { listId: number; count: number };
 
 export type SendResult = {
-  /** 送信を頼んだ会社の数 */
+  /** 送信を頼んだ会社の数（リストに入っていた件数。営業AI側の target_count） */
   requested: number;
+  /** 実際の内訳（成功・失敗・ブロック等）。営業AI側の stats をそのまま渡す */
+  stats: { sent: number; failed: number; blocked: number; suppressed: number; stopped: number };
   /** 営業AI側が返したメッセージ（そのまま画面に出す） */
   note: string | null;
 };
 
-function endpoint(connection: SalesAiConnection, path: string): string {
+/** 残り送信可能数（T55）。senders.py の判定と同じ計算式（直近30日ローリング）。 */
+export type QuotaStatus = {
+  /** テナントの基本クォータ（未設定なら営業AI側の既定値） */
+  baseMonthlyQuota: number;
+  /** 直近30日分の追加購入合計（T55のquota-purchase） */
+  addonQuota30d: number;
+  /** base + addon。実際にブロックされるかどうかはこの値で決まる */
+  effectiveQuota30d: number;
+  /** 直近30日の送信試行数（成否を問わない） */
+  used30d: number;
+  /** 直近30日の残り送信可能数 */
+  remaining30d: number;
+  planName: string | null;
+};
+
+/** クォータ追加購入（T55）の結果。 */
+export type QuotaPurchaseResult = {
+  /** 新規に記録されたか。falseならexternal_refが既存と重複していて二重計上しなかった */
+  created: boolean;
+  quota: QuotaStatus;
+};
+
+function endpoint(connection: { baseUrl: string }, path: string): string {
   return `${connection.baseUrl.replace(/\/+$/, "")}${path}`;
 }
 
-async function post(connection: SalesAiConnection, path: string, body: unknown): Promise<unknown> {
+async function request(
+  connection: { baseUrl: string },
+  path: string,
+  apiKey: string,
+  init: { method: "GET" | "POST"; body?: unknown },
+): Promise<unknown> {
   let response: Response;
   try {
     response = await fetch(endpoint(connection, path), {
-      method: "POST",
+      method: init.method,
       headers: {
-        Authorization: `Bearer ${connection.apiKey}`,
-        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+        ...(init.body !== undefined ? { "Content-Type": "application/json" } : {}),
       },
-      body: JSON.stringify(body),
+      ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (err) {
@@ -108,6 +156,18 @@ async function post(connection: SalesAiConnection, path: string, body: unknown):
   } catch {
     throw new OutreachError("PARSE_INVALID", "営業AIの応答をJSONとして読めませんでした");
   }
+}
+
+async function post(connection: SalesAiConnection, path: string, body: unknown): Promise<unknown> {
+  return request(connection, path, connection.apiKey, { method: "POST", body });
+}
+
+async function get(connection: SalesAiConnection, path: string): Promise<unknown> {
+  return request(connection, path, connection.apiKey, { method: "GET" });
+}
+
+async function postOps(connection: SalesAiOpsConnection, path: string, body: unknown): Promise<unknown> {
+  return request(connection, path, connection.opsApiKey, { method: "POST", body });
 }
 
 /** 数値として読めなければ0にせず、読めなかったことを分かるようにする。 */
@@ -194,6 +254,12 @@ export async function createTargetList(
  * 片方だけ直したときに食い違う。
  *
  * 参照：eigyouAI api.py `POST /api/tenant/lists/<id>/send`
+ *
+ * 【応答の形】
+ * 営業AI側 target_lists.send_list() の実際の戻り値は
+ * `{campaign_id, target_count, dry_run, stats: {sent,failed,blocked,suppressed,stopped}, cancelled_recent}`。
+ * トップレベルに sent / count / requested は無い（以前はここを読んでおり、実送信のたびに
+ * PARSE_INVALID になっていた。target_count と stats を読むよう修正）。
  */
 export async function sendTargetList(
   connection: SalesAiConnection,
@@ -214,17 +280,86 @@ export async function sendTargetList(
   if (typeof payload.error === "string") {
     throw new OutreachError("OUT_OF_SCOPE", `送信できませんでした：${payload.error}`);
   }
-  // 件数の呼び名は営業AI側の実装に依存するので、読めたものを使う。読めなければ0にせず止める
-  const requested =
-    typeof payload.sent === "number"
-      ? payload.sent
-      : typeof payload.count === "number"
-        ? payload.count
-        : typeof payload.requested === "number"
-          ? payload.requested
-          : null;
-  if (requested === null) {
-    throw new OutreachError("PARSE_INVALID", "営業AIの応答に送信した件数がありません");
+  const requested = requireNumber(payload.target_count, "送信対象件数（target_count）");
+  const statsRaw = payload.stats as Record<string, unknown> | undefined;
+  if (!statsRaw) {
+    throw new OutreachError("PARSE_INVALID", "営業AIの応答に内訳（stats）がありません");
   }
-  return { requested, note: typeof payload.message === "string" ? payload.message : null };
+  const stats = {
+    sent: requireNumber(statsRaw.sent, "stats.sent"),
+    failed: requireNumber(statsRaw.failed, "stats.failed"),
+    blocked: requireNumber(statsRaw.blocked, "stats.blocked"),
+    suppressed: requireNumber(statsRaw.suppressed, "stats.suppressed"),
+    stopped: requireNumber(statsRaw.stopped, "stats.stopped"),
+  };
+  return { requested, stats, note: typeof payload.message === "string" ? payload.message : null };
+}
+
+/**
+ * 残り送信可能数を見る（T55。「今月の残り通数の表示」）。
+ * senders.py._check_quota() が実際にブロック判定へ使うのと同じ計算式
+ * （直近30日ローリングウィンドウ）なので、ここで見える remaining30d が
+ * そのまま「あと何通送れるか」になる。
+ *
+ * 参照：eigyouAI api.py `GET /api/tenant/quota`
+ */
+export async function getQuotaStatus(connection: SalesAiConnection): Promise<QuotaStatus> {
+  const payload = (await get(connection, "/api/tenant/quota")) as Record<string, unknown>;
+  return toQuotaStatus(payload);
+}
+
+/**
+ * クォータを500通/¥5,000単位で追加購入する（T55）。
+ *
+ * 【いつ呼ぶか】
+ * Stripeで一回払いの決済が成功したあと、その1回だけ。まだCheckout／Webhookの
+ * 実装は無い（決済は後回しにするユーザー決定）。将来のWebhookハンドラから
+ * このまま呼べるように、アダプタとしては先に用意してある。
+ *
+ * 【本部専用の運用キーを使う】
+ * 送信系（preview/lists/send）と違い、テナントごとの api_key ではなく
+ * 本部だけが持つ運用キー（SalesAiOpsConnection.opsApiKey）で呼ぶ。
+ * どのテナントかはURLの tenantId（営業AI側の内部tenant.id、数値）で指定する。
+ * この数値をAI入札部側のどこに保存するかは、まだ決めていない
+ * （本部側の接続設定画面 `/admin/accounts` が未実装のため）。
+ *
+ * 【二重計上しない】
+ * externalRef に Stripe の決済ID等を入れると、Webhookが再送されても
+ * 営業AI側で二重に計上しない（db.add_quota_purchase()の冪等性）。
+ *
+ * 参照：eigyouAI api.py `POST /api/ops/tenants/<id>/quota-purchase`
+ */
+export async function purchaseQuota(
+  connection: SalesAiOpsConnection,
+  tenantId: number,
+  input: { qty: number; unitPriceYen?: number; externalRef?: string },
+): Promise<QuotaPurchaseResult> {
+  if (!Number.isInteger(input.qty) || input.qty <= 0) {
+    throw new OutreachError("OUT_OF_SCOPE", "qty（追加する送信可能件数）は正の整数で指定してください");
+  }
+  const payload = (await postOps(connection, `/api/ops/tenants/${tenantId}/quota-purchase`, {
+    qty: input.qty,
+    ...(input.unitPriceYen !== undefined ? { unit_price_yen: input.unitPriceYen } : {}),
+    ...(input.externalRef ? { external_ref: input.externalRef } : {}),
+  })) as Record<string, unknown>;
+
+  if (typeof payload.error === "string") {
+    throw new OutreachError("OUT_OF_SCOPE", `クォータを追加できませんでした：${payload.error}`);
+  }
+  return { created: payload.created === true, quota: toQuotaStatus(payload) };
+}
+
+function toQuotaStatus(payload: Record<string, unknown>): QuotaStatus {
+  const q = payload.quota as Record<string, unknown> | undefined;
+  if (!q) {
+    throw new OutreachError("PARSE_INVALID", "営業AIの応答にquotaがありません");
+  }
+  return {
+    baseMonthlyQuota: requireNumber(q.base_monthly_send_quota, "base_monthly_send_quota"),
+    addonQuota30d: requireNumber(q.addon_quota_30d, "addon_quota_30d"),
+    effectiveQuota30d: requireNumber(q.effective_quota_30d, "effective_quota_30d"),
+    used30d: requireNumber(q.used_30d, "used_30d"),
+    remaining30d: requireNumber(q.remaining_30d, "remaining_30d"),
+    planName: typeof q.plan_name === "string" ? q.plan_name : null,
+  };
 }

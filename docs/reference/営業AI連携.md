@@ -104,7 +104,12 @@ AI入札部が必要とする業種（電気・清掃・警備・情報処理・
 | 件数の確認 | `POST /api/tenant/lists/preview` |
 | リストの作成 | `POST /api/tenant/lists` |
 | 送信 | `POST /api/tenant/lists/<id>/send`（`dry_run: false`） |
+| 残り送信可能数（T55。アダプタのみ、画面は未実装） | `GET /api/tenant/quota` |
 
 認証は `Authorization: Bearer <tenant.api_key>`。
 
 営業AI側の既定は `dry_run: true`（送らない）なので、明示的に `false` を送っている。
+
+クォータ追加購入（500通/¥5,000単位。T55）は `POST /api/ops/tenants/<id>/quota-purchase`。
+こちらはテナントの`api_key`ではなく本部専用の運用キーで呼ぶ別枠のAPIで、
+決済（Stripe）はまだ繋がっていない。詳細は`docs/reference/営業AI連携_設計.md`。
