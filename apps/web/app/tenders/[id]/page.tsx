@@ -127,6 +127,29 @@ const SIMILAR_AWARDS_LIMIT = 20;
  * 近さの判定は Postgres の trigram 検索（find_similar_awards）に任せる。
  * 年度の表記は毎年変わるので、外してから渡す。
  */
+/**
+ * 営業AIの対応表にある業種。見積依頼タブでしか使わないので、そのタブでだけ引く。
+ * 対応の無い業種を営業AIへ投げると条件が捨てられ、その県の全社が対象になってしまう。
+ */
+async function loadOutreachTrades(
+  supabase: Awaited<ReturnType<typeof requireOrgContext>>["supabase"],
+  orgId: string,
+): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("sales_ai_connections")
+    .select("trade_map")
+    .eq("org_id", orgId)
+    .maybeSingle<{ trade_map: Record<string, string> }>();
+  if (error) {
+    // 設定が読めなくても案件画面は使える。握りつぶさずログには残す
+    console.error(`[tenders] 営業AIの設定を読めませんでした（org=${orgId}）: ${error.message}`);
+    return [];
+  }
+  return Object.entries(data?.trade_map ?? {})
+    .filter(([, code]) => typeof code === "string" && code.trim() !== "")
+    .map(([trade]) => trade);
+}
+
 async function loadPastAwards(
   supabase: Awaited<ReturnType<typeof requireOrgContext>>["supabase"],
   tenderName: string,
@@ -355,21 +378,6 @@ export default async function TenderDetailPage({
 
   if (!tender) notFound();
 
-  // 営業AIの対応表にある業種だけ、候補を探せる。
-  // 対応の無い業種を投げると営業AI側で条件が捨てられ、その県の全社が対象になってしまう
-  const { data: salesAi, error: salesAiError } = await supabase
-    .from("sales_ai_connections")
-    .select("trade_map")
-    .eq("org_id", orgId)
-    .maybeSingle<{ trade_map: Record<string, string> }>();
-  if (salesAiError) {
-    // 設定が読めなくても案件画面は使える。握りつぶさずログには残す
-    console.error(`[tenders] 営業AIの設定を読めませんでした（org=${orgId}）: ${salesAiError.message}`);
-  }
-  const outreachTrades = Object.entries(salesAi?.trade_map ?? {})
-    .filter(([, code]) => typeof code === "string" && code.trim() !== "")
-    .map(([trade]) => trade);
-
   const officialStatus: OfficialStatus = companyTender?.official_status ?? "未取得";
   // 資料が無い理由（機関が出していない／取得失敗）を分けて判定する（CLAUDE.md 最重要の前提7）
   const documentCheck: DocumentCheck = {
@@ -390,10 +398,20 @@ export default async function TenderDetailPage({
   // 見積依頼先のAIおすすめ選定（ユーザーからの要望：タブを開いたら自動で推薦する）。
   // 正式取得が済んでいない・数量表が無い場合は送信自体ができないため計算しない。
   const tradeGroups = groupLotsByTrade(lots ?? []);
-  const recommendations: Record<string, PartnerRecommendationResult | null> =
+  //
+  // 見積依頼タブで要るものは同時に引く。順番に待つ理由が無い
+  const [recommendations, sender, outreachTrades] = await Promise.all([
     tab === "request" && officialStatus === "取得済" && tradeGroups.length > 0
-      ? await getPartnerRecommendations(supabase, orgId, id, tender.item, tender.place, tradeGroups, partners ?? [])
-      : {};
+      ? getPartnerRecommendations(supabase, orgId, id, tender.item, tender.place, tradeGroups, partners ?? [])
+      : Promise.resolve({} as Record<string, PartnerRecommendationResult | null>),
+    // 依頼文のプレビューに出す連絡先は、実際に送るときと同じ「返信先」にする
+    // （送信時は actions.ts が同じ値を使う）。ここだけ別の値だと、画面で見た文面と
+    // 届く文面が食い違う。
+    tab === "request" ? loadSenderIdentity(supabase, orgId, orgName, userEmail) : Promise.resolve(null),
+    // 営業AIの対応表にある業種だけ、候補を探せる。対応の無い業種を投げると営業AI側で
+    // 条件が捨てられ、その県の全社が対象になってしまう
+    tab === "request" ? loadOutreachTrades(supabase, orgId) : Promise.resolve([] as string[]),
+  ]);
 
   // 送信済みの見積依頼と、協力会社からの回答状況（見積状況タブに一覧表示する）。
   const { data: sentRequestRows } =
@@ -424,14 +442,21 @@ export default async function TenderDetailPage({
   }));
 
   // 原価集計（タスク4-5）。見積・原価タブでだけ引く。
-  const { data: costRows } =
+  // 落札率と料率は見積の内容に関係しないので、同時に引く。
+  const [{ data: costRows }, marketRate, { data: org }] = await Promise.all([
     tab === "cost"
-      ? await supabase
+      ? supabase
           .from("quotes")
           .select("id, amount, adopted, declined, replied_at, memo, partners(name), quote_requests!inner(trade, tender_id)")
           .eq("quote_requests.tender_id", id)
           .returns<CostQuoteRow[]>()
-      : { data: null };
+      : Promise.resolve({ data: null }),
+    // 同種案件の落札率（勝てそうかの目安）。営業品目・機関区分・金額帯がそろわないと引けない。
+    tab === "cost" ? loadMarketRate(supabase, tender.item, agencyName(tender.agencies), tender.budget) : Promise.resolve(null),
+    tab === "cost"
+      ? supabase.from("organizations").select("overhead_rate, profit_rate").eq("id", orgId).maybeSingle<OrgRates>()
+      : Promise.resolve({ data: null }),
+  ]);
   const costQuotes: CostTabQuote[] = (costRows ?? []).map((q) => ({
     id: q.id,
     trade: (Array.isArray(q.quote_requests) ? q.quote_requests[0]?.trade : q.quote_requests?.trade) ?? "未判定",
@@ -447,19 +472,7 @@ export default async function TenderDetailPage({
   // 見積の行から開けるようにする。署名付きURLはサーバー側でだけ作る。
   const inboxByQuote = tab === "cost" ? await loadInbox(supabase, costQuotes.map((q) => q.id)) : {};
 
-  // 同種案件の落札率（勝てそうかの目安）。営業品目・機関区分・金額帯がそろわないと引けない。
-  const marketRate = tab === "cost" ? await loadMarketRate(supabase, tender.item, agencyName(tender.agencies), tender.budget) : null;
   const pastAwards = tab === "fit" ? await loadPastAwards(supabase, tender.name) : [];
-
-  // 依頼文のプレビューに出す連絡先は、実際に送るときと同じ「返信先」にする
-  // （送信時は actions.ts が同じ値を使う）。ここだけ別の値だと、画面で見た文面と
-  // 届く文面が食い違う。
-  const sender = tab === "request" ? await loadSenderIdentity(supabase, orgId, orgName, userEmail) : null;
-
-  const { data: org } =
-    tab === "cost"
-      ? await supabase.from("organizations").select("overhead_rate, profit_rate").eq("id", orgId).maybeSingle<OrgRates>()
-      : { data: null };
 
   // 見積依頼の回答期限の目安：提出期限の3日前（datetime-local用にAsia/Tokyoのローカル表記へ）。
   let suggestedDueAt: string | null = null;

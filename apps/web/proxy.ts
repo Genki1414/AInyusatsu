@@ -7,5 +7,8 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
+  // api は除く。Webhookの受け口（Resend / Stripe）はログインのCookieを使わず、
+  // それぞれ署名で検証している。ここを通すと1リクエストごとに
+  // Supabaseの認証サーバーへ無駄な往復が1回増える。
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
 };
