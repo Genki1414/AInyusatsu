@@ -135,17 +135,21 @@ async function loadOutreachTrades(
   supabase: Awaited<ReturnType<typeof requireOrgContext>>["supabase"],
   orgId: string,
 ): Promise<string[]> {
+  // 設定は本部が持つ。api_key は authenticated から列の読み取り権限を外してあるので選ばない
+  // （supabase/migrations/20260828000002_sales_ai_connections_admin.sql）
   const { data, error } = await supabase
     .from("sales_ai_connections")
-    .select("trade_map")
+    .select("base_url, trade_map")
     .eq("org_id", orgId)
-    .maybeSingle<{ trade_map: Record<string, string> }>();
+    .maybeSingle<{ base_url: string; trade_map: Record<string, string> }>();
   if (error) {
     // 設定が読めなくても案件画面は使える。握りつぶさずログには残す
     console.error(`[tenders] 営業AIの設定を読めませんでした（org=${orgId}）: ${error.message}`);
     return [];
   }
-  return Object.entries(data?.trade_map ?? {})
+  // URLが無ければ、対応表があっても呼べない
+  if (!data?.base_url) return [];
+  return Object.entries(data.trade_map ?? {})
     .filter(([, code]) => typeof code === "string" && code.trim() !== "")
     .map(([trade]) => trade);
 }

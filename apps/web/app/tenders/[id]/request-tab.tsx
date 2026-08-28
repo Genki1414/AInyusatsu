@@ -82,11 +82,16 @@ function replyByLabel(dueAt: string | null): string | null {
 const EMPTY_OUTREACH: OutreachState = { error: null, message: null, count: null, sample: [], listId: null };
 
 /**
- * 営業AIで候補企業を探す。
+ * 営業AIで候補企業を探して送る。
  *
- * ここでやるのは「何社いるか見る」と「送信先リストを作る」まで。
- * 送信は営業AIの画面から人が行う（CLAUDE.md「やらないこと：問い合わせフォームへの自動送信」）。
- * 業種が対応表に無い組織ではボタン自体を出さない（呼んでも止まるが、押させない）。
+ * 【押されたときだけ送る】
+ * 件数を見る（preview）と、送信（リスト作成→送信）の2段。定期実行やジョブから
+ * 呼ばない（CLAUDE.md「やらないこと：問い合わせフォームへの無人の自動送信」）。
+ * 実際にフォームへ送るのは営業AIで、除外・上限・停止も営業AI側が持つ。
+ *
+ * 【対応表に無い業種では出さない】
+ * 業種が変換できないまま投げると営業AI側で条件が捨てられ、その県の全社が対象になる。
+ * 対応表は本部が設定する（/admin/accounts）。
  */
 function SalesAiBlock({ tenderId, trade }: { tenderId: string; trade: string }) {
   const [state, formAction, pending] = useActionState(previewOutreachTargets, EMPTY_OUTREACH);

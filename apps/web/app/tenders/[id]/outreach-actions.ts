@@ -16,8 +16,9 @@
 // 変換できない業種は、ここで止める。
 
 import { createTargetList, OutreachError, previewTargets, sendTargetList } from "@ai-nyusatsu-bu/outreach";
-import { buildOutreachMessage, prefectureFromPlace, toSalesAiTrade, type TradeMap } from "@ai-nyusatsu-bu/domain";
+import { buildOutreachMessage, prefectureFromPlace, toSalesAiTrade } from "@ai-nyusatsu-bu/domain";
 import { requireOrgContext } from "@/lib/auth";
+import { loadSalesAiConnection } from "@/lib/sales-ai";
 
 export type OutreachState = {
   error: string | null;
@@ -71,12 +72,10 @@ async function resolve(formData: FormData): Promise<Resolved | { error: string }
 
   const { supabase, orgId, orgName, userName, userEmail } = await requireOrgContext();
 
-  const [{ data: connection }, { data: tender }] = await Promise.all([
-    supabase
-      .from("sales_ai_connections")
-      .select("base_url, api_key, trade_map")
-      .eq("org_id", orgId)
-      .maybeSingle<{ base_url: string; api_key: string; trade_map: TradeMap }>(),
+  // 接続設定は本部が持つ。APIキーは顧客のRLSでは読めないので service_role で引く
+  // （apps/web/lib/sales-ai.ts）。org_id は requireOrgContext が返したものだけを渡す
+  const [connection, { data: tender }] = await Promise.all([
+    loadSalesAiConnection(orgId),
     supabase
       .from("tenders")
       .select("name, place, term_from, term_to, source_url, agencies(name)")
@@ -84,20 +83,21 @@ async function resolve(formData: FormData): Promise<Resolved | { error: string }
       .maybeSingle<TenderForOutreach>(),
   ]);
 
-  if (!connection) return { error: "営業AIの接続設定がありません。「自社情報」から設定してください。" };
+  // 設定するのは本部なので、顧客に設定画面を案内しない
+  if (!connection) return { error: "営業AIをご利用いただける状態になっていません。本部までご連絡ください。" };
   if (!tender) return { error: "案件が見つかりません" };
 
-  const code = toSalesAiTrade(connection.trade_map ?? {}, trade);
+  const code = toSalesAiTrade(connection.tradeMap, trade);
   if (code === null) {
     return {
-      error: `「${trade}」に対応する営業AIの業種コードが設定されていません。「自社情報」の業種の対応表に追加してください。`,
+      error: `「${trade}」は営業AIでの開拓に対応していません。この業種を追加したい場合は本部までご連絡ください。`,
     };
   }
 
   // 履行場所から都道府県が取れなければ、地域では絞らない（推測で別の県を入れない）
   const pref = prefectureFromPlace(tender.place);
   return {
-    connection: { baseUrl: connection.base_url, apiKey: connection.api_key },
+    connection: { baseUrl: connection.baseUrl, apiKey: connection.apiKey },
     // 問い合わせページが分かっている会社だけにする。送り先の無い会社をリストに入れても意味がない
     filters: { prefs: pref ? [pref] : [], trades: [code], contactReady: true },
     trade,
