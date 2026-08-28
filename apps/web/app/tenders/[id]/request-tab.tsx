@@ -79,7 +79,14 @@ function replyByLabel(dueAt: string | null): string | null {
 
 // "use server" のファイルからは async 関数しか export できないため、初期値はこちらに置く
 // （apps/web/AGENTS.md「実際に踏んだ落とし穴」）
-const EMPTY_OUTREACH: OutreachState = { error: null, message: null, count: null, sample: [], listId: null };
+const EMPTY_OUTREACH: OutreachState = {
+  error: null,
+  message: null,
+  count: null,
+  sample: [],
+  listId: null,
+  hasRemaining: false,
+};
 
 /**
  * 営業AIで候補企業を探して送る。
@@ -111,17 +118,23 @@ function SalesAiBlock({ tenderId, trade }: { tenderId: string; trade: string }) 
           </button>
         </form>
 
-        {/* 何社いるかを見てからでないと送れない。件数を知らずに送らせない */}
-        {found > 0 && !sendState.message && (
+        {/* 何社いるかを見てからでないと送れない。件数を知らずに送らせない。
+            送り残しがあるときは、もう一度押せるようにボタンを出したままにする
+            （営業AIは1回に50社までしか送らない。送信済みの会社には送らない） */}
+        {found > 0 && (!sendState.message || sendState.hasRemaining) && (
           <form action={sendFormAction}>
             <input type="hidden" name="tender_id" value={tenderId} />
             <input type="hidden" name="trade" value={trade} />
             <ConfirmSubmitButton
               className={btnClass("primary", "sm")}
               disabled={sending}
-              confirmMessage={`${found}社の問い合わせフォームへ、${trade}のお取引の打診を送ります。送信は取り消せません。よろしいですか。`}
+              confirmMessage={
+                sendState.hasRemaining
+                  ? `まだ送れていない会社へ、${trade}のお取引の打診を送ります。送信は取り消せません。よろしいですか。`
+                  : `${found}社の問い合わせフォームへ、${trade}のお取引の打診を送ります。送信は取り消せません。よろしいですか。`
+              }
             >
-              {sending ? "送信中..." : `${found}社へ送信する`}
+              {sending ? "送信中..." : sendState.hasRemaining ? "続きを送信する" : `${found}社へ送信する`}
             </ConfirmSubmitButton>
           </form>
         )}

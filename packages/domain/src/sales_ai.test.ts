@@ -6,8 +6,10 @@ import {
   parseTradeMap,
   prefectureFromPlace,
   salesAiSetupState,
+  summarizeOutreachSend,
   toSalesAiTrade,
   validateSalesAiSettings,
+  type OutreachSendCounts,
   type SalesAiSetupInput,
 } from "./sales_ai";
 
@@ -172,5 +174,52 @@ describe("canOutreach", () => {
   it("未設定と対応表が空のときは探せない", () => {
     expect(canOutreach("未設定")).toBe(false);
     expect(canOutreach("対応表が空")).toBe(false);
+  });
+});
+
+describe("summarizeOutreachSend", () => {
+  const zero: OutreachSendCounts = {
+    requested: 0, sent: 0, failed: 0, blocked: 0, suppressed: 0, stopped: 0,
+    cancelledRecent: 0, dryRun: false,
+  };
+
+  it("全部送れたら件数だけを出す", () => {
+    const r = summarizeOutreachSend({ ...zero, requested: 12, sent: 12 });
+    expect(r.message).toBe("12社へ送信しました。");
+    expect(r.nothingSent).toBe(false);
+    expect(r.hasRemaining).toBe(false);
+  });
+
+  it("送り残しがあることを隠さない（営業AIは1回50社までしか送らない）", () => {
+    const r = summarizeOutreachSend({ ...zero, requested: 120, sent: 50, failed: 70 });
+    expect(r.message).toContain("50社へ送信しました");
+    expect(r.message).toContain("残り70社はまだ送れていません");
+    expect(r.message).toContain("もう一度");
+    expect(r.hasRemaining).toBe(true);
+    expect(r.nothingSent).toBe(false);
+  });
+
+  it("1社も送れていなければ成功として見せない", () => {
+    const r = summarizeOutreachSend({ ...zero, requested: 8, sent: 0, stopped: 8 });
+    expect(r.message).toContain("1社にも送信できませんでした");
+    expect(r.message).toContain("送信が停止されている");
+    expect(r.nothingSent).toBe(true);
+  });
+
+  it("ドライランで返ってきたら、送信しましたとは書かない", () => {
+    const r = summarizeOutreachSend({ ...zero, requested: 10, sent: 10, dryRun: true });
+    expect(r.message).toContain("1社にも届いていません");
+    expect(r.nothingSent).toBe(true);
+  });
+
+  it("直近に送った会社が外れたことを伝える", () => {
+    const r = summarizeOutreachSend({ ...zero, requested: 5, sent: 5, cancelledRecent: 3 });
+    expect(r.message).toContain("直近に送ったばかりの3社");
+  });
+
+  it("配信停止と送信失敗の内訳を出す", () => {
+    const r = summarizeOutreachSend({ ...zero, requested: 10, sent: 4, blocked: 2, failed: 4 });
+    expect(r.message).toContain("配信停止・除外設定により2社");
+    expect(r.message).toContain("送信できず4社");
   });
 });
