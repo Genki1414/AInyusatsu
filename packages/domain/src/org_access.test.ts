@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  accessSummary,
   buildInitialPassword,
+  suspendedOrgs,
   SUSPEND_REASONS,
+  type OrgAccessRow,
   INITIAL_PASSWORD_ALPHABET,
   INITIAL_PASSWORD_LENGTH,
   isActive,
@@ -97,5 +100,40 @@ describe("validateIssueAccount", () => {
 
   it("長すぎる名前は受け付けない", () => {
     expect(validateIssueAccount({ ...valid, orgName: "あ".repeat(101) }).ok).toBe(false);
+  });
+});
+
+describe("accessSummary / suspendedOrgs", () => {
+  const row = (orgId: string, status: string, suspendedAt: string | null = null): OrgAccessRow => ({
+    orgId,
+    orgName: `${orgId}社`,
+    status,
+    suspendedAt,
+    suspendedReason: null,
+  });
+
+  it("利用中と停止を数える", () => {
+    expect(accessSummary([row("a", "利用中"), row("b", "停止"), row("c", "利用中")])).toEqual({
+      active: 2,
+      suspended: 1,
+    });
+  });
+
+  it("知らない状態は停止に数える（分からないなら使わせない）", () => {
+    expect(accessSummary([row("a", "なにか別の値")])).toEqual({ active: 0, suspended: 1 });
+  });
+
+  it("止めた日の新しい順に並べる", () => {
+    const list = suspendedOrgs([
+      row("a", "停止", "2026-08-01T00:00:00Z"),
+      row("b", "利用中"),
+      row("c", "停止", "2026-08-20T00:00:00Z"),
+    ]);
+    expect(list.map((r) => r.orgId)).toEqual(["c", "a"]);
+  });
+
+  it("止めた日が分からないものは最後に回す", () => {
+    const list = suspendedOrgs([row("a", "停止", null), row("b", "停止", "2026-08-01T00:00:00Z")]);
+    expect(list.map((r) => r.orgId)).toEqual(["b", "a"]);
   });
 });

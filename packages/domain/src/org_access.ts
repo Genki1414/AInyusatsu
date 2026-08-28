@@ -111,3 +111,46 @@ export function validateIssueAccount(input: {
 
   return { ok: true, value: { orgName, userName, email } };
 }
+
+// --- 請求と利用状況 ---------------------------------------------------------
+//
+// 【なぜ subscriptions ではなく org_access を見るか】
+// 支払いは請求書払いのみ（ユーザー決定 2026-08-25）。カード決済のように
+// 自動で契約が始まらず、止まりもしない。実際に使えるかどうかを決めているのは
+// org_access ひとつだけで、subscriptions（Stripeのwebhookが書く表）は
+// いま何も止めていない。2つを並べて見せると、どちらが本当か分からなくなる。
+//
+// Stripe のコードは残してあるが動いていない。カード払いを足すときに、
+// org_access と連動させるかどうかをそのとき決める。
+
+/** 顧客に見せる支払い方法。請求書払いのみ。 */
+export const PAYMENT_METHOD_LABEL = "請求書払い（銀行振込）";
+
+export type OrgAccessRow = {
+  orgId: string;
+  orgName: string;
+  status: string;
+  suspendedAt: string | null;
+  suspendedReason: string | null;
+};
+
+/** 状態ごとの件数。運営画面の見出しに出す。 */
+export function accessSummary(rows: OrgAccessRow[]): { active: number; suspended: number } {
+  const active = rows.filter((row) => isActive(row.status)).length;
+  return { active, suspended: rows.length - active };
+}
+
+/**
+ * 止まっている組織。止めた日の新しい順に並べる。
+ * 日付が無いものは最後に回す（いつ止めたか分からないものを先頭に出さない）。
+ */
+export function suspendedOrgs(rows: OrgAccessRow[]): OrgAccessRow[] {
+  return rows
+    .filter((row) => !isActive(row.status))
+    .sort((a, b) => {
+      if (a.suspendedAt === null && b.suspendedAt === null) return 0;
+      if (a.suspendedAt === null) return 1;
+      if (b.suspendedAt === null) return -1;
+      return b.suspendedAt.localeCompare(a.suspendedAt);
+    });
+}
