@@ -3,7 +3,7 @@
 // プロトタイプに無い「過去の落札実績」を足している。国の入札は予定価格を原則として
 // 事前公表しないため、予定価格だけでは規模感が分からず参加を判断できないため
 // （ユーザー判断 2026-08-22）。予定価格ではなく実績であることは画面で断る。
-import type { MatchedAward } from "@ai-nyusatsu-bu/domain";
+import { summarizeCompetitors, type MatchedAward } from "@ai-nyusatsu-bu/domain";
 import { Panel, Pill, ReasonIcon, Verdict, verdictBarTone, Bar } from "@/components/ui";
 
 /** 金額は円単位のinteger（CLAUDE.md）。3桁区切りでそのまま出す。 */
@@ -80,6 +80,71 @@ function PastAwardsPanel({ awards }: { awards: MatchedAward[] }) {
   );
 }
 
+/**
+ * 誰が取っているか。
+ *
+ * 参加を決めるときに知りたいのは金額だけではない。同じ相手が繰り返し取っている案件は、
+ * 価格を下げても入りにくい。毎回違う会社なら入る余地がある。
+ * 集計元は上の「過去の落札実績」と同じ（追加の取得は無い）。
+ */
+function CompetitorsPanel({ awards }: { awards: MatchedAward[] }) {
+  const result = summarizeCompetitors(awards);
+
+  if (result.competitors.length === 0) {
+    return (
+      <Panel title="誰が取っているか">
+        <p className="text-xs leading-relaxed text-slate-600">
+          {awards.length === 0
+            ? "名称の近い過去の落札が見つからないため、落札者が分かりません。"
+            : `名称の近い落札${awards.length}件のいずれにも落札者名がありません。`}
+        </p>
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel title="誰が取っているか">
+      {result.repeatWinner && (
+        <p className="text-xs leading-relaxed text-amber-800">
+          {result.repeatWinner.name}が{result.known}件中{result.repeatWinner.wins}件を取っています。
+          同じ相手が繰り返し取っている案件は、価格を下げても入りにくいことがあります。
+        </p>
+      )}
+
+      <ul className={`space-y-1.5 ${result.repeatWinner ? "mt-2" : ""}`}>
+        {result.competitors.slice(0, SHOWN).map((c) => (
+          <li key={c.name} className="border-t border-slate-100 pt-1.5 first:border-0 first:pt-0">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <span className="text-xs text-slate-700">{c.name}</span>
+              <span className="text-xs font-semibold tabular-nums">{yen(c.medianAmount)}</span>
+            </div>
+            <div className="text-xs text-slate-500">
+              落札{c.wins}件・直近 {openedOn(c.latestOpenedAt)}
+              {c.wins > 1 && <span className="ml-1 text-slate-400">（金額は中央値）</span>}
+            </div>
+          </li>
+        ))}
+      </ul>
+      {result.competitors.length > SHOWN && (
+        <p className="mt-2 text-xs text-slate-500">ほか{result.competitors.length - SHOWN}社</p>
+      )}
+
+      {/* 取れていないことを隠さない（CLAUDE.md 最重要の前提7）。
+          出さないと「3件中3件が同じ会社」に見えてしまう */}
+      {result.unknown > 0 && (
+        <p className="mt-2 text-xs text-slate-500">
+          このほかに落札者名の無い実績が{result.unknown}件あります。上の件数には入れていません。
+        </p>
+      )}
+
+      <p className="mt-3 text-xs leading-relaxed text-slate-500">
+        名称が近い落札実績を落札者ごとにまとめたものです。名称の近さだけで照合しているため、
+        別の内容の案件が混ざっていることがあります。
+      </p>
+    </Panel>
+  );
+}
+
 export type FitTabProposal = {
   score: number;
   reasons_ok: string[];
@@ -101,6 +166,7 @@ export function FitTab({
           <p className="text-xs text-slate-600">まだ条件セットとの照合が行われていません。</p>
         </Panel>
         <PastAwardsPanel awards={pastAwards} />
+        <CompetitorsPanel awards={pastAwards} />
       </div>
     );
   }
@@ -150,8 +216,9 @@ export function FitTab({
           </ul>
         )}
       </Panel>
-      <div className="sm:col-span-3">
+      <div className="grid gap-3 sm:col-span-3 sm:grid-cols-2">
         <PastAwardsPanel awards={pastAwards} />
+        <CompetitorsPanel awards={pastAwards} />
       </div>
     </div>
   );
