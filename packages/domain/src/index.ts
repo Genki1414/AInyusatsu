@@ -58,3 +58,4 @@ export * from "./award_competitors";
 export * from "./award_match";
 export * from "./partner_gaps";
 export * from "./partner_outreach";
+export * from "./sales_ai";
