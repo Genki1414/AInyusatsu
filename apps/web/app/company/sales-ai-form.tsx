@@ -47,22 +47,27 @@ export function SalesAiForm({ view }: { view: SalesAiView }) {
 
   return (
     <Panel title="営業AI連携（協力会社の開拓）">
-      <form action={saveAction} className="space-y-2">
+      <form action={saveAction} autoComplete="off" className="space-y-2">
         <label className="flex flex-wrap items-center gap-2 text-xs">
           <span className="w-28 shrink-0 font-medium text-slate-700">営業AIのURL</span>
+          {/* autoComplete を付けないと、Chromeが「パスワード欄の隣のテキスト欄」を
+              ログインIDだと判断して、保存済みのメールアドレスを入れてしまう（実機で発生）。
+              url を明示して、ログインフォームではないと伝える */}
           <input
             type="url"
             name="base_url"
             defaultValue={view.baseUrl}
             placeholder="https://sales.example.com"
             required
+            autoComplete="url"
             className={`${input} w-72`}
           />
         </label>
 
         <label className="flex flex-wrap items-center gap-2 text-xs">
           <span className="w-28 shrink-0 font-medium text-slate-700">APIキー</span>
-          <input type="password" name="api_key" required autoComplete="off" className={`${input} w-72`} />
+          {/* off はChromeに無視されることが多い。new-password なら保存済みパスワードを入れてこない */}
+          <input type="password" name="api_key" required autoComplete="new-password" className={`${input} w-72`} />
           {view.hasKey && <span className="font-mono text-xs text-slate-500">保存済み {view.maskedApiKey}</span>}
         </label>
         <p className="text-xs leading-relaxed text-slate-500">
