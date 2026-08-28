@@ -5,7 +5,7 @@ export const FORMS_SCHEMA_DESCRIPTION = `{
     { "name": "string", "form_no": "string|null", "required": true,
       "note": "string|null", "quote": "string", "source": "string" }
   ],
-  "submission_method": { "value": "string|null", "quote": null, "source": null },
+  "submission_method": { "value": "string|null", "quote": "string|null", "source": "string|null" },
   "unknown_reason": "string|null"
 }`;
 

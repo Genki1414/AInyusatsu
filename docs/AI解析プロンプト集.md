@@ -32,7 +32,7 @@
 1. 資料に書かれていないことは推測しない。分からない項目は null にする
 2. すべての抽出項目に、原文からの引用（30字以内）と出典（資料種別と章・条番号）を付ける
 3. 引用は原文のまま。要約や言い換えをしない
-4. 日付は西暦のISO 8601（YYYY-MM-DDTHH:mm）に正規化する。和暦（令和8年）は西暦に変換する
+4. 日付は西暦のISO 8601に正規化する（YYYY-MM-DDTHH:mm。時刻が書かれていなければ YYYY-MM-DD）。和暦（令和8年）は西暦に変換する
    （時刻は日本時間として扱う。タイムゾーンは書かなくてよい。保存時に日本時間として
    固定される：packages/ai/src/schemas/common.ts の toJstTimestamp）
 5. 金額は数値のみ（円単位の整数）。「円」「税抜」などの単位や注記は別項目に入れる
@@ -76,23 +76,23 @@
 ```json
 {
   "name": { "value": "string|null", "quote": "string|null", "source": "string|null" },
-  "agency": { "value": "string|null", "quote": null, "source": null },
-  "org_unit": { "value": "string|null", "quote": null, "source": null },
-  "notice_no": { "value": "string|null", "quote": null, "source": null },
-  "notice_date": { "value": "YYYY-MM-DD|null", "quote": null, "source": null },
-  "submit_deadline": { "value": "YYYY-MM-DDTHH:mm|YYYY-MM-DD|null", "quote": null, "source": null },
-  "qa_deadline":     { "value": "YYYY-MM-DDTHH:mm|YYYY-MM-DD|null", "quote": null, "source": null },
-  "bid_open_at":     { "value": "YYYY-MM-DDTHH:mm|YYYY-MM-DD|null", "quote": null, "source": null },
-  "term_from": { "value": "YYYY-MM-DD|null", "quote": null, "source": null },
-  "term_to":   { "value": "YYYY-MM-DD|null", "quote": null, "source": null },
-  "place": { "value": "string|null", "quote": null, "source": null },
-  "qual_category": { "value": "役務の提供等|物品の販売|物品の製造|null", "quote": null, "source": null },
-  "item":  { "value": "string|null", "quote": null, "source": null },
-  "grade": { "value": "string|null", "quote": null, "source": null },
-  "areas": { "value": ["string"], "quote": null, "source": null },
-  "budget": { "value": 0, "disclosed": true, "quote": null, "source": null },
-  "jv_allowed": { "value": true, "quote": null, "source": null },
-  "electronic_bidding": { "value": true, "quote": null, "source": null },
+  "agency": { "value": "string|null", "quote": "string|null", "source": "string|null" },
+  "org_unit": { "value": "string|null", "quote": "string|null", "source": "string|null" },
+  "notice_no": { "value": "string|null", "quote": "string|null", "source": "string|null" },
+  "notice_date": { "value": "YYYY-MM-DD|null", "quote": "string|null", "source": "string|null" },
+  "submit_deadline": { "value": "YYYY-MM-DDTHH:mm|YYYY-MM-DD|null", "quote": "string|null", "source": "string|null" },
+  "qa_deadline":     { "value": "YYYY-MM-DDTHH:mm|YYYY-MM-DD|null", "quote": "string|null", "source": "string|null" },
+  "bid_open_at":     { "value": "YYYY-MM-DDTHH:mm|YYYY-MM-DD|null", "quote": "string|null", "source": "string|null" },
+  "term_from": { "value": "YYYY-MM-DD|null", "quote": "string|null", "source": "string|null" },
+  "term_to":   { "value": "YYYY-MM-DD|null", "quote": "string|null", "source": "string|null" },
+  "place": { "value": "string|null", "quote": "string|null", "source": "string|null" },
+  "qual_category": { "value": "役務の提供等|物品の販売|物品の製造|null", "quote": "string|null", "source": "string|null" },
+  "item":  { "value": "string|null", "quote": "string|null", "source": "string|null" },
+  "grade": { "value": "string|null", "quote": "string|null", "source": "string|null" },
+  "areas": { "value": ["string"], "quote": "string|null", "source": "string|null" },
+  "budget": { "value": 0, "disclosed": true, "quote": "string|null", "source": "string|null" },
+  "jv_allowed": { "value": true, "quote": "string|null", "source": "string|null" },
+  "electronic_bidding": { "value": true, "quote": "string|null", "source": "string|null" },
   "unknown_fields": ["string"]
 }
 ```
@@ -262,7 +262,7 @@ LLMの出力をそのまま信じません。**保存前に次を機械的に検
     { "name": "string", "form_no": "string|null", "required": true,
       "note": "string|null", "quote": "string", "source": "string" }
   ],
-  "submission_method": { "value": "string|null", "quote": null, "source": null },
+  "submission_method": { "value": "string|null", "quote": "string|null", "source": "string|null" },
   "unknown_reason": "string|null"
 }
 ```
