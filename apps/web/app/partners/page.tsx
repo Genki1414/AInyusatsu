@@ -1,5 +1,15 @@
 // 協力会社。docs/ai-nyusatsu-bu-prototype-v7.jsx の PartnersView 相当。
 //
+// 【開拓したい業種】（9月分）
+// 見積依頼は業種ごとに出す。必要な業種の協力会社が1社もいないと、その業種の見積が
+// 取れず、案件そのものを諦めることになる。「何が足りないか」を案件を開く前に見せる。
+//
+// 前は「公開中の全案件で使われている業種のうち、登録の無いもの」を出していたが、
+// 自社が出られない案件の業種まで並んでどれから当たるべきか分からなかった。
+// いま自社に提案されている案件から逆算し、案件の多い順に出す。
+// あわせて、メールアドレスの無い会社（依頼を送れない）と、1社しかいない業種
+// （相見積が取れない）も分けて見せる。判定は packages/domain/src/partner_gaps.ts。
+//
 // プロトタイプの採用率・平均回答速度・過去見積件数は見積依頼の履歴（quote_requests/quotes、
 // タスク4系）から算出する値で、まだ実データが無いため表示しない。評価（rating）は
 // 自由入力の列としてそのまま使う。AIのおすすめ度（recommendScore）も見積の実績データが
@@ -7,6 +17,7 @@
 import { CheckCircle2, Phone, Star } from "lucide-react";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
+import { countTradeDemand, findPartnerGaps, MIN_PARTNERS_FOR_QUOTES } from "@ai-nyusatsu-bu/domain";
 import { Field, Panel, Pill } from "@/components/ui";
 import { requireOrgContext } from "@/lib/auth";
 import { Modal } from "@/components/Modal";
@@ -25,6 +36,20 @@ type PartnerRow = {
   memo: string | null;
   active: boolean;
 };
+
+/** 開拓の対象にする提案の状態。対象外にした案件は数えない。 */
+const ACTIVE_PROPOSAL_STATUSES = ["提案対象", "配信済", "既読", "検討中"];
+
+type ProposedTenderRow = {
+  tender_id: string;
+  tenders: { collect_status: string; tender_lots: { trade: string | null }[] } | { collect_status: string; tender_lots: { trade: string | null }[] }[] | null;
+};
+
+/** PostgRESTの埋め込みは1対1でも配列で返ることがある。 */
+function one<T>(value: T | T[] | null | undefined): T | null {
+  if (!value) return null;
+  return Array.isArray(value) ? (value[0] ?? null) : value;
+}
 
 const BLANK: PartnerFormValues = {
   id: null,
@@ -54,11 +79,14 @@ export default async function PartnersPage({
       .select("id, name, person, tel, email, base, trades, areas, rating, memo, active")
       .order("name")
       .returns<PartnerRow[]>(),
+    // 開拓の順番は「いま自社に提案されている案件」で決める。公開中の全案件を見ても、
+    // 自社が出られない案件の業種まで並んでしまい、どれから当たるべきかが分からない
     supabase
-      .from("tenders")
-      .select("id, tender_lots(trade)")
-      .eq("collect_status", "公開中")
-      .returns<{ id: string; tender_lots: { trade: string | null }[] }[]>(),
+      .from("proposals")
+      .select("tender_id, tenders!inner(collect_status, tender_lots(trade))")
+      .in("status", ACTIVE_PROPOSAL_STATUSES)
+      .neq("tenders.collect_status", "終了")
+      .returns<ProposedTenderRow[]>(),
   ]);
 
   const allTrades = Array.from(new Set((partners ?? []).flatMap((p) => p.trades ?? []))).sort();
@@ -68,11 +96,17 @@ export default async function PartnersPage({
     return true;
   });
 
-  const requiredTrades = Array.from(
-    new Set((lotRows ?? []).flatMap((t) => t.tender_lots.map((l) => l.trade).filter((t): t is string => !!t))),
+  // 判定は packages/domain（テスト済み）。ここはDBの読み書きと詰め替えだけ
+  const demands = countTradeDemand(
+    (lotRows ?? []).flatMap((row) =>
+      one(row.tenders)
+        ?.tender_lots.map((lot) => ({ tenderId: row.tender_id, trade: lot.trade })) ?? [],
+    ),
   );
-  const activeTrades = new Set((partners ?? []).filter((p) => p.active).flatMap((p) => p.trades ?? []));
-  const missingTrades = requiredTrades.filter((t) => !activeTrades.has(t));
+  const gaps = findPartnerGaps(
+    demands,
+    (partners ?? []).map((p) => ({ trades: p.trades ?? [], email: p.email, active: p.active })),
+  );
 
   const selected = (partners ?? []).find((p) => p.id === partnerId) ?? null;
   const values: PartnerFormValues = selected
@@ -189,10 +223,49 @@ export default async function PartnersPage({
         )}
       </Panel>
 
-      {missingTrades.length > 0 && (
-        <Panel title="登録が不足している業種">
-          <p className="text-xs text-slate-600">
-            {missingTrades.join("・")}（この業種が必要な案件では適合率が下がります）
+      {/* いま提案されている案件から逆算して、開拓すべき業種を出す。
+          業種の一覧を眺めても順番は決まらないので、案件の件数が多い順に並べる */}
+      {(gaps.missing.length > 0 || gaps.thin.length > 0) && (
+        <Panel title="開拓したい業種">
+          {gaps.missing.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-rose-800">依頼先がいません</p>
+              <ul className="mt-1 space-y-1">
+                {gaps.missing.map((gap) => (
+                  <li key={gap.trade} className="text-xs text-slate-700">
+                    ・{gap.trade}
+                    <span className="ml-1 text-slate-500">提案中の案件{gap.tenders}件で必要</span>
+                    {/* 登録はあるが依頼できない、は「いない」と分けて見せる */}
+                    {gap.noEmail > 0 && (
+                      <span className="ml-1 text-amber-700">
+                        （{gap.noEmail}社は登録済みですがメールアドレスが未登録）
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {gaps.thin.length > 0 && (
+            <div className={gaps.missing.length > 0 ? "mt-3" : ""}>
+              <p className="text-xs font-medium text-amber-800">1社しかいません（相見積が取れません）</p>
+              <ul className="mt-1 space-y-1">
+                {gaps.thin.map((gap) => (
+                  <li key={gap.trade} className="text-xs text-slate-700">
+                    ・{gap.trade}
+                    <span className="ml-1 text-slate-500">提案中の案件{gap.tenders}件で必要</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <p className="mt-3 text-xs leading-relaxed text-slate-500">
+            いま提案されている案件で必要な業種を数え、案件の多い順に並べています。
+            相見積を取るには{MIN_PARTNERS_FOR_QUOTES}社以上が要ります。
+            メールアドレスの無い会社には見積依頼を送れません（回答ページのURLをメールで送るため）。
+            足りている業種：{gaps.covered}
           </p>
         </Panel>
       )}
