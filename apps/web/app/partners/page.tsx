@@ -171,6 +171,7 @@ export default async function PartnersPage({
             {allTrades.map((t) => (
               <Link
                 key={t}
+                prefetch={false}
                 href={`/partners?trade=${encodeURIComponent(t)}`}
                 className={`rounded border px-2 py-1 text-xs ${trade === t ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 text-slate-600"}`}
               >
@@ -197,7 +198,7 @@ export default async function PartnersPage({
                 {rows.map((p) => (
                   <tr key={p.id} className="cursor-pointer border-t border-slate-100 hover:bg-slate-50">
                     <td className="px-3 py-2">
-                      <Link href={`/partners?partner=${p.id}`} className="font-medium hover:underline">
+                      <Link prefetch={false} href={`/partners?partner=${p.id}`} className="font-medium hover:underline">
                         {p.name}
                       </Link>
                       <div className="text-slate-500">

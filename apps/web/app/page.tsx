@@ -198,7 +198,7 @@ export default async function HomePage() {
               {consideringRows.map((p) =>
                 p.tenders ? (
                   <li key={p.id} className="flex flex-wrap items-center gap-2 p-3">
-                    <Link href={`/tenders/${p.tenders.id}`} className="text-xs font-semibold hover:underline">
+                    <Link prefetch={false} href={`/tenders/${p.tenders.id}`} className="text-xs font-semibold hover:underline">
                       {p.tenders.name}
                     </Link>
                     <ProposePill s={p.status} />
@@ -218,7 +218,7 @@ export default async function HomePage() {
                 <li key={i} className="flex flex-wrap items-center gap-2">
                   <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${x.d <= 2 ? "bg-rose-500" : x.d <= 5 ? "bg-amber-500" : "bg-slate-300"}`} />
                   <Pill tone={x.tone}>{x.kind}</Pill>
-                  <Link href={`/tenders/${x.tenderId}`} className="truncate text-xs hover:underline">
+                  <Link prefetch={false} href={`/tenders/${x.tenderId}`} className="truncate text-xs hover:underline">
                     {x.name}
                   </Link>
                   <span className={`ml-auto text-xs tabular-nums ${x.d <= 2 ? "font-semibold text-rose-700" : "text-slate-500"}`}>

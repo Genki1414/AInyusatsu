@@ -340,7 +340,7 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
           <Panel key={t.id}>
             <div className="flex flex-wrap items-start gap-3">
               <div className="min-w-0 flex-1">
-                <Link href={`/tenders/${t.id}`} className="text-sm font-semibold leading-snug hover:underline">
+                <Link prefetch={false} href={`/tenders/${t.id}`} className="text-sm font-semibold leading-snug hover:underline">
                   {t.name}
                 </Link>
                 <div className="mt-0.5 text-xs text-slate-500">{agencyName(t.agencies)}</div>
@@ -378,7 +378,7 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
               )}
             </div>
             <div className="mt-3">
-              <Link href={`/tenders/${t.id}`} className={btnClass("primary")}>
+              <Link prefetch={false} href={`/tenders/${t.id}`} className={btnClass("primary")}>
                 <ListChecks size={12} />
                 案件を見る
               </Link>

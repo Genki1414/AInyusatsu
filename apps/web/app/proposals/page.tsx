@@ -117,7 +117,7 @@ export default async function ProposalsPage() {
           <Panel key={p.id}>
             <div className="flex flex-wrap items-start gap-3">
               <div className="min-w-0 flex-1">
-                <Link href={`/tenders/${t.id}`} className="text-sm font-semibold leading-snug hover:underline">
+                <Link prefetch={false} href={`/tenders/${t.id}`} className="text-sm font-semibold leading-snug hover:underline">
                   {t.name}
                 </Link>
                 <div className="mt-0.5 text-xs text-slate-500">{agencyName(t.agencies)}</div>
@@ -168,7 +168,7 @@ export default async function ProposalsPage() {
             </div>
 
             <div className="mt-3 flex flex-wrap gap-2">
-              <Link href={`/tenders/${t.id}`} className={btnClass("primary")}>
+              <Link prefetch={false} href={`/tenders/${t.id}`} className={btnClass("primary")}>
                 <ListChecks size={12} />
                 案件を見る
               </Link>
@@ -195,7 +195,7 @@ export default async function ProposalsPage() {
           <ul className="space-y-1.5">
             {excluded.map((p) => (
               <li key={p.id} className="flex flex-wrap gap-2 text-xs">
-                <Link href={`/tenders/${p.tenders!.id}`} className="font-medium hover:underline">
+                <Link prefetch={false} href={`/tenders/${p.tenders!.id}`} className="font-medium hover:underline">
                   {p.tenders!.name}
                 </Link>
                 <span className="text-slate-500">{p.excluded_reason ?? "手動で見送り"}</span>
