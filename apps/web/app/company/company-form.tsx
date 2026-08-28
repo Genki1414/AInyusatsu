@@ -8,7 +8,7 @@ import { useActionState } from "react";
 import { Panel } from "@/components/ui";
 import { saveCompanyName, type CompanyNameState } from "./actions";
 
-const initialState: CompanyNameState = { error: null, saved: false };
+const initialState: CompanyNameState = { error: null, saved: false, syncNote: null };
 const input = "rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-300";
 
 export function CompanyForm({
@@ -85,7 +85,11 @@ export function CompanyForm({
             {state.error}
           </p>
         )}
-        {state.saved && <p className="mt-2 text-xs text-emerald-700">保存しました。</p>}
+        {state.saved && (
+          <p className="mt-2 text-xs text-emerald-700">
+            保存しました。{state.syncNote}
+          </p>
+        )}
 
         <button
           type="submit"

@@ -21,6 +21,12 @@ import Link from "next/link";
 import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
 import { CopyButton } from "@/components/CopyButton";
 import { previewOutreachTargets, sendOutreach, type OutreachState } from "./outreach-actions";
+import {
+  checkRepliedCandidates,
+  registerRepliedPartners,
+  type CheckRepliesState,
+  type RegisterRepliesState,
+} from "./outreach-import-actions";
 import { btnClass, Panel, Pill } from "@/components/ui";
 import { buildOutreachMessage, buildQuoteRequestEmail, groupLotsByTrade, type QuoteRequestLot } from "@ai-nyusatsu-bu/domain";
 import { AREA_OPTIONS, PREFECTURE_OPTIONS, TRADE_OPTIONS } from "@/lib/catalog";
@@ -142,6 +148,85 @@ function SalesAiBlock({ tenderId, trade }: { tenderId: string; trade: string }) 
         送るのは下の打診文です。実際にフォームへ送るのは営業AIで、送信先の除外・回数の上限・
         停止の設定はすべて営業AI側の設定が効きます。
       </p>
+
+      <RepliedCandidatesBlock tenderId={tenderId} trade={trade} />
+    </div>
+  );
+}
+
+const EMPTY_CHECK_REPLIES: CheckRepliesState = { error: null, candidates: [], trade: null };
+const EMPTY_REGISTER_REPLIES: RegisterRepliesState = { error: null, message: null };
+
+/**
+ * 返信があった会社を確認して、協力会社として登録する（結果の取り込み）。
+ *
+ * docs/reference/営業AI連携_設計.md「3. 結果（未実装）」の実装。営業AI側で人が
+ * 「返信あり」を付けたものだけがここに出る（自動でのメール取り込みはしていない）。
+ */
+function RepliedCandidatesBlock({ tenderId, trade }: { tenderId: string; trade: string }) {
+  const [checkState, checkAction, checking] = useActionState(checkRepliedCandidates, EMPTY_CHECK_REPLIES);
+  const [registerState, registerAction, registering] = useActionState(registerRepliedPartners, EMPTY_REGISTER_REPLIES);
+  const checked = checkState.trade !== null;
+  const selectable = checkState.candidates.filter((c) => !c.alreadyPartner);
+
+  return (
+    <div className="mt-2 border-t border-violet-200 pt-2">
+      <form action={checkAction}>
+        <input type="hidden" name="tender_id" value={tenderId} />
+        <input type="hidden" name="trade" value={trade} />
+        <button type="submit" disabled={checking} className={btnClass("default", "sm")}>
+          {checking ? "確認中..." : "返信を確認する"}
+        </button>
+      </form>
+
+      {checkState.error && (
+        <p role="alert" className="mt-1 text-xs leading-relaxed text-rose-700">
+          {checkState.error}
+        </p>
+      )}
+
+      {checked && checkState.candidates.length === 0 && !checkState.error && (
+        <p className="mt-1 text-xs leading-relaxed text-slate-500">まだ返信はありません。</p>
+      )}
+
+      {checked && checkState.candidates.length > 0 && (
+        <form action={registerAction} className="mt-1">
+          <input type="hidden" name="tender_id" value={tenderId} />
+          <input type="hidden" name="trade" value={trade} />
+          <ul className="space-y-1">
+            {checkState.candidates.map((c) => (
+              <li key={c.companyId} className="flex flex-wrap items-center gap-2 text-xs text-slate-700">
+                <label className="flex items-center gap-1.5">
+                  <input
+                    type="checkbox"
+                    name="company_id"
+                    value={c.companyId}
+                    disabled={c.alreadyPartner}
+                    defaultChecked={!c.alreadyPartner}
+                  />
+                  <span>{c.name}</span>
+                </label>
+                {c.pref && <span className="text-slate-400">{c.pref}</span>}
+                {c.email && <span className="text-slate-400">{c.email}</span>}
+                {c.alreadyPartner && <Pill tone="slate">登録済み</Pill>}
+              </li>
+            ))}
+          </ul>
+          {selectable.length > 0 && (
+            <button type="submit" disabled={registering} className={`${btnClass("primary", "sm")} mt-2`}>
+              {registering ? "登録中..." : "選んだ会社を協力会社として登録する"}
+            </button>
+          )}
+          {registerState.error && (
+            <p role="alert" className="mt-1 text-xs leading-relaxed text-rose-700">
+              {registerState.error}
+            </p>
+          )}
+          {registerState.message && (
+            <p className="mt-1 text-xs leading-relaxed text-emerald-800">{registerState.message}</p>
+          )}
+        </form>
+      )}
     </div>
   );
 }

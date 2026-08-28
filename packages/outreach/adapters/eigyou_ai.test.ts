@@ -3,6 +3,7 @@ import {
   createTargetList,
   createTenant,
   getQuotaStatus,
+  listRepliedMembers,
   OutreachError,
   previewTargets,
   purchaseQuota,
@@ -382,5 +383,65 @@ describe("setSenderIdentity", () => {
     });
     vi.stubGlobal("fetch", spy);
     await expect(setSenderIdentity(connection, senderInput)).rejects.toMatchObject({ code: "OUT_OF_SCOPE" });
+  });
+});
+
+describe("listRepliedMembers", () => {
+  it("GETでstatus=repliedを付けて呼び、会社の配列を返す", async () => {
+    const spy = mockFetch(200, {
+      list: { id: 7 },
+      members: [
+        {
+          id: 501,
+          name: "山田電気株式会社",
+          pref: "宮城県",
+          phone: "022-123-4567",
+          email: "info@yamada.example",
+          website_url: "https://yamada.example",
+          contact_url: "https://yamada.example/contact",
+          replied: 1,
+          replied_at: "2026-08-20T10:00:00",
+        },
+      ],
+    });
+    const result = await listRepliedMembers(connection, 7);
+    expect(result).toEqual([
+      {
+        companyId: 501,
+        name: "山田電気株式会社",
+        pref: "宮城県",
+        phone: "022-123-4567",
+        email: "info@yamada.example",
+        websiteUrl: "https://yamada.example",
+        contactUrl: "https://yamada.example/contact",
+        repliedAt: "2026-08-20T10:00:00",
+      },
+    ]);
+    const [url, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://sales.example.com/api/tenant/lists/7?status=replied");
+    expect(init.method).toBe("GET");
+  });
+
+  it("空文字の項目はnullにする(社名不明は既定文言)", async () => {
+    mockFetch(200, { members: [{ id: 502, name: "", pref: "", phone: "", email: "", website_url: "", contact_url: "", replied_at: "" }] });
+    const result = await listRepliedMembers(connection, 7);
+    expect(result).toEqual([
+      { companyId: 502, name: "（社名不明）", pref: null, phone: null, email: null, websiteUrl: null, contactUrl: null, repliedAt: null },
+    ]);
+  });
+
+  it("membersが無ければ空配列", async () => {
+    mockFetch(200, { list: { id: 7 } });
+    expect(await listRepliedMembers(connection, 7)).toEqual([]);
+  });
+
+  it("会社IDが読めない行があれば止める", async () => {
+    mockFetch(200, { members: [{ name: "山田電気" }] });
+    await expect(listRepliedMembers(connection, 7)).rejects.toMatchObject({ code: "PARSE_INVALID" });
+  });
+
+  it("営業AIがerrorを返したら止める", async () => {
+    mockFetch(404, { error: "リストが見つかりません" });
+    await expect(listRepliedMembers(connection, 999)).rejects.toMatchObject({ code: "OUT_OF_SCOPE" });
   });
 });

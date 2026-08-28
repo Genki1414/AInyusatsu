@@ -445,27 +445,29 @@ export async function createTenant(
  *
  * 参照：eigyouAI api.py `POST /api/tenant/sender-templates` `POST /api/tenant/sender-templates/activate`
  */
+export type SenderIdentityPayload = {
+  templateName: string;
+  senderName: string;
+  senderEmail: string;
+  senderAddress: string;
+  optoutUrl?: string;
+  lastName?: string;
+  firstName?: string;
+  lastNameKana?: string;
+  firstNameKana?: string;
+  postalCode?: string;
+  prefecture?: string;
+  city?: string;
+  block?: string;
+  building?: string;
+  phone?: string;
+  department?: string;
+  position?: string;
+};
+
 export async function setSenderIdentity(
   connection: SalesAiConnection,
-  input: {
-    templateName: string;
-    senderName: string;
-    senderEmail: string;
-    senderAddress: string;
-    optoutUrl?: string;
-    lastName?: string;
-    firstName?: string;
-    lastNameKana?: string;
-    firstNameKana?: string;
-    postalCode?: string;
-    prefecture?: string;
-    city?: string;
-    block?: string;
-    building?: string;
-    phone?: string;
-    department?: string;
-    position?: string;
-  },
+  input: SenderIdentityPayload,
 ): Promise<{ templateId: number }> {
   if (input.senderName.trim() === "" || input.senderEmail.trim() === "") {
     throw new OutreachError("OUT_OF_SCOPE", "送信元名（senderName）と送信元メールアドレス（senderEmail）が必要です");
@@ -507,4 +509,47 @@ export async function setSenderIdentity(
     );
   }
   return { templateId };
+}
+
+/** 返信があった1社。結果の取り込み（協力会社として登録する）の元データ。 */
+export type RepliedMember = {
+  companyId: number;
+  name: string;
+  pref: string | null;
+  phone: string | null;
+  email: string | null;
+  websiteUrl: string | null;
+  contactUrl: string | null;
+  repliedAt: string | null;
+};
+
+/**
+ * 送信先リストのうち、返信があった会社だけを見る。
+ *
+ * 【誰が「返信あり」を付けるか】
+ * 営業AI側でメールの自動取り込みはしていない（β版）。人が営業AIの画面で
+ * 「返信あり」を手で付けたものだけがここに出る。
+ *
+ * 参照：eigyouAI api.py `GET /api/tenant/lists/<id>?status=replied`
+ */
+export async function listRepliedMembers(connection: SalesAiConnection, listId: number): Promise<RepliedMember[]> {
+  const payload = (await get(connection, `/api/tenant/lists/${listId}?status=replied`)) as Record<string, unknown>;
+  if (typeof payload.error === "string") {
+    throw new OutreachError("OUT_OF_SCOPE", `返信を確認できませんでした：${payload.error}`);
+  }
+  const members = Array.isArray(payload.members) ? payload.members : [];
+  return members.map((raw) => {
+    const row = (raw ?? {}) as Record<string, unknown>;
+    const str = (key: string): string | null => (typeof row[key] === "string" && row[key] !== "" ? (row[key] as string) : null);
+    return {
+      companyId: requireNumber(row.id, "会社ID"),
+      name: str("name") ?? "（社名不明）",
+      pref: str("pref"),
+      phone: str("phone"),
+      email: str("email"),
+      websiteUrl: str("website_url"),
+      contactUrl: str("contact_url"),
+      repliedAt: str("replied_at"),
+    };
+  });
 }

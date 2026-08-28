@@ -40,6 +40,9 @@ function fail(error: string): OutreachState {
 }
 
 type Resolved = {
+  supabase: Awaited<ReturnType<typeof requireOrgContext>>["supabase"];
+  orgId: string;
+  tenderId: string;
   connection: { baseUrl: string; apiKey: string };
   filters: { prefs: string[]; trades: string[]; contactReady: boolean };
   trade: string;
@@ -97,6 +100,9 @@ async function resolve(formData: FormData): Promise<Resolved | { error: string }
   // 履行場所から都道府県が取れなければ、地域では絞らない（推測で別の県を入れない）
   const pref = prefectureFromPlace(tender.place);
   return {
+    supabase,
+    orgId,
+    tenderId,
     connection: { baseUrl: connection.base_url, apiKey: connection.api_key },
     // 問い合わせページが分かっている会社だけにする。送り先の無い会社をリストに入れても意味がない
     filters: { prefs: pref ? [pref] : [], trades: [code], contactReady: true },
@@ -181,6 +187,20 @@ export async function sendOutreach(_prev: OutreachState, formData: FormData): Pr
   } catch (err) {
     return fail(`送信先リストを作れませんでした（${describe(err)}）`);
   }
+
+  // どのlist_idを見れば返信を確認できるかを覚えておく（結果の取り込み。
+  // sendOutreach自体は失敗させない——記録できなくても、営業AIの画面から確認はできる）
+  const { error: recordError } = await resolved.supabase.from("sales_ai_outreach_lists").insert({
+    org_id: resolved.orgId,
+    tender_id: resolved.tenderId,
+    trade: resolved.trade,
+    list_id: created.listId,
+    list_name: name,
+  });
+  if (recordError) {
+    console.error("[outreach] 送信先リストの記録に失敗しました", recordError);
+  }
+
   if (created.count === 0) {
     return {
       ...fail(

@@ -10,9 +10,10 @@
 // メールアドレスが入るため（20260803000001_auth_signup_trigger.sql）、あとから直せるようにする。
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { looksLikeEmail } from "@ai-nyusatsu-bu/domain";
+import { looksLikeEmail, normalizeMailingIdentity } from "@ai-nyusatsu-bu/domain";
 import { createClient } from "@/lib/supabase/server";
 import { requireOrgContext } from "@/lib/auth";
+import { syncSalesAiSenderIdentity } from "@/lib/sales_ai_sync";
 
 // 率は画面では%で入力し、DBには小数（0.12など）で持つ（organizations.overhead_rate は numeric(5,4)）。
 const percent = (label: string) =>
@@ -37,11 +38,15 @@ const companyNameSchema = z.object({
     .refine((v) => v === null || looksLikeEmail(v), "返信先はメールアドレスの形で入力してください"),
 });
 
-export type CompanyNameState = { error: string | null; saved: boolean };
+export type CompanyNameState = { error: string | null; saved: boolean; syncNote: string | null };
 
 /**
  * 自社情報（会社名・一般管理費率・目標利益率・返信先）を変更する。
  * organizationsのRLSは自組織のみ許可しているため、ユーザーのセッションのまま更新できる。
+ *
+ * 会社名・返信先は営業AI（eigyouAI）の送信元テンプレートの元になるため、保存できたら
+ * そのまま同期する（T55の続き。手で二重に入れさせない）。テナントがまだ無い組織では
+ * 何もしない。同期の失敗はこの保存自体を失敗にはしない（自社情報は保存できるようにする）。
  */
 export async function saveCompanyName(_prevState: CompanyNameState, formData: FormData): Promise<CompanyNameState> {
   const parsed = companyNameSchema.safeParse({
@@ -51,7 +56,7 @@ export async function saveCompanyName(_prevState: CompanyNameState, formData: Fo
     replyTo: String(formData.get("reply_to") ?? ""),
   });
   if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? "入力内容を確認してください", saved: false };
+    return { error: parsed.error.issues[0]?.message ?? "入力内容を確認してください", saved: false, syncNote: null };
   }
 
   const { orgId } = await requireOrgContext();
@@ -67,12 +72,18 @@ export async function saveCompanyName(_prevState: CompanyNameState, formData: Fo
     .eq("id", orgId);
   if (error) {
     console.error("[company] 自社情報の保存に失敗しました", error);
-    return { error: "保存に失敗しました。時間をおいて再度お試しください。", saved: false };
+    return { error: "保存に失敗しました。時間をおいて再度お試しください。", saved: false, syncNote: null };
   }
+
+  const sync = await syncSalesAiSenderIdentity(supabase, orgId);
 
   // ヘッダーの表示名は全画面で使うため、まとめて再検証する。
   revalidatePath("/", "layout");
-  return { error: null, saved: true };
+  return {
+    error: null,
+    saved: true,
+    syncNote: sync.ok ? "営業AI側の送信元にも反映しました。" : null,
+  };
 }
 
 
@@ -105,4 +116,64 @@ export async function saveUserName(_prevState: UserNameState, formData: FormData
   // 署名に使う値なので、案件画面のプレビューも含めて再検証する
   revalidatePath("/", "layout");
   return { error: null, saved: true };
+}
+
+export type MailingIdentityState = { error: string | null; saved: boolean; syncNote: string | null };
+
+/**
+ * 郵送名義（姓名・フリガナ・住所・電話番号・部署・役職）を保存する。
+ *
+ * 協力会社開拓の問い合わせフォームに載る送信元＝契約者本人の名義にする
+ * （AI入札部自身のアドレスにはしない。ユーザー決定 2026-08-28）。全項目任意
+ * （まだ営業AIのテナントが無い組織でも先に入力しておける）。保存できたら
+ * 営業AI側の送信元テンプレートへそのまま同期する（手で二重に入れさせない）。
+ */
+export async function saveMailingIdentity(
+  _prevState: MailingIdentityState,
+  formData: FormData,
+): Promise<MailingIdentityState> {
+  const identity = normalizeMailingIdentity({
+    lastName: String(formData.get("last_name") ?? ""),
+    firstName: String(formData.get("first_name") ?? ""),
+    lastNameKana: String(formData.get("last_name_kana") ?? ""),
+    firstNameKana: String(formData.get("first_name_kana") ?? ""),
+    postalCode: String(formData.get("postal_code") ?? ""),
+    prefecture: String(formData.get("prefecture") ?? ""),
+    city: String(formData.get("city") ?? ""),
+    block: String(formData.get("block") ?? ""),
+    building: String(formData.get("building") ?? ""),
+    phone: String(formData.get("phone") ?? ""),
+    department: String(formData.get("department") ?? ""),
+    position: String(formData.get("position") ?? ""),
+  });
+
+  const { orgId } = await requireOrgContext();
+  const supabase = await createClient();
+  const { error } = await supabase.from("organization_mailing_identity").upsert({
+    org_id: orgId,
+    last_name: identity.lastName,
+    first_name: identity.firstName,
+    last_name_kana: identity.lastNameKana,
+    first_name_kana: identity.firstNameKana,
+    postal_code: identity.postalCode,
+    prefecture: identity.prefecture,
+    city: identity.city,
+    block: identity.block,
+    building: identity.building,
+    phone: identity.phone,
+    department: identity.department,
+    position: identity.position,
+    updated_at: new Date().toISOString(),
+  });
+  if (error) {
+    console.error("[company] 郵送名義の保存に失敗しました", error);
+    return { error: "保存に失敗しました。時間をおいて再度お試しください。", saved: false, syncNote: null };
+  }
+
+  const sync = await syncSalesAiSenderIdentity(supabase, orgId);
+  return {
+    error: null,
+    saved: true,
+    syncNote: sync.ok ? "営業AI側の送信元にも反映しました。" : null,
+  };
 }

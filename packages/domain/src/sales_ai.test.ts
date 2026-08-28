@@ -7,7 +7,6 @@ import {
   toSalesAiTrade,
   validateProvisionTenant,
   validateSalesAiSettings,
-  validateSenderIdentity,
 } from "./sales_ai";
 
 describe("parseTradeMap", () => {
@@ -136,52 +135,5 @@ describe("validateProvisionTenant", () => {
   });
 });
 
-describe("validateSenderIdentity", () => {
-  it("必須(送信元名・メール)だけでも通り、未入力の任意項目は空文字になる", () => {
-    const result = validateSenderIdentity({ senderName: "山田電気株式会社", senderEmail: "info@yamada.example" });
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.value.senderName).toBe("山田電気株式会社");
-      expect(result.value.senderEmail).toBe("info@yamada.example");
-      expect(result.value.templateName).toBe("本部設定（顧客名義）");
-      expect(result.value.lastName).toBe("");
-      expect(result.value.phone).toBe("");
-    }
-  });
-
-  it("姓・名・フリガナ・郵便番号・住所・電話番号もそのまま渡る", () => {
-    const result = validateSenderIdentity({
-      senderName: "山田電気株式会社",
-      senderEmail: "info@yamada.example",
-      lastName: "山田",
-      firstName: "太郎",
-      lastNameKana: "ヤマダ",
-      firstNameKana: "タロウ",
-      postalCode: "100-0001",
-      prefecture: "東京都",
-      city: "千代田区千代田",
-      block: "1-1",
-      building: "皇居ビル3F",
-      phone: "03-1234-5678",
-      department: "営業部",
-      position: "部長",
-    });
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.value.lastName).toBe("山田");
-      expect(result.value.prefecture).toBe("東京都");
-      expect(result.value.phone).toBe("03-1234-5678");
-    }
-  });
-
-  it("送信元名が空なら止める", () => {
-    const result = validateSenderIdentity({ senderName: " ", senderEmail: "info@yamada.example" });
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain("送信元名");
-  });
-
-  it("送信元メールが空、または形が不正なら止める", () => {
-    expect(validateSenderIdentity({ senderName: "山田電気", senderEmail: " " }).ok).toBe(false);
-    expect(validateSenderIdentity({ senderName: "山田電気", senderEmail: "not-an-email" }).ok).toBe(false);
-  });
-});
+// 送信元（顧客名義）の入力・検証（旧validateSenderIdentity）は
+// mailing_identity.test.ts の normalizeMailingIdentity/combineAddress に移した。

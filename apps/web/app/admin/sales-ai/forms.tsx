@@ -11,7 +11,7 @@ import {
   deleteConnection,
   provisionTenant,
   saveConnection,
-  saveSenderIdentity,
+  syncSenderIdentity,
   type SalesAiAdminState,
 } from "./actions";
 
@@ -53,13 +53,12 @@ function jst(at: string | null): string {
 
 export function ConnectionRowForms({ row }: { row: ConnectionRow }) {
   const [manualOpen, setManualOpen] = useState(false);
-  const [senderOpen, setSenderOpen] = useState(false);
 
   const [provState, provAction, provPending] = useActionState(provisionTenant, EMPTY_STATE);
   const [manState, manAction, manPending] = useActionState(saveConnection, EMPTY_STATE);
   const [delState, delAction, delPending] = useActionState(deleteConnection, EMPTY_STATE);
   const [chkState, chkAction, chkPending] = useActionState(checkConnection, EMPTY_STATE);
-  const [sndState, sndAction, sndPending] = useActionState(saveSenderIdentity, EMPTY_STATE);
+  const [syncState, syncAction, syncPending] = useActionState(syncSenderIdentity, EMPTY_STATE);
 
   const connected = row.tenantId !== null;
 
@@ -105,15 +104,25 @@ export function ConnectionRowForms({ row }: { row: ConnectionRow }) {
               {chkPending ? "確認中..." : "つながるか確認する"}
             </button>
           </form>
-          <button type="button" onClick={() => setSenderOpen((v) => !v)} className={btnClass("default", "sm")}>
-            送信元（顧客名義）を{senderOpen ? "閉じる" : "設定する"}
-          </button>
+          <form action={syncAction}>
+            <input type="hidden" name="org_id" value={row.orgId} />
+            <button type="submit" disabled={syncPending} className={btnClass("default", "sm")}>
+              {syncPending ? "同期中..." : "送信元を今すぐ同期する"}
+            </button>
+          </form>
           <button type="button" onClick={() => setManualOpen((v) => !v)} className={btnClass("ghost", "sm")}>
             {manualOpen ? "手動設定を閉じる" : "接続を手で編集する"}
           </button>
         </div>
       )}
       <Result state={chkState} />
+      <Result state={syncState} />
+      {connected && (
+        <p className="text-xs leading-relaxed text-slate-400">
+          送信元（顧客名義）は、顧客が自社の「会社情報」画面を保存するたびに自動で反映されます。
+          ここは自動同期が失敗したときのやり直し用です。
+        </p>
+      )}
 
       {(manualOpen || !connected) && (
         <details open={manualOpen || undefined} className="rounded border border-slate-200 p-2">
@@ -153,95 +162,6 @@ export function ConnectionRowForms({ row }: { row: ConnectionRow }) {
             </form>
           )}
         </details>
-      )}
-
-      {senderOpen && connected && (
-        <div className="rounded border border-slate-200 p-2">
-          <p className="mb-2 text-xs leading-relaxed text-slate-500">
-            協力会社開拓の問い合わせフォームに載る送信元。<strong>契約者本人の名義</strong>を入れる
-            （AI入札部自身のアドレスにはしない）。姓・名・フリガナ・郵便番号・住所・電話番号は、
-            別欄がある問い合わせフォーム向けの任意項目。
-          </p>
-          <form action={sndAction} className="space-y-2">
-            <input type="hidden" name="org_id" value={row.orgId} />
-            <div className="flex flex-wrap gap-2">
-              <label className="flex flex-col gap-0.5 text-xs">
-                <span className="text-slate-500">送信元名（会社名）</span>
-                <input type="text" name="sender_name" defaultValue={row.orgName} required className={`${input} w-56`} />
-              </label>
-              <label className="flex flex-col gap-0.5 text-xs">
-                <span className="text-slate-500">送信元メールアドレス</span>
-                <input type="email" name="sender_email" required className={`${input} w-64`} />
-              </label>
-            </div>
-            <label className="flex flex-col gap-0.5 text-xs">
-              <span className="text-slate-500">住所（単一欄向け）</span>
-              <input type="text" name="sender_address" className={`${input} w-full`} />
-            </label>
-            <div className="flex flex-wrap gap-2">
-              <label className="flex flex-col gap-0.5 text-xs">
-                <span className="text-slate-500">姓</span>
-                <input type="text" name="last_name" className={`${input} w-24`} />
-              </label>
-              <label className="flex flex-col gap-0.5 text-xs">
-                <span className="text-slate-500">名</span>
-                <input type="text" name="first_name" className={`${input} w-24`} />
-              </label>
-              <label className="flex flex-col gap-0.5 text-xs">
-                <span className="text-slate-500">姓（フリガナ）</span>
-                <input type="text" name="last_name_kana" className={`${input} w-24`} />
-              </label>
-              <label className="flex flex-col gap-0.5 text-xs">
-                <span className="text-slate-500">名（フリガナ）</span>
-                <input type="text" name="first_name_kana" className={`${input} w-24`} />
-              </label>
-              <label className="flex flex-col gap-0.5 text-xs">
-                <span className="text-slate-500">郵便番号</span>
-                <input type="text" name="postal_code" className={`${input} w-24`} />
-              </label>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <label className="flex flex-col gap-0.5 text-xs">
-                <span className="text-slate-500">都道府県</span>
-                <input type="text" name="prefecture" className={`${input} w-24`} />
-              </label>
-              <label className="flex flex-col gap-0.5 text-xs">
-                <span className="text-slate-500">市区町村</span>
-                <input type="text" name="city" className={`${input} w-40`} />
-              </label>
-              <label className="flex flex-col gap-0.5 text-xs">
-                <span className="text-slate-500">丁目番地</span>
-                <input type="text" name="block" className={`${input} w-32`} />
-              </label>
-              <label className="flex flex-col gap-0.5 text-xs">
-                <span className="text-slate-500">建物名</span>
-                <input type="text" name="building" className={`${input} w-40`} />
-              </label>
-              <label className="flex flex-col gap-0.5 text-xs">
-                <span className="text-slate-500">電話番号</span>
-                <input type="text" name="phone" className={`${input} w-32`} />
-              </label>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <label className="flex flex-col gap-0.5 text-xs">
-                <span className="text-slate-500">部署</span>
-                <input type="text" name="department" className={`${input} w-40`} />
-              </label>
-              <label className="flex flex-col gap-0.5 text-xs">
-                <span className="text-slate-500">役職</span>
-                <input type="text" name="position" className={`${input} w-32`} />
-              </label>
-              <label className="flex flex-col gap-0.5 text-xs">
-                <span className="text-slate-500">配信停止URL（任意）</span>
-                <input type="text" name="optout_url" className={`${input} w-56`} />
-              </label>
-            </div>
-            <button type="submit" disabled={sndPending} className={btnClass("primary", "sm")}>
-              {sndPending ? "設定中..." : "送信元を設定・有効化する"}
-            </button>
-            <Result state={sndState} />
-          </form>
-        </div>
       )}
     </div>
   );

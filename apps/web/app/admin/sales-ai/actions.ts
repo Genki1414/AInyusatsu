@@ -7,11 +7,13 @@
 // テナントを作り、APIキーを顧客に見せずそのまま保存する。顧客向けの画面
 // （apps/web/app/company/sales-ai-actions.ts）はまだ残っているが、本来はここへ移す。
 //
-// 【送信元は契約者本人の名義にする】
+// 【送信元は契約者本人の名義にする。手入力ではなく自動同期】
 // AI入札部の契約者が協力会社開拓のフォームを送信するとき、フォームに載る送信元は
 // AI入札部自身のアドレスではなく契約者本人の名義にする（ユーザー決定 2026-08-28）。
-// AI入札部が自社で見積依頼を送るときの送信元（packages/domain/src/sender_identity.ts）
-// とは別物。
+// 最初は本部がここで毎回手入力していたが、手間が多すぎるというユーザー決定
+// （2026-08-28その2）。顧客が /company で自社情報・郵送名義を入力すれば
+// apps/web/lib/sales_ai_sync.ts が自動で反映する。ここではテナント作成直後の
+// 初回同期と、うまくいかなかったときの「今すぐ同期する」だけを行う。
 //
 // 【service_role でしか行えない】
 // 組織をまたいで sales_ai_connections を読み書きするため、requireAdmin が運営で
@@ -23,20 +25,10 @@
 // （CLAUDE.md「やらないこと：問い合わせフォームへの自動送信」）。ここにも送信を呼ぶ処理は書かない。
 
 import { revalidatePath } from "next/cache";
-import {
-  createTenant,
-  OutreachError,
-  previewTargets,
-  setSenderIdentity,
-  type SalesAiOpsConnection,
-} from "@ai-nyusatsu-bu/outreach";
-import {
-  validateProvisionTenant,
-  validateSalesAiSettings,
-  validateSenderIdentity,
-  type TradeMap,
-} from "@ai-nyusatsu-bu/domain";
+import { createTenant, OutreachError, previewTargets, type SalesAiOpsConnection } from "@ai-nyusatsu-bu/outreach";
+import { validateProvisionTenant, validateSalesAiSettings, type TradeMap } from "@ai-nyusatsu-bu/domain";
 import { requireAdmin } from "@/lib/admin";
+import { syncSalesAiSenderIdentity } from "@/lib/sales_ai_sync";
 
 export type SalesAiAdminState = { error: string | null; message: string | null };
 const EMPTY: SalesAiAdminState = { error: null, message: null };
@@ -148,10 +140,19 @@ export async function provisionTenant(
     );
   }
 
+  // 顧客が/companyで既に自社情報・郵送名義を入れていれば、作成直後にそのまま反映する。
+  // まだ何も入れていない組織では「送信元メールアドレスがありません」等で失敗するが、
+  // それ自体はエラーではない（あとで顧客が/companyを保存したときに自動で同期される）
+  const sync = await syncSalesAiSenderIdentity(admin, orgId);
+
   revalidatePath("/admin/sales-ai");
   return {
     error: null,
-    message: `テナント（ID:${created.tenantId}）を作成しました。続けて下の「送信元（顧客名義）」を設定してください。`,
+    message:
+      `テナント（ID:${created.tenantId}）を作成しました。` +
+      (sync.ok
+        ? "送信元（顧客名義）も自動で反映しました。"
+        : `送信元はまだ反映されていません（${sync.reason}）。顧客が「自社情報」を保存すると自動で反映されます`),
   };
 }
 
@@ -237,48 +238,23 @@ export async function checkConnection(_prevState: SalesAiAdminState, formData: F
 }
 
 /**
- * 送信元（顧客名義）を登録して有効化する。
- * 先にテナントが必要（api_keyが要るため）。
+ * 送信元（顧客名義）を今すぐ同期する。
+ *
+ * 通常は顧客が /company を保存するたびに自動で同期される（apps/web/lib/sales_ai_sync.ts）。
+ * このボタンは、その自動同期がうまくいかなかったとき（営業AI側が一時的に落ちていた等）に
+ * 手で再試行するためのもの。入力欄は無い＝本部が値を打ち直すことはしない。
  */
-export async function saveSenderIdentity(
+export async function syncSenderIdentity(
   _prevState: SalesAiAdminState,
   formData: FormData,
 ): Promise<SalesAiAdminState> {
   const { admin } = await requireAdmin();
-
   const orgId = text(formData, "org_id");
   if (orgId === "") return fail("組織が指定されていません");
 
-  const validated = validateSenderIdentity({
-    templateName: text(formData, "template_name"),
-    senderName: text(formData, "sender_name"),
-    senderEmail: text(formData, "sender_email"),
-    senderAddress: text(formData, "sender_address"),
-    optoutUrl: text(formData, "optout_url"),
-    lastName: text(formData, "last_name"),
-    firstName: text(formData, "first_name"),
-    lastNameKana: text(formData, "last_name_kana"),
-    firstNameKana: text(formData, "first_name_kana"),
-    postalCode: text(formData, "postal_code"),
-    prefecture: text(formData, "prefecture"),
-    city: text(formData, "city"),
-    block: text(formData, "block"),
-    building: text(formData, "building"),
-    phone: text(formData, "phone"),
-    department: text(formData, "department"),
-    position: text(formData, "position"),
-  });
-  if (!validated.ok) return fail(validated.error);
-
-  const data = await loadConnection(admin, orgId);
-  if (!data) return fail("先に営業AIの接続（テナント）を設定してください");
-
-  try {
-    await setSenderIdentity({ baseUrl: data.base_url, apiKey: data.api_key }, validated.value);
-  } catch (err) {
-    return fail(`送信元を設定できませんでした（${describe(err)}）`);
-  }
+  const sync = await syncSalesAiSenderIdentity(admin, orgId);
+  if (!sync.ok) return fail(`同期できませんでした（${sync.reason}）`);
 
   revalidatePath("/admin/sales-ai");
-  return { error: null, message: "送信元（顧客名義）を設定し、有効にしました。" };
+  return { error: null, message: "送信元（顧客名義）を同期しました。" };
 }
