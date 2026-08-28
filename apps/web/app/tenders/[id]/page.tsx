@@ -557,6 +557,7 @@ export default async function TenderDetailPage({
           place={tender.place}
           termFrom={tender.term_from}
           termTo={tender.term_to}
+          sourceUrl={tender.source_url}
           lots={lots ?? []}
           partners={partners ?? []}
           suggestedDueAt={suggestedDueAt}

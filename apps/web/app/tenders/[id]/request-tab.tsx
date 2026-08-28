@@ -19,8 +19,9 @@
 import { useActionState, useCallback, useRef, useState } from "react";
 import Link from "next/link";
 import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
+import { CopyButton } from "@/components/CopyButton";
 import { Panel, Pill } from "@/components/ui";
-import { buildQuoteRequestEmail, groupLotsByTrade, type QuoteRequestLot } from "@ai-nyusatsu-bu/domain";
+import { buildOutreachMessage, buildQuoteRequestEmail, groupLotsByTrade, type QuoteRequestLot } from "@ai-nyusatsu-bu/domain";
 import { AREA_OPTIONS, PREFECTURE_OPTIONS, TRADE_OPTIONS } from "@/lib/catalog";
 import { sendQuoteRequests, type SendQuoteRequestsState } from "./actions";
 import { DUE_AT_PLACEHOLDER, RESPONSE_URL_PLACEHOLDER } from "./quote-request-shared";
@@ -51,6 +52,72 @@ function TruncatedText({ text, limit = 40 }: { text: string; limit?: number }) {
         {expanded ? "閉じる" : "詳しく見る"}
       </button>
     </>
+  );
+}
+
+/**
+ * 依頼先が1社もいない業種で出す、開拓の打診文。
+ *
+ * ここで止まると案件そのものを諦めることになる。「協力会社を登録してください」だけでは
+ * 何をすればよいか分からないので、そのまま送れる文面まで作って渡す。
+ *
+ * 送信はしない（CLAUDE.md「やらないこと：問い合わせフォームへの自動送信」）。
+ * 文面をコピーして、営業ツールなり自分のメールなりから送ってもらう。
+ */
+/**
+ * 返信の期日を日本語にする。
+ * suggestedDueAt は入力欄用の "YYYY-MM-DDTHH:mm"。そのまま文面に入れると読めない。
+ * 時刻までは求めない（相手はまだ取引の無い会社で、分単位の締切を押し付ける相手ではない）。
+ */
+function replyByLabel(dueAt: string | null): string | null {
+  const matched = /^(\d{4})-(\d{2})-(\d{2})/.exec(dueAt ?? "");
+  if (!matched) return null;
+  const [, year, month, day] = matched;
+  return `${year}年${Number(month)}月${Number(day)}日`;
+}
+
+function OutreachBlock(props: {
+  trade: string;
+  senderOrgName: string;
+  senderContactName: string;
+  senderContactEmail: string | null;
+  tenderName: string;
+  agencyName: string;
+  place: string | null;
+  termFrom: string | null;
+  termTo: string | null;
+  replyByLabel: string | null;
+  sourceUrl: string | null;
+}) {
+  const { subject, body } = buildOutreachMessage({ ...props, replyByLabel: replyByLabel(props.replyByLabel) });
+  return (
+    <div className="mt-1 space-y-2">
+      <p className="text-xs leading-relaxed text-slate-600">
+        この業種に対応するメール登録済みの協力会社がありません。
+        <Link href="/partners" className="ml-1 text-blue-800 underline">
+          協力会社
+        </Link>
+        から登録するか、下の文面で新しい会社に打診してください。
+      </p>
+
+      <div className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-slate-700">打診文（コピーして使えます）</span>
+          <CopyButton value={`${subject}\n\n${body}`} label="打診文" />
+        </div>
+        <p className="mt-1 text-xs text-slate-500">件名</p>
+        <p className="text-xs text-slate-800">{subject}</p>
+        <p className="mt-1 text-xs text-slate-500">本文</p>
+        <pre className="mt-0.5 whitespace-pre-wrap font-mono text-xs text-slate-800">{body}</pre>
+      </div>
+
+      {/* 見積依頼の文面と違い、回答ページのURLも数量表も入れていない。
+          面識の無い会社に配ってよいものではないため（packages/domain/src/partner_outreach.ts） */}
+      <p className="text-xs leading-relaxed text-slate-500">
+        見積依頼の文面とは別のものです。回答ページのURLと数量表の中身は入れていません
+        （まだ取引の無い会社に渡すものではないため）。公告のURLだけを載せています。
+      </p>
+    </div>
   );
 }
 
@@ -227,6 +294,7 @@ export function RequestTab({
   place,
   termFrom,
   termTo,
+  sourceUrl,
   lots,
   partners,
   suggestedDueAt,
@@ -242,6 +310,7 @@ export function RequestTab({
   place: string | null;
   termFrom: string | null;
   termTo: string | null;
+  sourceUrl: string | null;
   lots: QuoteRequestLot[];
   partners: RequestTabPartner[];
   suggestedDueAt: string | null;
@@ -373,9 +442,19 @@ export function RequestTab({
               )}
               <div className="text-xs font-medium text-slate-700">依頼先</div>
               {candidates.length === 0 ? (
-                <p className="mt-1 text-xs text-slate-500">
-                  この業種に対応するメール登録済みの協力会社がありません。「協力会社」画面から登録してください。
-                </p>
+                <OutreachBlock
+                  trade={group.trade}
+                  senderOrgName={senderOrgName}
+                  senderContactName={senderContactName}
+                  senderContactEmail={senderContactEmail}
+                  tenderName={tenderName}
+                  agencyName={agencyName}
+                  place={place}
+                  termFrom={termFrom}
+                  termTo={termTo}
+                  replyByLabel={suggestedDueAt}
+                  sourceUrl={sourceUrl}
+                />
               ) : (
                 <PartnerPicker
                   trade={group.trade}
