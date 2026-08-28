@@ -1,0 +1,227 @@
+[
+  {
+    "tenderName": "新潟地方裁判所庁舎、新潟家庭裁判所庁舎等で使用する電気の購入（高圧電気）",
+    "tenderId": "48d3f818-2990-4317-8bd8-339f2c1b4f6f",
+    "sourceUrl": "https://www.p-portal.go.jp/pps-web-biz/UAA01/OAA0104?",
+    "checked": [
+      "期限",
+      "qualCategory",
+      "grade",
+      "areas"
+    ],
+    "expected": {},
+    "note": "原文で確認（2026-08-28）：提出 9/17・質問 8/6・開札 9/18 が公告と一致。参加資格は引用のみで確認。営業品目は引用なしのため未確認"
+  },
+  {
+    "tenderName": "災害時備蓄品の購入",
+    "tenderId": "2422b70c-c68e-4642-a4a8-98dbe2fc5780",
+    "sourceUrl": "https://www.p-portal.go.jp/pps-web-biz/UAA01/OAA0104?",
+    "checked": [
+      "期限",
+      "qualCategory",
+      "grade",
+      "areas"
+    ],
+    "expected": {},
+    "note": "引用のみで確認（原文は未確認）：期限3つ・資格区分・等級・地域は引用と一致。営業品目は引用なしのため未確認"
+  },
+  {
+    "tenderName": "鳥取VOR/DME局舎空気調和設備工事外１件実施設計",
+    "tenderId": "c77e01f6-42f7-4cec-b153-12c1813a19c2",
+    "sourceUrl": "https://www.p-portal.go.jp/pps-web-biz/UAA01/OAA0104?",
+    "checked": [
+      "submitDeadline",
+      "grade"
+    ],
+    "expected": {},
+    "note": "引用のみで確認（原文は未確認）：提出期限は引用の「09時00分から17時00分まで」の締切17:00と一致。質問期限17:00と開札00:00は引用に時刻が無いため未確認（要原文）"
+  },
+  {
+    "tenderName": "令和８年度大規模災害及び国民保護事案を想定した消防庁図上訓練における訓練想定作成",
+    "tenderId": "21f0bfd3-0ae3-4d12-a90f-eee21b428b2d",
+    "sourceUrl": "https://www.p-portal.go.jp/pps-web-biz/UAA01/OAA0104?",
+    "checked": [
+      "submitDeadline",
+      "bidOpenAt",
+      "参加資格"
+    ],
+    "expected": {},
+    "note": "引用のみで確認（原文は未確認）：提出期限・開札・参加資格4項目とも引用と一致。質問期限は（無し）で、無いのが正しいかは原文が要る"
+  },
+  {
+    "tenderName": "阿倍野公共職業安定所ルシアス庁舎における什器の購入及び移設等作業",
+    "tenderId": "44fe59df-6554-4415-b1c3-754ba7771eb5",
+    "sourceUrl": "https://www.p-portal.go.jp/pps-web-biz/UAA01/OAA0104?",
+    "checked": [],
+    "expected": {},
+    "note": "引用が1つも無い。値はあるが根拠が無いため全項目未確認（要原文）"
+  },
+  {
+    "tenderName": "(26)「(27)鹿島知手住宅外壁改修その他工事」設計業務",
+    "tenderId": "6ce9e10f-980c-499b-9aff-9f4e055e7f93",
+    "sourceUrl": "https://www.p-portal.go.jp/pps-web-biz/UAA01/OAA0104?",
+    "checked": [
+      "期限",
+      "item",
+      "grade"
+    ],
+    "expected": {},
+    "note": "引用のみで確認（原文は未確認）：期限3つ・営業品目・等級は引用と一致。資格区分は未判定で引用なし、地域も引用なし"
+  },
+  {
+    "tenderName": "【関東地方整備局　利根川上流河川事務所】ごみ袋外１６点購入",
+    "tenderId": "e219bfda-508c-4e22-9d1a-ce0f518c5446",
+    "sourceUrl": "https://www.p-portal.go.jp/pps-web-biz/UAA01/OAA0104?",
+    "checked": [
+      "qualCategory",
+      "areas"
+    ],
+    "expected": {},
+    "note": "引用のみで確認（原文は未確認）：資格区分・地域は引用と一致。期限は引用に時刻しか無く、日付の根拠が見えない（要原文）"
+  },
+  {
+    "tenderName": "令和８年度有害化学物質リスク管理基礎調査委託事業（国産水産物中のPFAS含有実態調査）",
+    "tenderId": "a9b8bbc9-acd2-4e60-ad86-7bf289e94559",
+    "sourceUrl": "https://www.p-portal.go.jp/pps-web-biz/UAA01/OAA0104?",
+    "checked": [
+      "qualCategory",
+      "grade"
+    ],
+    "expected": {},
+    "note": "引用のみで確認（原文は未確認）：資格区分・等級は引用と一致。提出期限が空、開札は引用に日付が無い（要原文）"
+  },
+  {
+    "tenderName": "東北防衛局（８）会計課執務室改修等業務",
+    "tenderId": "d0d2ead4-c985-461a-a9cd-dcd53eadd659",
+    "sourceUrl": "https://www.p-portal.go.jp/pps-web-biz/UAA01/OAA0104?",
+    "checked": [],
+    "expected": {},
+    "note": "引用が1つも無い。値はあるが根拠が無いため全項目未確認（要原文）"
+  },
+  {
+    "tenderName": "令和８年度除雪機械作業ガイダンス装置保守等作業",
+    "tenderId": "8dc5f038-788d-434b-a7e2-a1349fdbfae1",
+    "sourceUrl": "https://www.p-portal.go.jp/pps-web-biz/UAA01/OAA0104?",
+    "checked": [
+      "期限",
+      "参加資格"
+    ],
+    "expected": {},
+    "note": "原文で確認（2026-08-28）：提出 9/11・質問 8/28・開札 9/14 が公告と一致。参加資格は引用のみで確認"
+  },
+  {
+    "tenderName": "運輸管理業務効率化のための情報処理機器更新等作業の請負　一式",
+    "tenderId": "dda647a3-60bf-4192-8040-05973d7f1d37",
+    "sourceUrl": "https://www.p-portal.go.jp/pps-web-biz/UAA01/OAA0104?",
+    "checked": [
+      "期限",
+      "qualCategory",
+      "grade"
+    ],
+    "expected": {},
+    "note": "引用のみで確認（原文は未確認）：期限3つ・資格区分・等級は引用と一致。営業品目と地域は引用なし"
+  },
+  {
+    "tenderName": "重度被災労働者の生活・介護に関する実態調査（アンケート調査）",
+    "tenderId": "2f5f21e2-4990-4e92-b56f-f08bd09c9095",
+    "sourceUrl": "https://www.p-portal.go.jp/pps-web-biz/UAA01/OAA0104?",
+    "checked": [
+      "submitDeadline",
+      "bidOpenAt",
+      "qualCategory",
+      "grade"
+    ],
+    "expected": {},
+    "note": "原文で確認（2026-08-28）：提出 8/20 16:00・開札 8/21 11:00 が公告と一致。質問期限（無し）は未確認のため checked に入れていない。参加資格は引用のみで確認"
+  },
+  {
+    "tenderName": "連絡車（４×４ ７人乗り）１台交換購入",
+    "tenderId": "ba14424f-7e88-4ecd-bb51-40a2e2c5c09d",
+    "sourceUrl": "https://www.p-portal.go.jp/pps-web-biz/UAA01/OAA0104?",
+    "checked": [
+      "期限",
+      "item",
+      "grade",
+      "areas"
+    ],
+    "expected": {},
+    "note": "引用のみで確認（原文は未確認）：期限3つ・営業品目・等級・地域は引用と一致。資格区分は引用が「物品の製造」又は「物品の販売」の両方を挙げているのに片方だけを選んでいる。判断が要る"
+  },
+  {
+    "tenderName": "【東京航空局】新潟空港TAPS用20kVA無停電電源装置入力盤外2点（製造・設置・調整）（再公告）",
+    "tenderId": "a86bcb23-9d64-401d-b6d5-ff4ae1304a98",
+    "sourceUrl": "https://www.p-portal.go.jp/pps-web-biz/UAA01/OAA0104?",
+    "checked": [],
+    "expected": {},
+    "note": "引用が1つも無い。値はあるが根拠が無いため全項目未確認（要原文）"
+  },
+  {
+    "tenderName": "官民連携によるサイバー脅威情勢把握に関する調査研究",
+    "tenderId": "8eeb113f-6c27-4996-9538-e198d3d20e6b",
+    "sourceUrl": "https://www.p-portal.go.jp/pps-web-biz/UAA01/OAA0104?",
+    "checked": [
+      "submitDeadline",
+      "bidOpenAt",
+      "qualCategory",
+      "item",
+      "grade"
+    ],
+    "expected": {},
+    "note": "引用のみで確認（原文は未確認）：提出期限（正午＝12:00）・開札（午後3時＝15:00）・資格区分・営業品目・等級は引用と一致。質問期限（無し）と地域は原文が要る"
+  },
+  {
+    "tenderName": "東京拘置所被収容者主食用精麦（白麦）（令和８年度下半期分）単価契約",
+    "tenderId": "dc2d99d3-c6b0-4f7f-a127-ac02b572465c",
+    "sourceUrl": "https://www.p-portal.go.jp/pps-web-biz/UAA01/OAA0104?",
+    "checked": [
+      "submitDeadline",
+      "bidOpenAt",
+      "grade"
+    ],
+    "expected": {},
+    "note": "引用のみで確認（原文は未確認）：提出期限・開札・等級は引用と一致。質問期限は引用に時刻が無く00:00になっている（要原文）。資格区分は引用が「物品の製造」又は「物品の販売」で、未判定が妥当かは判断が要る"
+  },
+  {
+    "tenderName": "【岩木川統管】岩木川ダム統合管理事務所管内で使用する電気（高圧）",
+    "tenderId": "a87f2d34-b263-4571-97aa-d378184a6f9c",
+    "sourceUrl": "https://www.p-portal.go.jp/pps-web-biz/UAA01/OAA0104?",
+    "checked": [
+      "qualCategory",
+      "grade",
+      "areas"
+    ],
+    "expected": {},
+    "note": "引用のみで確認（原文は未確認）：資格区分・等級・地域は引用と一致。期限3つは引用に時刻が無いのに値に時刻が付いている。別表の隣の欄から読んだ可能性があるが、引用では裏付けられない（要原文）"
+  },
+  {
+    "tenderName": "共通基盤システム開発用及び警察庁WAN接続用端末装置の購入外",
+    "tenderId": "b22ec6e4-1e5a-48a4-a6b8-cf3f2775495b",
+    "sourceUrl": "https://www.p-portal.go.jp/pps-web-biz/UAA01/OAA0104?",
+    "checked": [],
+    "expected": {},
+    "note": "引用が1つも無い。値はあるが根拠が無いため全項目未確認（要原文）"
+  },
+  {
+    "tenderName": "08-0049-0200 令和８年度「周波数ひっ迫対策技術試験事務」のうち「無線LANにおける周波数高効率化技術の導入に向けた調査検討」の請負",
+    "tenderId": "37029213-6494-4bc2-b87b-d5e8d88ad0b0",
+    "sourceUrl": "https://www.p-portal.go.jp/pps-web-biz/UAA01/OAA0104?",
+    "checked": [
+      "submitDeadline",
+      "bidOpenAt",
+      "参加資格"
+    ],
+    "expected": {},
+    "note": "引用のみで確認（原文は未確認）：提出期限（午後5時＝17:00）・開札（午後3時＝15:00）・参加資格4項目とも引用と一致。質問期限（無し）は原文が要る"
+  },
+  {
+    "tenderName": "【海上保安庁　特外1178】GPS MODULE(ファルコン用)2個整備",
+    "tenderId": "e14612bd-1333-4e48-8ab8-18627d750ea1",
+    "sourceUrl": "https://www.p-portal.go.jp/pps-web-biz/UAA01/OAA0104?",
+    "checked": [
+      "grade",
+      "areas"
+    ],
+    "expected": {},
+    "note": "引用のみで確認（原文は未確認）：等級・地域は引用と一致。提出期限は引用に時刻が無く00:00、開札は引用に時刻が無いのに10:00が付いている（要原文）。資格区分は引用が「物品の製造」又は「役務の提供等」で判断が要る"
+  }
+]
