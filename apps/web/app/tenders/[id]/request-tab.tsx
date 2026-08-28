@@ -20,7 +20,15 @@ import { useActionState, useCallback, useRef, useState } from "react";
 import Link from "next/link";
 import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
 import { CopyButton } from "@/components/CopyButton";
-import { previewOutreachTargets, sendOutreach, type OutreachState } from "./outreach-actions";
+import {
+  loadOutreachResults,
+  previewOutreachTargets,
+  registerPartnerFromOutreach,
+  sendOutreach,
+  type OutreachResultsState,
+  type OutreachState,
+  type RegisterPartnerState,
+} from "./outreach-actions";
 import { btnClass, Panel, Pill } from "@/components/ui";
 import { buildOutreachMessage, buildQuoteRequestEmail, groupLotsByTrade, type QuoteRequestLot } from "@ai-nyusatsu-bu/domain";
 import { AREA_OPTIONS, PREFECTURE_OPTIONS, TRADE_OPTIONS } from "@/lib/catalog";
@@ -159,6 +167,110 @@ function SalesAiBlock({ tenderId, trade }: { tenderId: string; trade: string }) 
       <p className="mt-1 text-xs leading-relaxed text-slate-500">
         送るのは下の打診文です。実際にフォームへ送るのは営業AIで、送信先の除外・回数の上限・
         停止の設定はすべて営業AI側の設定が効きます。
+      </p>
+    </div>
+  );
+}
+
+// "use server" のファイルからは async 関数しか export できないため、初期値はこちらに置く
+const EMPTY_RESULTS: OutreachResultsState = { error: null, message: null, companies: [] };
+const EMPTY_REGISTER: RegisterPartnerState = { error: null, message: null };
+
+/**
+ * 打診に返信をくれた会社を、協力会社として登録する1行。
+ *
+ * 【なぜ「返信のあった会社」を営業AIから引かないか】
+ * 営業AIの replied は人が手で立てるフラグで、営業AIはメールボックスを見ていない。
+ * 返信は打診文に書いた連絡先＝利用者自身のメールに届くので、
+ * 「送った会社」を出して、返信をもらった会社を利用者に選んでもらう。
+ */
+function OutreachResultRow({
+  tenderId,
+  trade,
+  company,
+}: {
+  tenderId: string;
+  trade: string;
+  company: OutreachResultsState["companies"][number];
+}) {
+  const [state, formAction, pending] = useActionState(registerPartnerFromOutreach, EMPTY_REGISTER);
+  const done = Boolean(state.message);
+
+  return (
+    <li className="border-b border-violet-100 py-1 last:border-0">
+      <form action={formAction} className="flex flex-wrap items-center gap-2">
+        <input type="hidden" name="tender_id" value={tenderId} />
+        <input type="hidden" name="trade" value={trade} />
+        <input type="hidden" name="company_id" value={String(company.companyId)} />
+        <input type="hidden" name="name" value={company.name} />
+        <input type="hidden" name="pref" value={company.pref ?? ""} />
+        <input type="hidden" name="tel" value={company.tel ?? ""} />
+        <input type="hidden" name="email" value={company.email ?? ""} />
+        <input type="hidden" name="contact_url" value={company.contactUrl ?? ""} />
+        <input type="hidden" name="website_url" value={company.websiteUrl ?? ""} />
+
+        <span className="text-xs text-slate-800">{company.name}</span>
+        {company.pref && <span className="text-xs text-slate-400">{company.pref}</span>}
+        {/* メールアドレスが無い会社は登録できても見積依頼を出せない。先に見せる */}
+        {!company.email && <span className="text-xs text-amber-700">メール未取得</span>}
+        {company.replied && <span className="text-xs text-emerald-700">返信あり</span>}
+        {!done && (
+          <button type="submit" disabled={pending} className={btnClass("default", "sm")}>
+            {pending ? "登録中..." : "協力会社として登録"}
+          </button>
+        )}
+      </form>
+      {state.error && (
+        <p role="alert" className="text-xs leading-relaxed text-rose-700">
+          {state.error}
+        </p>
+      )}
+      {state.message && <p className="text-xs leading-relaxed text-emerald-800">{state.message}</p>}
+    </li>
+  );
+}
+
+/**
+ * 営業AIへ送った会社の一覧。返信をもらった会社をここから協力会社にする。
+ *
+ * **ここが繋がって初めて開拓が価値になる。** 送っただけでは協力会社は増えない。
+ * 返信は数日後に来るので、案件画面をあとから開いても見られるようにしてある
+ * （リストの番号は outreach_sends に控えてある）。
+ */
+function OutreachResults({ tenderId, trade, sentOnLabel }: { tenderId: string; trade: string; sentOnLabel: string | null }) {
+  const [state, formAction, pending] = useActionState(loadOutreachResults, EMPTY_RESULTS);
+
+  return (
+    <div className="mt-1 rounded border border-violet-200 bg-violet-50 px-2 py-1.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-xs font-medium text-violet-900">営業AIで打診した会社</p>
+        {sentOnLabel && <span className="text-xs text-slate-500">最後の送信 {sentOnLabel}</span>}
+        <form action={formAction}>
+          <input type="hidden" name="tender_id" value={tenderId} />
+          <input type="hidden" name="trade" value={trade} />
+          <input type="hidden" name="sent_on" value={sentOnLabel ?? ""} />
+          <button type="submit" disabled={pending} className={btnClass("default", "sm")}>
+            {pending ? "確認中..." : "送った会社を見る"}
+          </button>
+        </form>
+      </div>
+
+      {state.error && (
+        <p role="alert" className="mt-1 text-xs leading-relaxed text-rose-700">
+          {state.error}
+        </p>
+      )}
+      {state.message && <p className="mt-1 text-xs leading-relaxed text-violet-900">{state.message}</p>}
+      {state.companies.length > 0 && (
+        <ul className="mt-1">
+          {state.companies.map((company) => (
+            <OutreachResultRow key={company.companyId || company.name} tenderId={tenderId} trade={trade} company={company} />
+          ))}
+        </ul>
+      )}
+      <p className="mt-1 text-xs leading-relaxed text-slate-500">
+        返信は、打診文に書いたご自身のメールアドレスに届きます。
+        返信をもらった会社を登録すると、次の案件から見積依頼を出せます。
       </p>
     </div>
   );
@@ -393,6 +505,7 @@ export function RequestTab({
   officialStatus,
   recommendations,
   outreachTrades,
+  outreachSends,
 }: {
   tenderId: string;
   senderOrgName: string;
@@ -411,6 +524,12 @@ export function RequestTab({
   recommendations: Record<string, PartnerRecommendationResult | null>;
   /** 営業AIの対応表にある業種。ここに無い業種では候補を探せない */
   outreachTrades: string[];
+  /**
+   * すでに営業AIへ送った業種と、最後に送信した日時の表示。
+   * 一度でも送っていれば、依頼先が埋まったあとも結果を見られるようにする
+   * （返信は数日後に来るし、1社登録しただけで一覧が消えては困る）
+   */
+  outreachSends: Record<string, string | null>;
 }) {
   const boundAction = sendQuoteRequests.bind(null, tenderId);
   const [state, formAction, pending] = useActionState(boundAction, initialState);
@@ -558,6 +677,15 @@ export function RequestTab({
                   candidates={candidates}
                   recommended={recommendedMap}
                   onSelectedCountChange={handleSelectedCountChange}
+                />
+              )}
+
+              {/* 依頼先が埋まったあとも出す。1社登録したら一覧が消える、では続きを登録できない */}
+              {group.trade in outreachSends && (
+                <OutreachResults
+                  tenderId={tenderId}
+                  trade={group.trade}
+                  sentOnLabel={outreachSends[group.trade]}
                 />
               )}
 
