@@ -56,3 +56,4 @@ export * from "./goldset";
 export * from "./org_access";
 export * from "./award_competitors";
 export * from "./award_match";
+export * from "./partner_gaps";
