@@ -15,7 +15,7 @@
 // 「その都道府県の全社」が対象になり、面識の無い会社への一斉送信になる。
 // 変換できない業種は、ここで止める。
 
-import { createTargetList, OutreachError, previewTargets, sendTargetList } from "@ai-nyusatsu-bu/outreach";
+import { createTargetList, getQuotaStatus, OutreachError, previewTargets, sendTargetList } from "@ai-nyusatsu-bu/outreach";
 import { buildOutreachMessage, prefectureFromPlace, toSalesAiTrade, type TradeMap } from "@ai-nyusatsu-bu/domain";
 import { requireOrgContext } from "@/lib/auth";
 
@@ -28,6 +28,8 @@ export type OutreachState = {
   sample: { name: string; pref: string | null }[];
   /** 作ったリストの番号。作っていなければ null */
   listId: number | null;
+  /** 今月の残り送信可能数（T55）。取れなかったときはnull（エラーにはしない） */
+  quotaNote: string | null;
 };
 
 function text(formData: FormData, key: string): string {
@@ -36,7 +38,23 @@ function text(formData: FormData, key: string): string {
 }
 
 function fail(error: string): OutreachState {
-  return { error, message: null, count: null, sample: [], listId: null };
+  return { error, message: null, count: null, sample: [], listId: null, quotaNote: null };
+}
+
+/**
+ * 残り送信可能数（T55）を一言にする。
+ *
+ * 【失敗させない】
+ * これが取れなくても、何社いるか見る・送信すること自体は成立しているので、
+ * ここでの失敗は無視してnullを返す（呼び出し側でエラーにしない）。
+ */
+async function quotaNote(connection: { baseUrl: string; apiKey: string }): Promise<string | null> {
+  try {
+    const quota = await getQuotaStatus(connection);
+    return `今月の残り送信可能数：${quota.remaining30d}通（直近30日、上限${quota.effectiveQuota30d}通）`;
+  } catch {
+    return null;
+  }
 }
 
 type Resolved = {
@@ -154,6 +172,7 @@ export async function previewOutreachTargets(_prev: OutreachState, formData: For
       count: preview.count,
       sample: preview.sample,
       listId: null,
+      quotaNote: await quotaNote(resolved.connection),
     };
   } catch (err) {
     return fail(`営業AIに問い合わせできませんでした（${describe(err)}）`);
@@ -223,6 +242,7 @@ export async function sendOutreach(_prev: OutreachState, formData: FormData): Pr
       count: sent.requested,
       sample: [],
       listId: created.listId,
+      quotaNote: await quotaNote(resolved.connection),
     };
   } catch (err) {
     // リストは作れたが送れなかった。作り直させないよう、リストの番号を残す

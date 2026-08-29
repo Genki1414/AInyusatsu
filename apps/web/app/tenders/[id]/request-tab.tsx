@@ -85,7 +85,7 @@ function replyByLabel(dueAt: string | null): string | null {
 
 // "use server" のファイルからは async 関数しか export できないため、初期値はこちらに置く
 // （apps/web/AGENTS.md「実際に踏んだ落とし穴」）
-const EMPTY_OUTREACH: OutreachState = { error: null, message: null, count: null, sample: [], listId: null };
+const EMPTY_OUTREACH: OutreachState = { error: null, message: null, count: null, sample: [], listId: null, quotaNote: null };
 
 /**
  * 営業AIで候補企業を探す。
@@ -134,6 +134,7 @@ function SalesAiBlock({ tenderId, trade }: { tenderId: string; trade: string }) 
         </p>
       )}
       {shown.message && <p className="mt-1 text-xs leading-relaxed text-violet-900">{shown.message}</p>}
+      {shown.quotaNote && <p className="mt-1 text-xs leading-relaxed text-slate-500">{shown.quotaNote}</p>}
       {state.sample.length > 0 && !sendState.message && (
         <ul className="mt-1 space-y-0.5">
           {state.sample.map((company, i) => (
