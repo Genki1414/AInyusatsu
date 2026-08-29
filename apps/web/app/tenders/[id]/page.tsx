@@ -131,10 +131,17 @@ const SIMILAR_AWARDS_LIMIT = 20;
  * 営業AIの対応表にある業種。見積依頼タブでしか使わないので、そのタブでだけ引く。
  * 対応の無い業種を営業AIへ投げると条件が捨てられ、その県の全社が対象になってしまう。
  */
+/**
+ * 営業AIの接続と、対応表にある業種。
+ *
+ * 【つながっていない理由まで返す】
+ * 業種の一覧だけ返すと、「接続していない」と「この業種が対応表に無い」の区別がつかない。
+ * どちらも同じ空配列になり、画面から枠ごと消えて理由が分からなくなる（実際に分からなかった）。
+ */
 async function loadOutreachTrades(
   supabase: Awaited<ReturnType<typeof requireOrgContext>>["supabase"],
   orgId: string,
-): Promise<string[]> {
+): Promise<{ connected: boolean; trades: string[] }> {
   // 設定は本部が持つ。api_key は authenticated から列の読み取り権限を外してあるので選ばない
   // （supabase/migrations/20260828000002_sales_ai_connections_admin.sql）
   const { data, error } = await supabase
@@ -145,13 +152,16 @@ async function loadOutreachTrades(
   if (error) {
     // 設定が読めなくても案件画面は使える。握りつぶさずログには残す
     console.error(`[tenders] 営業AIの設定を読めませんでした（org=${orgId}）: ${error.message}`);
-    return [];
+    return { connected: false, trades: [] };
   }
   // URLが無ければ、対応表があっても呼べない
-  if (!data?.base_url) return [];
-  return Object.entries(data.trade_map ?? {})
-    .filter(([, code]) => typeof code === "string" && code.trim() !== "")
-    .map(([trade]) => trade);
+  if (!data?.base_url) return { connected: false, trades: [] };
+  return {
+    connected: true,
+    trades: Object.entries(data.trade_map ?? {})
+      .filter(([, code]) => typeof code === "string" && code.trim() !== "")
+      .map(([trade]) => trade),
+  };
 }
 
 /**
@@ -433,7 +443,7 @@ export default async function TenderDetailPage({
   const tradeGroups = groupLotsByTrade(lots ?? []);
   //
   // 見積依頼タブで要るものは同時に引く。順番に待つ理由が無い
-  const [recommendations, sender, outreachTrades, outreachSends] = await Promise.all([
+  const [recommendations, sender, outreach, outreachSends] = await Promise.all([
     tab === "request" && officialStatus === "取得済" && tradeGroups.length > 0
       ? getPartnerRecommendations(supabase, orgId, id, tender.item, tender.place, tradeGroups, partners ?? [])
       : Promise.resolve({} as Record<string, PartnerRecommendationResult | null>),
@@ -443,7 +453,9 @@ export default async function TenderDetailPage({
     tab === "request" ? loadSenderIdentity(supabase, orgId, orgName, userEmail) : Promise.resolve(null),
     // 営業AIの対応表にある業種だけ、候補を探せる。対応の無い業種を投げると営業AI側で
     // 条件が捨てられ、その県の全社が対象になってしまう
-    tab === "request" ? loadOutreachTrades(supabase, orgId) : Promise.resolve([] as string[]),
+    tab === "request"
+      ? loadOutreachTrades(supabase, orgId)
+      : Promise.resolve({ connected: false, trades: [] as string[] }),
     // すでに営業AIへ送った業種。依頼先が埋まったあとも、送った会社を見て
     // 協力会社として登録できるようにする（返信は数日後に来る）
     tab === "request"
@@ -629,7 +641,8 @@ export default async function TenderDetailPage({
           suggestedDueAt={suggestedDueAt}
           officialStatus={officialStatus}
           recommendations={recommendations}
-          outreachTrades={outreachTrades}
+          outreachConnected={outreach.connected}
+          outreachTrades={outreach.trades}
           outreachSends={outreachSends}
         />
       )}

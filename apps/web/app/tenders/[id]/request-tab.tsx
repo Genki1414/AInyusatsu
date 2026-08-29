@@ -99,6 +99,27 @@ const EMPTY_OUTREACH: OutreachState = {
 };
 
 /**
+ * 営業AIでの開拓が使えないときの枠。
+ *
+ * 【消さずに理由を出す】
+ * 枠ごと消すと、「そういう機能が無い」のか「設定していないだけ」なのかが
+ * 利用者にも本部にも分からない。実際に「出ない」と言われて原因を追うことになった。
+ * 押せない理由を書いておけば、本部に連絡すれば済むと分かる。
+ */
+function SalesAiUnavailable({ connected, trade }: { connected: boolean; trade: string }) {
+  return (
+    <div className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5">
+      <p className="text-xs font-medium text-slate-600">営業AIで新しい取引先を探して打診する</p>
+      <p className="mt-0.5 text-xs leading-relaxed text-slate-500">
+        {connected
+          ? `「${trade}」は、いまこの機能ではお探しできません。ご希望の場合は本部までご連絡ください。`
+          : "いまはご利用いただけません。ご希望の場合は本部までご連絡ください。"}
+      </p>
+    </div>
+  );
+}
+
+/**
  * 営業AIで候補企業を探して送る。
  *
  * 【依頼先がいても出す】（ユーザー決定 2026-08-29）
@@ -541,6 +562,7 @@ export function RequestTab({
   suggestedDueAt,
   officialStatus,
   recommendations,
+  outreachConnected,
   outreachTrades,
   outreachSends,
 }: {
@@ -559,6 +581,8 @@ export function RequestTab({
   suggestedDueAt: string | null;
   officialStatus: "未取得" | "申請中" | "取得済";
   recommendations: Record<string, PartnerRecommendationResult | null>;
+  /** 営業AIの接続そのものがあるか。無ければ業種以前に使えない */
+  outreachConnected: boolean;
   /** 営業AIの対応表にある業種。ここに無い業種では候補を探せない */
   outreachTrades: string[];
   /**
@@ -719,9 +743,15 @@ export function RequestTab({
               {/* 【依頼先がいても出す】（ユーザー決定 2026-08-29）
                   もともとは「協力会社がいない業種を埋める」機能として、依頼先が0社のときだけ
                   出していた。相見積を増やしたい場合もあるので、常に出す。
-                  対応表に無い業種では出さない（その県の全社が対象になってしまうため） */}
-              {outreachTrades.includes(group.trade) && (
+
+                  【使えないときも枠は出す】
+                  対応表に無い業種では探しに行けない（その県の全社が対象になってしまうため）。
+                  ただし枠ごと消すと、機能が無いのか設定していないのかが分からない。
+                  枠は出したまま、押せない理由を書く */}
+              {outreachTrades.includes(group.trade) ? (
                 <SalesAiBlock tenderId={tenderId} trade={group.trade} />
+              ) : (
+                <SalesAiUnavailable connected={outreachConnected} trade={group.trade} />
               )}
 
               {/* 依頼先が埋まったあとも出す。1社登録したら一覧が消える、では続きを登録できない */}
