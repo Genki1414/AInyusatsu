@@ -5,6 +5,8 @@
 // （tel / areas / memo）は別物。詰め替えを画面やアクションに散らすと、
 // 項目が増えたときに片方だけ直る。純ロジックにしてテストを書く。
 //
+import { normalizeCompanyName } from "./company_name";
+
 // 【推測で埋めない】
 // 取れなかった項目は null のままにする。メールアドレスが無い会社を
 // 「メール未登録」として登録し、見積依頼の候補から外れるほうが、
@@ -91,25 +93,15 @@ export function toPartnerDraft(
  * 同じ会社へ2通行く（相手には嫌がられ、原価集計も狂う）ので、
  * 社名で照合してから入れる。
  *
- * 株式会社の表記ゆれ（㈱・(株)）だけは吸収する。
- * それ以上の「似ている」判定はしない——別の会社を同じとみなすほうが害が大きい。
+ * 突き合わせの規則は会社名の共通処理（company_name.ts）に置いてある。
+ * 本部が組織の重複を止めるのと同じ規則を使う。
  */
-export function normalizePartnerName(name: string): string {
-  return name
-    .replace(/㈱/g, "株式会社")
-    .replace(/㈲/g, "有限会社")
-    .replace(/[（(]株[)）]/g, "株式会社")
-    .replace(/[（(]有[)）]/g, "有限会社")
-    .replace(/[\s　]/g, "")
-    .toLowerCase();
-}
-
 export function findExistingPartner<T extends { id: string; name: string }>(
   partners: T[],
   name: string,
 ): T | null {
-  const target = normalizePartnerName(name);
-  return partners.find((p) => normalizePartnerName(p.name) === target) ?? null;
+  const target = normalizeCompanyName(name);
+  return partners.find((p) => normalizeCompanyName(p.name) === target) ?? null;
 }
 
 /**

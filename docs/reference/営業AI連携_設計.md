@@ -52,8 +52,9 @@ AI入札部側に作り直すと、片方だけ直したときに食い違う。
 **顧客は営業AIの画面を開かない**（ユーザー決定 2026-08-28）。
 基本プランに送信500通/月が含まれる。
 
-`monthly_send_quota` / `daily_send_quota` は、テナント作成時に必ず渡している
-（基本プラン 月500通・日50通。`packages/domain/src/sales_ai.ts` の `basePlanQuota()`）。
+`monthly_send_quota` は、テナント作成時に必ず渡している
+（基本プラン 月500通。`packages/domain/src/sales_ai.ts` の `basePlanQuota()`）。
+**日の上限（`daily_send_quota`）は渡さない**（ユーザー決定 2026-08-29。月の枠だけで管理する）。
 **渡し忘れると営業AI側の既定値 4,000通/月になる。契約の8倍。**
 応答の `quota_is_default` を見て、既定値に落ちていたら作成そのものを失敗させる。
 
@@ -220,9 +221,12 @@ POST /api/ops/tenants
 これは営業AI単体の最低プランの想定値。AI入札部の基本プランは500通なので、
 渡さないと**契約の8倍**送れる状態になり、誰も気づかない。
 
-枠の値は `packages/domain/src/sales_ai.ts` の `basePlanQuota()` に1か所だけ置いてある
-（月500通・日50通）。日の上限は、月500通を1日に固め打ちさせないため
-——相手はこれから協力会社になってもらう会社で、同じ日に大量に届くと関係が始まらない。
+枠の値は `packages/domain/src/sales_ai.ts` の `basePlanQuota()` に1か所だけ置いてある（月500通）。
+
+**日の上限は設けない**（ユーザー決定 2026-08-29）。営業AI側の既定値（300通/日）のままにする。
+月500通しか無いので、日次が実質的な制約になることはない。
+なお「1回押したら50社まで」は日の上限ではなく、営業AI側のペーシング
+（`FORM_MAX_PER_RUN` / `FORM_MAX_PER_TENANT_PER_HOUR`）によるもので、これは変えられない。
 
 応答の `quota_is_default` と `monthly_send_quota` を照合し、
 指定どおりでなければ**テナント作成そのものを失敗させる**。

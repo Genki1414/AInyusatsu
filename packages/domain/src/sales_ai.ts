@@ -285,17 +285,20 @@ export function validateProvisionTenant(input: { orgName: string; senderEmail: s
 /** 基本プランに含まれる送信数（通/月）。docs/reference/価格.md */
 export const BASE_PLAN_MONTHLY_SENDS = 500;
 
+export type PlanQuota = { monthlySends: number };
+
 /**
- * 1日あたりの上限（通/日）。
+ * 契約プランの送信枠。いまは1プランしか無いので固定値を返す。
  *
- * 月500通を1日に固め打ちさせない。相手はこれから協力会社になってもらう会社で、
- * 同じ日に大量に届くと関係が始まらない。月の1割強にあたる50通を上限にする。
+ * 【日の上限は設けない】（ユーザー決定 2026-08-29）
+ * 月の枠だけで管理する。営業AI側には日次の枠（daily_send_quota）もあるが、
+ * こちらからは渡さない＝営業AIの既定値（300通/日）のままにする。
+ * 月500通しか無いので、日次が実質的な制約になることはない。
+ *
+ * なお営業AI側には、こちらの設定と関係なく効くペーシングがある
+ * （FORM_MAX_PER_RUN=50件／回、FORM_MAX_PER_TENANT_PER_HOUR=50件／時）。
+ * 「1回押したら50社まで」はこれによるもので、日の上限とは別。
  */
-export const BASE_PLAN_DAILY_SENDS = 50;
-
-export type PlanQuota = { monthlySends: number; dailySends: number };
-
-/** 契約プランの送信枠。いまは1プランしか無いので固定値を返す。 */
 export function basePlanQuota(): PlanQuota {
-  return { monthlySends: BASE_PLAN_MONTHLY_SENDS, dailySends: BASE_PLAN_DAILY_SENDS };
+  return { monthlySends: BASE_PLAN_MONTHLY_SENDS };
 }

@@ -20,6 +20,7 @@ import { randomInt } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import {
   buildInitialPassword,
+  findSameNameOrg,
   SUSPEND_REASONS,
   INITIAL_PASSWORD_ALPHABET,
   INITIAL_PASSWORD_LENGTH,
@@ -111,6 +112,28 @@ export async function issueAccount(
   });
   if (!validated.ok) return fail(validated.error);
   const { orgName, userName, email } = validated.value;
+
+  // 【同じ会社を二重に作らせない】
+  // ここは「新しい会社」を作るフォーム。同じ会社の2人目をここで作ると
+  // 別の組織ができ、案件も協力会社も見えないアカウントになる（実際に起きた）。
+  // 2人目は「アカウント追加の依頼」から発行する。
+  const { data: orgs, error: orgsError } = await admin
+    .from("organizations")
+    .select("id, name")
+    .returns<{ id: string; name: string }[]>();
+  if (orgsError) {
+    // 読めないまま発行すると重複に気づけない。ここで止める
+    return fail(`既存の会社を確認できませんでした（${orgsError.message}）。時間をおいて試してください`);
+  }
+  const duplicated = findSameNameOrg(orgs ?? [], orgName);
+  if (duplicated) {
+    return fail(
+      `「${duplicated.name}」はすでに登録されています。` +
+        "同じ会社に2人目以降のログインを足すときは、このフォームではなく" +
+        "「アカウント追加の依頼」から発行してください（ここで発行すると別の会社になり、案件も協力会社も見えません）。" +
+        "別の会社であれば、区別がつく会社名で登録してください",
+    );
+  }
 
   const password = newInitialPassword();
   const { data: created, error: createError } = await admin.auth.admin.createUser({
