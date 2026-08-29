@@ -170,8 +170,7 @@ export default function PrivacyPage() {
           <li>当社が取得した資料の原本：解析の完了から1年を経過した後に削除します</li>
           <li>解析の結果および抽出したテキスト：本サービスの提供に必要な期間、保持します</li>
           <li>
-            お客様が登録したデータ：利用契約の終了後
-            <Fill>終了後のデータ保存期間（例：90日）</Fill> を経過した後に削除します
+            お客様が登録したデータ：利用契約の終了後90日を経過した後に削除します
           </li>
         </ul>
       </Section>
@@ -194,9 +193,10 @@ export default function PrivacyPage() {
       </Section>
 
       <section className="mt-6 border-t border-slate-200 pt-3 text-xs text-slate-600">
-        <p>制定日：<Fill>制定日</Fill></p>
+        <p>制定日：2026年8月29日</p>
         <p className="mt-1">東北三上機材株式会社</p>
-        <p>所在地：<Fill>本店所在地</Fill></p>
+        <p>所在地：宮城県名取市小塚原字東遠泉63番地</p>
+        <p>法人番号：4370001041531</p>
         <p>個人情報に関するお問い合わせ窓口：<Fill>担当部署名と問い合わせ先メールアドレス</Fill></p>
       </section>
     </>

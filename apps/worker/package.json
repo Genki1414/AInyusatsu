@@ -25,6 +25,7 @@
     "inbound:reparse": "tsx --env-file=.env.local scripts/run-reparse-inbound.ts",
     "notify:digest": "tsx --env-file=.env.local scripts/run-notify-digest.ts",
     "notify:instant": "tsx --env-file=.env.local scripts/run-notify-instant.ts",
+    "notify:ops": "tsx --env-file=.env.local scripts/run-notify-ops.ts",
     "agencies:classify": "tsx --env-file=.env.local scripts/run-classify-agencies.ts",
     "goldset:template": "tsx --env-file=.env.local scripts/run-goldset.ts template",
     "goldset:measure": "tsx --env-file=.env.local scripts/run-goldset.ts measure",
