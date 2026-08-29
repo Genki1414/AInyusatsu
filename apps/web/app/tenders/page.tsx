@@ -22,7 +22,9 @@ import {
   hasActiveFilter,
   parseDeadlineWithin,
   PENDING_COLLECT_STATUSES,
+  isWon,
   proposalsByTender,
+  SELECTABLE_BID_RESULTS,
   SELECTABLE_STANCES,
   tenderVerdict,
   type BrowseProposal,
@@ -54,9 +56,15 @@ type SearchParams = {
   grade?: string;
   within?: string;
   stance?: string;
+  result?: string;
   sort?: string;
   page?: string;
 };
+
+/** 参加中の案件を先頭に出すときの上限。多すぎると一覧が見えなくなる */
+const JOINED_LIMIT = 20;
+
+type JoinedRow = TenderRow & { company_tenders: { stance: string }[] | { stance: string } | null };
 
 type TenderRow = {
   id: string;
@@ -108,6 +116,26 @@ function likePattern(keyword: string): string {
   return `%${keyword.replace(/[%_,]/g, " ")}%`;
 }
 
+/** 判断（参加 / 検討 / 保留 / 見送り）の色。案件ページの表示と揃える。 */
+const STANCE_TONE: Record<string, "green" | "amber" | "slate" | "rose"> = {
+  参加: "green",
+  検討: "amber",
+  保留: "slate",
+  見送り: "rose",
+};
+
+/** 未定（＝まだ決めていない）は出さない。決めたものだけ見せる */
+function StancePill({ stance }: { stance: string | undefined }) {
+  if (!stance || stance === "未定") return null;
+  return <Pill tone={STANCE_TONE[stance] ?? "slate"}>{stance}</Pill>;
+}
+
+/** 入札の結果。未入力は出さない（決まっていないものを見せない） */
+function ResultPill({ result }: { result: string | undefined }) {
+  if (!result || result === "未入力") return null;
+  return <Pill tone={isWon(result) ? "green" : "slate"}>結果：{result}</Pill>;
+}
+
 const inputClass =
   "rounded border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300";
 
@@ -125,12 +153,14 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
   // 「未定」は company_tenders の行が無い案件も含むので、絞り込みには出さない
   // （行が無いものは内部結合で落ちる。出せない選択肢は置かない）
   const stance = pickOption(params.stance, [...SELECTABLE_STANCES]);
+  // 落札した案件をここから見る（「落札案件へ移す」の受け皿）
+  const result = pickOption(params.result, [...SELECTABLE_BID_RESULTS]);
   const sortKey: SortKey = params.sort === "newest" ? "newest" : "deadline";
   const sort = SORTS[sortKey];
   const page = pageFrom(params.page);
   const from = (page - 1) * PAGE_SIZE;
 
-  const filtered = hasActiveFilter([keyword, item, area, qual, grade, within, stance]);
+  const filtered = hasActiveFilter([keyword, item, area, qual, grade, within, stance, result]);
 
   // キーワードは案件名だけでなく発注機関名でも探せるようにする。
   // 機関は数百件なので、先に機関を引いてから案件を絞る。
@@ -152,7 +182,7 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
   const columns = "id, name, item, grade, areas, budget, submit_deadline, collect_status, agencies(name)";
   let query = supabase
     .from("tenders")
-    .select(stance === "" ? columns : `${columns}, company_tenders!inner(stance)`, {
+    .select(stance === "" && result === "" ? columns : `${columns}, company_tenders!inner(stance, bid_result)`, {
       count: "exact",
     })
     .in("collect_status", [...BROWSABLE_COLLECT_STATUSES])
@@ -173,8 +203,17 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
   }
   if (within !== null) query = query.lte("submit_deadline", deadlineCutoff(within, now).toISOString());
   if (stance !== "") query = query.eq("company_tenders.stance", stance);
+  if (result !== "") query = query.eq("company_tenders.bid_result", result);
+  // 【提出期限の切れた案件は既定で出さない】（ユーザー決定 2026-08-29）
+  // 出しても参加できないので、一覧を埋めるだけになる。探しているときだけ出す。
+  // 期限が取れていない案件は消さない（「無い」と「過ぎた」は別。CLAUDE.md 最重要の前提5）。
+  // 参加を決めた案件は、期限が過ぎても上の「参加中の案件」に出る（結果を記録するため）。
+  if (!filtered) {
+    query = query.or(`submit_deadline.is.null,submit_deadline.gte.${now.toISOString()}`);
+  }
 
-  const [{ data: tenders, count, error }, { count: pendingCount }, { count: totalCount }] = await Promise.all([
+  const [{ data: tenders, count, error }, { count: pendingCount }, { count: totalCount }, { data: joinedRows }] =
+    await Promise.all([
     query.returns<TenderRow[]>(),
     supabase
       .from("tenders")
@@ -186,10 +225,22 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
       .from("tenders")
       .select("id", { count: "exact", head: true })
       .in("collect_status", [...BROWSABLE_COLLECT_STATUSES]),
+    // 参加を決めた案件。**提出期限が過ぎていても出す**（結果を記録するため）。
+    // 絞り込み中は一覧のほうに出るので、二重に見せない
+    filtered
+      ? Promise.resolve({ data: [] as JoinedRow[] })
+      : supabase
+          .from("tenders")
+          .select(`${columns}, company_tenders!inner(stance)`)
+          .eq("company_tenders.stance", "参加")
+          .order("submit_deadline", { ascending: true, nullsFirst: false })
+          .limit(JOINED_LIMIT)
+          .returns<JoinedRow[]>(),
   ]);
   if (error) throw new Error(`案件の取得に失敗しました: ${error.message}`);
 
   const rows = tenders ?? [];
+  const joined = joinedRows ?? [];
   const total = count ?? 0;
   const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -204,6 +255,20 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
         )
         .returns<ProposalRow[]>()
     : { data: [] as ProposalRow[] };
+
+  // 案件ごとの判断（参加 / 検討 / 保留 / 見送り）。一覧でも一目で分かるようにする
+  const { data: stanceRows } = rows.length
+    ? await supabase
+        .from("company_tenders")
+        .select("tender_id, stance, bid_result")
+        .in(
+          "tender_id",
+          rows.map((t) => t.id),
+        )
+        .returns<{ tender_id: string; stance: string; bid_result: string }[]>()
+    : { data: [] as { tender_id: string; stance: string; bid_result: string }[] };
+  const stanceByTender = new Map((stanceRows ?? []).map((r) => [r.tender_id, r.stance]));
+  const resultByTender = new Map((stanceRows ?? []).map((r) => [r.tender_id, r.bid_result]));
 
   const verdicts = proposalsByTender(
     (proposalRows ?? []).map(
@@ -226,6 +291,7 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
     if (grade !== "") search.set("grade", grade);
     if (within !== null) search.set("within", String(within));
     if (stance !== "") search.set("stance", stance);
+    if (result !== "") search.set("result", result);
     if (sortKey !== "deadline") search.set("sort", sortKey);
     if (target > 1) search.set("page", String(target));
     const query = search.toString();
@@ -311,6 +377,14 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
                 </option>
               ))}
             </select>
+            <select name="result" defaultValue={result} className={inputClass} aria-label="入札の結果">
+              <option value="">結果：すべて</option>
+              {SELECTABLE_BID_RESULTS.map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
             <select name="within" defaultValue={within ?? ""} className={inputClass} aria-label="提出期限">
               <option value="">提出期限：すべて</option>
               {DEADLINE_WITHIN_OPTIONS.map((d) => (
@@ -343,6 +417,36 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
         </p>
       </Panel>
 
+      {/* 【参加中の案件を先頭に出す】（ユーザー決定 2026-08-29）
+          提出期限が過ぎても消さない。結果を記録するまでが1件だから。
+          絞り込み中は下の一覧に出るので、二重に見せない */}
+      {joined.length > 0 && (
+        <Panel title={`参加中の案件（${joined.length}）`}>
+          <ul className="space-y-1">
+            {joined.map((t) => {
+              const dl = daysLeft(t.submit_deadline);
+              return (
+                <li key={t.id} className="flex flex-wrap items-center gap-2 border-b border-slate-100 py-1 last:border-0">
+                  <Pill tone="green">参加</Pill>
+                  <Link prefetch={false} href={`/tenders/${t.id}`} className="text-xs font-medium hover:underline">
+                    {t.name}
+                  </Link>
+                  <span className="text-xs text-slate-500">{agencyName(t.agencies)}</span>
+                  {/* 過ぎたことを隠さない。結果を入れる段階だと分かるように */}
+                  {dl != null && dl < 0 && <span className="text-xs text-slate-500">提出期限を過ぎています</span>}
+                  {dl != null && dl >= 0 && (
+                    <span className={`text-xs ${dl <= 3 ? "font-medium text-rose-700" : "text-slate-500"}`}>
+                      提出まで残{dl}日
+                    </span>
+                  )}
+                  {t.submit_deadline === null && <span className="text-xs text-slate-400">提出期限は未確認</span>}
+                </li>
+              );
+            })}
+          </ul>
+        </Panel>
+      )}
+
       {rows.length === 0 && (
         <Panel>
           <p className="text-xs text-slate-500">
@@ -364,6 +468,8 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
                 </Link>
                 <div className="mt-0.5 text-xs text-slate-500">{agencyName(t.agencies)}</div>
                 <div className="mt-2 flex flex-wrap gap-1">
+                  <StancePill stance={stanceByTender.get(t.id)} />
+                  <ResultPill result={resultByTender.get(t.id)} />
                   <CollectPill s={t.collect_status} />
                   {verdict.kind === "提案対象" && <ProposePill s={verdict.status} />}
                   {verdict.kind === "対象外" && <Pill tone="rose">提案条件に合いません</Pill>}

@@ -8,7 +8,7 @@
 // stance は人がどうしたいかなので、片方を変えてももう片方は動かさない。
 
 import { revalidatePath } from "next/cache";
-import { isTenderStance } from "@ai-nyusatsu-bu/domain";
+import { acceptsAmount, isBidResult, isTenderStance, isWon } from "@ai-nyusatsu-bu/domain";
 import { requireOrgContext } from "@/lib/auth";
 
 export type StanceState = { error: string | null; message: string | null };
@@ -42,5 +42,64 @@ export async function setTenderStance(_prev: StanceState, formData: FormData): P
       stance === "参加"
         ? "「参加」にしました。下に、提出までの段取りが出ます。"
         : `「${stance}」にしました。`,
+  };
+}
+
+export type BidResultState = { error: string | null; message: string | null };
+
+/** 金額を円のintegerにする。カンマや全角も受ける（手で打つ欄なので）。 */
+function parseYen(raw: string): { ok: true; value: number | null } | { ok: false; error: string } {
+  const text = raw.trim().replace(/[，,\s]/g, "").replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0));
+  if (text === "") return { ok: true, value: null };
+  if (!/^\d+$/.test(text)) return { ok: false, error: "金額は数字で入力してください（円）" };
+  const value = Number(text);
+  if (!Number.isSafeInteger(value)) return { ok: false, error: "金額が大きすぎます" };
+  return { ok: true, value };
+}
+
+/**
+ * 入札の結果を記録する。
+ *
+ * 【stance は変えない】
+ * stance（参加するかの意思）と結果は別の軸。結果で上書きすると、
+ * そもそも参加したのかが分からなくなる。「参加」のまま「落札」を持たせる。
+ *
+ * 【辞退・中止では金額を持たせない】
+ * 決まった金額が無いのに数字が残ると、あとで相場の材料として読み違える。
+ */
+export async function setBidResult(_prev: BidResultState, formData: FormData): Promise<BidResultState> {
+  const { supabase, orgId } = await requireOrgContext();
+
+  const tenderId = text(formData, "tender_id").trim();
+  const result = text(formData, "bid_result").trim();
+  if (tenderId === "") return { error: "案件が指定されていません", message: null };
+  if (!isBidResult(result) || result === "未入力") return { error: `「${result}」は選べません`, message: null };
+
+  const amount = parseYen(text(formData, "result_amount"));
+  if (!amount.ok) return { error: amount.error, message: null };
+  const memo = text(formData, "result_memo").trim();
+
+  const now = new Date().toISOString();
+  const { error } = await supabase.from("company_tenders").upsert(
+    {
+      org_id: orgId,
+      tender_id: tenderId,
+      bid_result: result,
+      // 辞退・中止では金額を持たせない（決まった金額が無い）
+      result_amount: acceptsAmount(result) ? amount.value : null,
+      result_memo: memo === "" ? null : memo,
+      result_at: now,
+    },
+    { onConflict: "org_id,tender_id" },
+  );
+  if (error) return { error: `保存できませんでした（${error.message}）`, message: null };
+
+  revalidatePath(`/tenders/${tenderId}`);
+  revalidatePath("/tenders");
+  return {
+    error: null,
+    message: isWon(result)
+      ? "「落札」で記録しました。案件一覧の「結果：落札」から見られます。"
+      : `「${result}」で記録しました。`,
   };
 }
