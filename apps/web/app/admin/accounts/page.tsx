@@ -13,15 +13,23 @@
 // 一覧の下に埋もれないようにする。
 
 import Link from "next/link";
-import { formatTradeMap, maskApiKey, type TradeMap } from "@ai-nyusatsu-bu/domain";
+import { additionalLoginMonthlyYen, formatTradeMap, maskApiKey, type TradeMap } from "@ai-nyusatsu-bu/domain";
 import { Panel } from "@/components/ui";
 import { requireAdmin } from "@/lib/admin";
-import { AccountRowForms, IssueForm, type AccountRow } from "./account-forms";
+import { AccountRowForms, IssueForm, PendingRequests, type AccountRow, type PendingRequest } from "./account-forms";
 import { EMPTY_SALES_AI_VIEW, SalesAiRowForm, type SalesAiAdminView } from "./sales-ai-forms";
 
 type OrgRow = { id: string; name: string; created_at: string };
 type UserRow = { id: string; org_id: string; email: string; name: string; role: string; created_at: string };
 type AccessRow = { org_id: string; status: string; suspended_reason: string | null };
+type RequestRow = {
+  id: string;
+  org_id: string;
+  name: string;
+  email: string;
+  note: string | null;
+  created_at: string;
+};
 type SalesAiRow = {
   org_id: string;
   base_url: string;
@@ -62,7 +70,7 @@ function toSalesAiView(row: SalesAiRow): SalesAiAdminView {
 export default async function AdminAccountsPage() {
   const { email, admin } = await requireAdmin();
 
-  const [orgs, users, access, salesAi] = await Promise.all([
+  const [orgs, users, access, salesAi, pendingRows] = await Promise.all([
     admin.from("organizations").select("id, name, created_at").order("created_at", { ascending: false }).returns<OrgRow[]>(),
     admin.from("users").select("id, org_id, email, name, role, created_at").returns<UserRow[]>(),
     admin.from("org_access").select("org_id, status, suspended_reason").returns<AccessRow[]>(),
@@ -70,6 +78,12 @@ export default async function AdminAccountsPage() {
       .from("sales_ai_connections")
       .select("org_id, base_url, api_key, trade_map, checked_at, check_error")
       .returns<SalesAiRow[]>(),
+    admin
+      .from("account_requests")
+      .select("id, org_id, name, email, note, created_at")
+      .eq("status", "依頼中")
+      .order("created_at", { ascending: true })
+      .returns<RequestRow[]>(),
   ]);
 
   // 読めなかったことを隠さない（CLAUDE.md「エラーは握りつぶさない」）。
@@ -79,7 +93,16 @@ export default async function AdminAccountsPage() {
   // 営業AIの設定が読めなくても、発行・停止はできる。分けてログに残す
   if (salesAi.error) console.error(`[admin] 営業AIの接続設定を読めませんでした: ${salesAi.error.message}`);
 
+  if (pendingRows.error) console.error(`[admin] アカウント追加の依頼を読めませんでした: ${pendingRows.error.message}`);
+
   const salesAiByOrg = new Map((salesAi.data ?? []).map((row) => [row.org_id, toSalesAiView(row)]));
+
+  // 組織ごとのログイン数。発行するといくらになるかを出すのに要る
+  const loginCountByOrg = new Map<string, number>();
+  for (const user of users.data ?? []) {
+    loginCountByOrg.set(user.org_id, (loginCountByOrg.get(user.org_id) ?? 0) + 1);
+  }
+  const orgNameById = new Map((orgs.data ?? []).map((org) => [org.id, org.name]));
 
   const accessByOrg = new Map((access.data ?? []).map((row) => [row.org_id, row]));
   const ownerByOrg = new Map<string, UserRow>();
@@ -130,6 +153,24 @@ export default async function AdminAccountsPage() {
       )}
 
       <IssueForm />
+
+      {/* 依頼は放置すると顧客が待たされる。発行フォームのすぐ下に置く */}
+      <PendingRequests
+        requests={(pendingRows.data ?? []).map((row): PendingRequest => {
+          const after = (loginCountByOrg.get(row.org_id) ?? 0) + 1;
+          return {
+            id: row.id,
+            orgId: row.org_id,
+            orgName: orgNameById.get(row.org_id) ?? "（組織名不明）",
+            name: row.name,
+            email: row.email,
+            note: row.note,
+            createdOn: jst(row.created_at),
+            loginsAfter: after,
+            monthlyAfter: additionalLoginMonthlyYen(after),
+          };
+        })}
+      />
 
       <Panel title={`アカウント一覧（利用中 ${activeCount} / 全 ${rows.length}）`}>
         {sorted.length === 0 ? (
