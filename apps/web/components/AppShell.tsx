@@ -73,6 +73,15 @@ export function AppShell({ active, orgName, children }: { active: NavKey; orgNam
           のAPI、および各発注機関が公開する情報を利用しています。掲載情報の正確性・網羅性は保証されません。
           入札への参加にあたっては、必ず発注機関が公表する原本をご確認ください。
         </p>
+        {/* 契約の内容と個人情報の扱いは、ログイン後からも常に読めるようにしておく */}
+        <p className="mt-1.5 flex flex-wrap gap-3 text-xs text-slate-400">
+          <Link href="/terms" className="underline hover:text-slate-600">
+            利用規約
+          </Link>
+          <Link href="/privacy" className="underline hover:text-slate-600">
+            プライバシーポリシー
+          </Link>
+        </p>
       </div>
     </div>
   );

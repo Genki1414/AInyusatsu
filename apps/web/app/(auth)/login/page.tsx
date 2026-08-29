@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState } from "react";
 import { login, type LoginState } from "./actions";
 
@@ -49,6 +50,15 @@ export default function LoginPage() {
           自分で登録する導線は置かない。問い合わせ先が分からないと迷子になるため、案内だけ残す */}
       <p className="text-sm leading-relaxed text-slate-600">
         アカウントは運営が発行します。ご利用をご希望の方、ログインできない方は、担当者までご連絡ください。
+      </p>
+      {/* 契約前に読むものなので、ログインしていなくても辿れるようにしておく */}
+      <p className="flex flex-wrap gap-3 text-xs text-slate-500">
+        <Link href="/terms" className="underline hover:text-slate-700">
+          利用規約
+        </Link>
+        <Link href="/privacy" className="underline hover:text-slate-700">
+          プライバシーポリシー
+        </Link>
       </p>
     </main>
   );
