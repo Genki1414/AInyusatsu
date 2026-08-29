@@ -16,7 +16,7 @@
 // 御社による正式取得（company_tenders.official_status）が「取得済」になるまでは送信できない
 // （docs/資料取得方針_v3.md §5「取得済みになるまで…作業を促さない」を見積依頼にも適用する。
 // ユーザーからの明示的な要望による）。サーバー側（actions.ts）でも同じ判定をしている。
-import { useActionState, useCallback, useRef, useState } from "react";
+import { useActionState, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
 import { CopyButton } from "@/components/CopyButton";
@@ -94,6 +94,8 @@ const EMPTY_OUTREACH: OutreachState = {
   sample: [],
   listId: null,
   hasRemaining: false,
+  quotaNote: null,
+  killSwitchWarning: null,
 };
 
 /**
@@ -113,6 +115,9 @@ function SalesAiBlock({ tenderId, trade }: { tenderId: string; trade: string }) 
   const [sendState, sendFormAction, sending] = useActionState(sendOutreach, EMPTY_OUTREACH);
   const shown = sendState.message || sendState.error ? sendState : state;
   const found = state.count ?? 0;
+  // 何社いるか見たときに止まっていると分かっていれば、送信ボタンは押させない
+  // （営業AI側の送信自体は止まるが、押せてしまうと届かない理由が分かりにくい）
+  const stopped = state.killSwitchWarning !== null;
 
   return (
     <div className="rounded border border-violet-200 bg-violet-50 px-2 py-1.5">
@@ -129,7 +134,7 @@ function SalesAiBlock({ tenderId, trade }: { tenderId: string; trade: string }) 
         {/* 何社いるかを見てからでないと送れない。件数を知らずに送らせない。
             送り残しがあるときは、もう一度押せるようにボタンを出したままにする
             （営業AIは1回に50社までしか送らない。送信済みの会社には送らない） */}
-        {found > 0 && (!sendState.message || sendState.hasRemaining) && (
+        {found > 0 && !stopped && (!sendState.message || sendState.hasRemaining) && (
           <form action={sendFormAction}>
             <input type="hidden" name="tender_id" value={tenderId} />
             <input type="hidden" name="trade" value={trade} />
@@ -154,6 +159,12 @@ function SalesAiBlock({ tenderId, trade }: { tenderId: string; trade: string }) 
         </p>
       )}
       {shown.message && <p className="mt-1 text-xs leading-relaxed text-violet-900">{shown.message}</p>}
+      {shown.killSwitchWarning && (
+        <p role="alert" className="mt-1 text-xs leading-relaxed text-rose-700">
+          {shown.killSwitchWarning}
+        </p>
+      )}
+      {shown.quotaNote && <p className="mt-1 text-xs leading-relaxed text-slate-500">{shown.quotaNote}</p>}
       {state.sample.length > 0 && !sendState.message && (
         <ul className="mt-1 space-y-0.5">
           {state.sample.map((company, i) => (
@@ -234,11 +245,29 @@ function OutreachResultRow({
  * 営業AIへ送った会社の一覧。返信をもらった会社をここから協力会社にする。
  *
  * **ここが繋がって初めて開拓が価値になる。** 送っただけでは協力会社は増えない。
- * 返信は数日後に来るので、案件画面をあとから開いても見られるようにしてある
- * （リストの番号は outreach_sends に控えてある）。
+ *
+ * 【開いた時点で自動的に読み込む】
+ * 以前は「送った会社を見る」を押すまで何も出さなかった。送った会社が誰かを
+ * 確かめるのにひと手間かかっていたので、この枠が出た時点（＝1回でも送っている）で
+ * 自動的に読み込む。ボタンは「読み込み直す」——返信が来たあとに押し直す用に残す。
  */
 function OutreachResults({ tenderId, trade, sentOnLabel }: { tenderId: string; trade: string; sentOnLabel: string | null }) {
   const [state, formAction, pending] = useActionState(loadOutreachResults, EMPTY_RESULTS);
+  const loadedRef = useRef(false);
+
+  useEffect(() => {
+    if (loadedRef.current) return;
+    loadedRef.current = true;
+    const formData = new FormData();
+    formData.set("tender_id", tenderId);
+    formData.set("trade", trade);
+    formData.set("sent_on", sentOnLabel ?? "");
+    formAction(formData);
+    // 開いた時点で1回だけ読み込む。tenderId/tradeが変わることは無い
+    // （呼び出し元のPanelがgroup.tradeをkeyにしているため、このコンポーネント自体が
+    // 作り直される）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="mt-1 rounded border border-violet-200 bg-violet-50 px-2 py-1.5">
@@ -250,7 +279,7 @@ function OutreachResults({ tenderId, trade, sentOnLabel }: { tenderId: string; t
           <input type="hidden" name="trade" value={trade} />
           <input type="hidden" name="sent_on" value={sentOnLabel ?? ""} />
           <button type="submit" disabled={pending} className={btnClass("default", "sm")}>
-            {pending ? "確認中..." : "送った会社を見る"}
+            {pending ? "確認中..." : "読み込み直す"}
           </button>
         </form>
       </div>

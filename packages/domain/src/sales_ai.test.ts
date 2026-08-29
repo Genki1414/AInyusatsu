@@ -8,6 +8,7 @@ import {
   salesAiSetupState,
   summarizeOutreachSend,
   toSalesAiTrade,
+  validateProvisionTenant,
   validateSalesAiSettings,
   type OutreachSendCounts,
   type SalesAiSetupInput,
@@ -179,8 +180,7 @@ describe("canOutreach", () => {
 
 describe("summarizeOutreachSend", () => {
   const zero: OutreachSendCounts = {
-    requested: 0, sent: 0, failed: 0, blocked: 0, suppressed: 0, stopped: 0,
-    cancelledRecent: 0, dryRun: false,
+    requested: 0, sent: 0, failed: 0, blocked: 0, suppressed: 0, stopped: 0, dryRun: false,
   };
 
   it("全部送れたら件数だけを出す", () => {
@@ -212,14 +212,31 @@ describe("summarizeOutreachSend", () => {
     expect(r.nothingSent).toBe(true);
   });
 
-  it("直近に送った会社が外れたことを伝える", () => {
-    const r = summarizeOutreachSend({ ...zero, requested: 5, sent: 5, cancelledRecent: 3 });
-    expect(r.message).toContain("直近に送ったばかりの3社");
-  });
-
   it("配信停止と送信失敗の内訳を出す", () => {
     const r = summarizeOutreachSend({ ...zero, requested: 10, sent: 4, blocked: 2, failed: 4 });
     expect(r.message).toContain("配信停止・除外設定により2社");
     expect(r.message).toContain("送信できず4社");
   });
 });
+
+describe("validateProvisionTenant", () => {
+  it("会社名とメールアドレスを確かめる", () => {
+    const result = validateProvisionTenant({ orgName: " 山田電気 ", senderEmail: " Sales@Example.co.jp " });
+    expect(result).toEqual({ ok: true, value: { orgName: "山田電気", senderEmail: "sales@example.co.jp" } });
+  });
+
+  it("会社名が空なら止める", () => {
+    const result = validateProvisionTenant({ orgName: " ", senderEmail: "a@example.com" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("会社名");
+  });
+
+  it("メールアドレスの形でなければ止める", () => {
+    const result = validateProvisionTenant({ orgName: "山田電気", senderEmail: "not-an-email" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("メールアドレス");
+  });
+});
+
+// 送信元（顧客名義）の入力・検証（旧validateSenderIdentity）は
+// mailing_identity.test.ts の normalizeMailingIdentity/combineAddress に移した。

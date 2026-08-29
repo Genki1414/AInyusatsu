@@ -189,7 +189,6 @@ export type OutreachSendCounts = {
   blocked: number;
   suppressed: number;
   stopped: number;
-  cancelledRecent: number;
   dryRun: boolean;
 };
 
@@ -218,14 +217,10 @@ export function summarizeOutreachSend(counts: OutreachSendCounts): OutreachSendS
   if (counts.blocked > 0) parts.push(`配信停止・除外設定により${counts.blocked}社`);
   if (counts.failed > 0) parts.push(`送信できず${counts.failed}社（送信上限に達した分を含みます）`);
   const detail = parts.length > 0 ? `送れなかった内訳：${parts.join("／")}。` : "";
-  const cancelled =
-    counts.cancelledRecent > 0
-      ? `直近に送ったばかりの${counts.cancelledRecent}社は今回の対象から外れています。`
-      : "";
 
   if (counts.sent === 0) {
     return {
-      message: `1社にも送信できませんでした。${detail}${cancelled}`,
+      message: `1社にも送信できませんでした。${detail}`,
       nothingSent: true,
       hasRemaining: counts.requested > 0,
     };
@@ -236,14 +231,42 @@ export function summarizeOutreachSend(counts: OutreachSendCounts): OutreachSendS
     return {
       message:
         `${counts.sent}社へ送信しました。残り${remaining}社はまだ送れていません。${detail}` +
-        `${cancelled}もう一度「送信する」を押すと、送れていない会社にだけ送ります。`,
+        "もう一度「送信する」を押すと、送れていない会社にだけ送ります。",
       nothingSent: false,
       hasRemaining: true,
     };
   }
   return {
-    message: `${counts.sent}社へ送信しました。${cancelled}`,
+    message: `${counts.sent}社へ送信しました。`,
     nothingSent: false,
     hasRemaining: false,
   };
 }
+
+// ── 本部が営業AIのテナントを作る（/admin/sales-ai） ─────────────────
+//
+// 【なぜ本部側にも要るか】
+// 「顧客は営業AIの画面を開かない」（ユーザー決定 2026-08-28）ので、テナントの発行は
+// 本部が代行する。本部がキーを顧客に見せずそのまま保存できるようにする。
+
+function looksLikeEmailAddress(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+export type ProvisionTenantInput = { orgName: string; senderEmail: string };
+export type ProvisionTenantValidation = { ok: true; value: ProvisionTenantInput } | { ok: false; error: string };
+
+/** 「営業AIにテナントを作る」フォームの入力を確かめる。 */
+export function validateProvisionTenant(input: { orgName: string; senderEmail: string }): ProvisionTenantValidation {
+  const orgName = input.orgName.trim();
+  const senderEmail = input.senderEmail.trim().toLowerCase();
+  if (orgName === "") return { ok: false, error: "会社名を入力してください" };
+  if (orgName.length > 100) return { ok: false, error: "会社名は100文字以内で入力してください" };
+  if (senderEmail === "") return { ok: false, error: "送信元メールアドレスを入力してください" };
+  if (!looksLikeEmailAddress(senderEmail)) return { ok: false, error: "メールアドレスの形で入力してください" };
+  return { ok: true, value: { orgName, senderEmail } };
+}
+
+// 送信元（顧客名義）の入力・検証は packages/domain/src/mailing_identity.ts に移した
+// （本部が毎回手入力する画面をやめ、顧客の自社情報から自動同期する形にしたため。
+// ユーザー決定 2026-08-28その2。apps/web/lib/sales_ai_sync.ts参照）。

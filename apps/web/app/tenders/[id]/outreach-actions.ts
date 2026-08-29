@@ -17,6 +17,8 @@
 
 import {
   createTargetList,
+  getKillSwitchStatus,
+  getQuotaStatus,
   listSentCompanies,
   markReplied,
   OutreachError,
@@ -49,6 +51,10 @@ export type OutreachState = {
   listId: number | null;
   /** まだ送れていない会社が残っている。もう一度押せば続きから送れる */
   hasRemaining: boolean;
+  /** 今月の残り送信可能数（T55）。取れなかったときはnull（エラーにはしない） */
+  quotaNote: string | null;
+  /** 営業AI側で送信が止められているときの警告。止まっていなければ、取れなかったときもnull */
+  killSwitchWarning: string | null;
 };
 
 function text(formData: FormData, key: string): string {
@@ -57,7 +63,38 @@ function text(formData: FormData, key: string): string {
 }
 
 function fail(error: string): OutreachState {
-  return { error, message: null, count: null, sample: [], listId: null, hasRemaining: false };
+  return { error, message: null, count: null, sample: [], listId: null, hasRemaining: false, quotaNote: null, killSwitchWarning: null };
+}
+
+/**
+ * 残り送信可能数（T55）を一言にする。
+ *
+ * 【失敗させない】
+ * これが取れなくても、何社いるか見る・送信すること自体は成立しているので、
+ * ここでの失敗は無視してnullを返す（呼び出し側でエラーにしない）。
+ */
+async function quotaNote(connection: { baseUrl: string; apiKey: string }): Promise<string | null> {
+  try {
+    const quota = await getQuotaStatus(connection);
+    return `今月の残り送信可能数：${quota.remaining30d}通（直近30日、上限${quota.effectiveQuota30d}通）`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 送信が止められていれば警告文にする（docs/reference/営業AI連携_設計.md「AI入札部側に
+ * 足すもの」4番）。止まっていない、または状態が取れなかったときはnull（quotaNoteと同じく
+ * 失敗させない）。
+ */
+async function killSwitchWarning(connection: { baseUrl: string; apiKey: string }): Promise<string | null> {
+  try {
+    const status = await getKillSwitchStatus(connection);
+    if (!status.stopped) return null;
+    return `営業AI側で送信が止められています${status.reason ? `（理由：${status.reason}）` : ""}。送信ボタンを押しても届きません`;
+  } catch {
+    return null;
+  }
 }
 
 type Resolved = {
@@ -174,6 +211,8 @@ export async function previewOutreachTargets(_prev: OutreachState, formData: For
       sample: preview.sample,
       listId: null,
       hasRemaining: false,
+      quotaNote: await quotaNote(resolved.connection),
+      killSwitchWarning: await killSwitchWarning(resolved.connection),
     };
   } catch (err) {
     return fail(`営業AIに問い合わせできませんでした（${describe(err)}）`);
@@ -269,8 +308,10 @@ export async function sendOutreach(_prev: OutreachState, formData: FormData): Pr
     // （1回50社の上限・月/日の上限・停止スイッチ・配信停止）。
     // 送信は取り消せないので、送れなかった分は必ず伝える
     const summary = summarizeOutreachSend(sent);
+    const quota = await quotaNote(resolved.connection);
+    const stopped = await killSwitchWarning(resolved.connection);
     if (summary.nothingSent) {
-      return { ...fail(summary.message), listId, hasRemaining: summary.hasRemaining };
+      return { ...fail(summary.message), listId, hasRemaining: summary.hasRemaining, quotaNote: quota, killSwitchWarning: stopped };
     }
     return {
       error: null,
@@ -279,6 +320,8 @@ export async function sendOutreach(_prev: OutreachState, formData: FormData): Pr
       sample: [],
       listId,
       hasRemaining: summary.hasRemaining,
+      quotaNote: quota,
+      killSwitchWarning: stopped,
     };
   } catch (err) {
     return {
@@ -321,12 +364,15 @@ export async function loadOutreachResults(
 
   try {
     const companies = await listSentCompanies(resolved.connection, listId);
+    // 送信件数・返信件数は保存せず、開くたびに営業AI側（正）から数え直す。
+    // こちらで数を持つとズレる（送信は営業AI側で継続実行されるため）
+    const repliedCount = companies.filter((c) => c.replied).length;
     return {
       error: null,
       message:
         companies.length === 0
           ? "まだ1社にも送れていません。送信の直後は、営業AI側の処理が終わるまで出ないことがあります。"
-          : `${companies.length}社に送っています。返信をもらった会社を協力会社として登録してください。`,
+          : `${companies.length}社に送っています（うち返信を記録済み：${repliedCount}社）。返信をもらった会社を協力会社として登録してください。`,
       companies,
     };
   } catch (err) {

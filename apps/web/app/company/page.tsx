@@ -1,16 +1,17 @@
 // 自社情報。協力会社へ送るメールと画面のヘッダーに使う自社の情報を設定する。
-// あわせて営業AI（協力会社の開拓）が使える状態かを表示する。
+// あわせて営業AI（協力会社の開拓）が使える状態かの表示・郵送名義を置く。
 //
-// 【営業AIの設定はここに無い】
+// 【営業AIの接続設定はここに無い】
 // 営業AIのテナントとAPIキーは本部が作る。顧客は営業AIの画面を開かない
 // （ユーザー決定 2026-08-28 / docs/reference/営業AI連携_設計.md）。
 // ここは「使えるかどうか」を見せるだけで、入力欄は置かない。
-// 設定は本部の /admin/accounts から行う。
+// 設定は本部の /admin/sales-ai から行う。
 import { type TradeMap } from "@ai-nyusatsu-bu/domain";
 import { AppShell } from "@/components/AppShell";
 import { Panel } from "@/components/ui";
 import { requireOrgContext } from "@/lib/auth";
 import { CompanyForm } from "./company-form";
+import { MailingIdentityForm, type MailingIdentityView } from "./mailing-identity-form";
 import { UserForm } from "./user-form";
 
 type SalesAiRow = {
@@ -45,10 +46,25 @@ function SalesAiStatus({ trades }: { trades: string[] }) {
   );
 }
 
+type MailingIdentityRow = {
+  last_name: string | null;
+  first_name: string | null;
+  last_name_kana: string | null;
+  first_name_kana: string | null;
+  postal_code: string | null;
+  prefecture: string | null;
+  city: string | null;
+  block: string | null;
+  building: string | null;
+  phone: string | null;
+  department: string | null;
+  position: string | null;
+};
+
 export default async function CompanyPage() {
   const { supabase, orgId, orgName, userName, userEmail } = await requireOrgContext();
 
-  const [{ data: org }, { data: salesAi, error: salesAiError }] = await Promise.all([
+  const [{ data: org }, { data: salesAi, error: salesAiError }, { data: mailingIdentity }] = await Promise.all([
     supabase
       .from("organizations")
       .select("overhead_rate, profit_rate, reply_to")
@@ -61,6 +77,13 @@ export default async function CompanyPage() {
       .select("base_url, trade_map")
       .eq("org_id", orgId)
       .maybeSingle<SalesAiRow>(),
+    supabase
+      .from("organization_mailing_identity")
+      .select(
+        "last_name, first_name, last_name_kana, first_name_kana, postal_code, prefecture, city, block, building, phone, department, position",
+      )
+      .eq("org_id", orgId)
+      .maybeSingle<MailingIdentityRow>(),
   ]);
   if (salesAiError) {
     // 読めなくても他の設定は使える。握りつぶさずログには残す
@@ -73,6 +96,20 @@ export default async function CompanyPage() {
         .filter(([, code]) => typeof code === "string" && code.trim() !== "")
         .map(([trade]) => trade)
     : [];
+  const mailingIdentityView: MailingIdentityView = {
+    lastName: mailingIdentity?.last_name ?? "",
+    firstName: mailingIdentity?.first_name ?? "",
+    lastNameKana: mailingIdentity?.last_name_kana ?? "",
+    firstNameKana: mailingIdentity?.first_name_kana ?? "",
+    postalCode: mailingIdentity?.postal_code ?? "",
+    prefecture: mailingIdentity?.prefecture ?? "",
+    city: mailingIdentity?.city ?? "",
+    block: mailingIdentity?.block ?? "",
+    building: mailingIdentity?.building ?? "",
+    phone: mailingIdentity?.phone ?? "",
+    department: mailingIdentity?.department ?? "",
+    position: mailingIdentity?.position ?? "",
+  };
 
   return (
     <AppShell active="company" orgName={orgName}>
@@ -85,6 +122,7 @@ export default async function CompanyPage() {
       />
       <UserForm userName={userName} userEmail={userEmail} />
       <SalesAiStatus trades={trades} />
+      <MailingIdentityForm view={mailingIdentityView} />
     </AppShell>
   );
 }

@@ -61,3 +61,4 @@ export * from "./ops_alert";
 export * from "./outreach_partner";
 export * from "./partner_outreach";
 export * from "./sales_ai";
+export * from "./mailing_identity";

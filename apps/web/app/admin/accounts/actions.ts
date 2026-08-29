@@ -25,7 +25,9 @@ import {
   INITIAL_PASSWORD_LENGTH,
   validateIssueAccount,
 } from "@ai-nyusatsu-bu/domain";
+import { OutreachError, setKillSwitch } from "@ai-nyusatsu-bu/outreach";
 import { requireAdmin } from "@/lib/admin";
+import { opsConnection } from "@/lib/sales_ai_sync";
 
 export type AccountActionState = {
   error: string | null;
@@ -54,6 +56,40 @@ function newInitialPassword(): string {
 function text(formData: FormData, key: string): string {
   const value = formData.get(key);
   return typeof value === "string" ? value : "";
+}
+
+/**
+ * 停止・再開を営業AI（eigyouAI）側のKill Switchへ連動させる。
+ *
+ * 契約が止まっているのに営業AI側の送信だけ動き続けるのはおかしいので連動させる
+ * （docs/reference/営業AI連携_設計.md「契約が止まったとき」。以前は未連動だった）。
+ * 営業AIのテナントがまだ無い組織（sales_ai_connections.tenant_idが無い）では
+ * 何もしない。org_access自体の更新は既に終わっている前提なので、ここが失敗しても
+ * 停止・再開そのものは成立済みとして扱う（呼び出し側でメッセージに一言添えるだけ）。
+ */
+async function syncKillSwitch(
+  admin: Awaited<ReturnType<typeof requireAdmin>>["admin"],
+  orgId: string,
+  stopped: boolean,
+  reason?: string,
+): Promise<string | null> {
+  const { data: connection } = await admin
+    .from("sales_ai_connections")
+    .select("tenant_id")
+    .eq("org_id", orgId)
+    .maybeSingle<{ tenant_id: number | null }>();
+  if (!connection?.tenant_id) return null;
+
+  const conn = opsConnection();
+  if (!conn) return "営業AI側のKill Switchは連動できませんでした（SALES_ENGINE_API_KEY未設定）";
+
+  try {
+    await setKillSwitch(conn, connection.tenant_id, stopped, reason);
+    return null;
+  } catch (err) {
+    const detail = err instanceof OutreachError ? `${err.code}：${err.message}` : String(err);
+    return `営業AI側のKill Switchは連動できませんでした（${detail}）。営業AIの画面から手で操作してください`;
+  }
 }
 
 /**
@@ -156,8 +192,12 @@ export async function updateAccount(
       .from("org_access")
       .upsert({ org_id: orgId, status: "停止", suspended_at: now, suspended_reason: reason, updated_at: now });
     if (error) return fail(`停止できませんでした：${error.message}`);
+    const killSwitchNote = await syncKillSwitch(admin, orgId, true, reason);
     revalidatePath("/admin/accounts");
-    return { ...EMPTY, message: "停止しました。次に画面を開いたときから使えなくなります" };
+    return {
+      ...EMPTY,
+      message: `停止しました。次に画面を開いたときから使えなくなります${killSwitchNote ? `／${killSwitchNote}` : ""}`,
+    };
   }
 
   if (op === "再開") {
@@ -165,8 +205,9 @@ export async function updateAccount(
       .from("org_access")
       .upsert({ org_id: orgId, status: "利用中", activated_at: now, suspended_at: null, suspended_reason: null, updated_at: now });
     if (error) return fail(`再開できませんでした：${error.message}`);
+    const killSwitchNote = await syncKillSwitch(admin, orgId, false);
     revalidatePath("/admin/accounts");
-    return { ...EMPTY, message: "再開しました" };
+    return { ...EMPTY, message: `再開しました${killSwitchNote ? `／${killSwitchNote}` : ""}` };
   }
 
   if (op === "パスワード再発行") {

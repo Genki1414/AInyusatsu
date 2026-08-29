@@ -13,23 +13,13 @@
 // 一覧の下に埋もれないようにする。
 
 import Link from "next/link";
-import { formatTradeMap, maskApiKey, type TradeMap } from "@ai-nyusatsu-bu/domain";
 import { Panel } from "@/components/ui";
 import { requireAdmin } from "@/lib/admin";
 import { AccountRowForms, IssueForm, type AccountRow } from "./account-forms";
-import { EMPTY_SALES_AI_VIEW, SalesAiRowForm, type SalesAiAdminView } from "./sales-ai-forms";
 
 type OrgRow = { id: string; name: string; created_at: string };
 type UserRow = { id: string; org_id: string; email: string; name: string; role: string; created_at: string };
 type AccessRow = { org_id: string; status: string; suspended_reason: string | null };
-type SalesAiRow = {
-  org_id: string;
-  base_url: string;
-  api_key: string;
-  trade_map: TradeMap | null;
-  checked_at: string | null;
-  check_error: string | null;
-};
 
 function jst(at: string | null): string {
   if (at === null) return "—";
@@ -38,48 +28,19 @@ function jst(at: string | null): string {
   return parsed.toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo" });
 }
 
-function jstAt(at: string | null): string | null {
-  if (at === null) return null;
-  const parsed = new Date(at);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return parsed.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
-}
-
-/** APIキーは伏せ字にしてから画面へ渡す。実物はサーバーから出さない。 */
-function toSalesAiView(row: SalesAiRow): SalesAiAdminView {
-  const tradeMap = row.trade_map ?? {};
-  return {
-    baseUrl: row.base_url,
-    maskedApiKey: maskApiKey(row.api_key),
-    hasKey: Boolean(row.api_key),
-    tradeMapText: formatTradeMap(tradeMap),
-    tradeCount: Object.keys(tradeMap).length,
-    checkedAtLabel: jstAt(row.checked_at),
-    checkError: row.check_error,
-  };
-}
-
 export default async function AdminAccountsPage() {
   const { email, admin } = await requireAdmin();
 
-  const [orgs, users, access, salesAi] = await Promise.all([
+  const [orgs, users, access] = await Promise.all([
     admin.from("organizations").select("id, name, created_at").order("created_at", { ascending: false }).returns<OrgRow[]>(),
     admin.from("users").select("id, org_id, email, name, role, created_at").returns<UserRow[]>(),
     admin.from("org_access").select("org_id, status, suspended_reason").returns<AccessRow[]>(),
-    admin
-      .from("sales_ai_connections")
-      .select("org_id, base_url, api_key, trade_map, checked_at, check_error")
-      .returns<SalesAiRow[]>(),
   ]);
 
   // 読めなかったことを隠さない（CLAUDE.md「エラーは握りつぶさない」）。
   // 一覧が空なのか読めなかったのかが分からないと、発行済みのアカウントを二重に作ってしまう
   const loadError = orgs.error?.message ?? users.error?.message ?? access.error?.message ?? null;
   if (loadError) console.error(`[admin] アカウント一覧の取得に失敗しました: ${loadError}`);
-  // 営業AIの設定が読めなくても、発行・停止はできる。分けてログに残す
-  if (salesAi.error) console.error(`[admin] 営業AIの接続設定を読めませんでした: ${salesAi.error.message}`);
-
-  const salesAiByOrg = new Map((salesAi.data ?? []).map((row) => [row.org_id, toSalesAiView(row)]));
 
   const accessByOrg = new Map((access.data ?? []).map((row) => [row.org_id, row]));
   const ownerByOrg = new Map<string, UserRow>();
@@ -139,10 +100,7 @@ export default async function AdminAccountsPage() {
             {sorted.map((row) => (
               <div key={row.orgId}>
                 <AccountRowForms row={row} />
-                {/* 営業AIのテナントは本部が作り、キーも本部が持つ（顧客は営業AIを触らない）。
-                    docs/reference/営業AI連携_設計.md */}
-                <SalesAiRowForm orgId={row.orgId} view={salesAiByOrg.get(row.orgId) ?? EMPTY_SALES_AI_VIEW} />
-                <p className="pb-1 pt-1 text-xs text-slate-400">発行日 {jst(row.createdAt)}</p>
+                <p className="-mt-1 pb-1 text-xs text-slate-400">発行日 {jst(row.createdAt)}</p>
               </div>
             ))}
           </div>
