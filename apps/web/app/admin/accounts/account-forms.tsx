@@ -80,21 +80,44 @@ export function IssueForm() {
   );
 }
 
+/** 会社にぶら下がる1つのログイン。 */
+export type AccountLogin = {
+  userId: string;
+  name: string;
+  email: string;
+  /** 1人目（新しい会社として発行された人）。停止の対象ではない、という意味ではない */
+  isOwner: boolean;
+};
+
 export type AccountRow = {
   orgId: string;
   orgName: string;
   status: string;
   suspendedReason: string | null;
-  /** 代表のログイン。パスワード再発行の対象 */
-  userId: string | null;
-  userName: string | null;
-  email: string | null;
+  /** この会社のログイン。1人目が先頭 */
+  logins: AccountLogin[];
   createdAt: string | null;
 };
 
 /** 定型に無い理由を書くときに選ぶ値。空文字にすると select の初期選択と紛れる */
 const OTHER = "__other__";
 
+/**
+ * 会社1社ぶんの行。
+ *
+ * 【会社単位で並べる】（ユーザー決定 2026-08-29）
+ * 一覧は会社が単位。ログインは開いたときに出す。
+ * ログインごとに行を作ると、同じ会社が何度も並んで「別の会社が2つある」ように見える。
+ * 実際にそれで、同じ会社の組織を二重に作る事故が起きた。
+ *
+ * 【停止は会社単位】
+ * 止めているのは org_access（組織ごと）で、ログインごとではない。
+ * 停止すると、その会社のログインは全部使えなくなる。ボタンを会社の行に置いて、
+ * 「この人だけ止められる」と誤解させない。
+ *
+ * 【パスワード再発行はログインごと】
+ * これだけは人ごとの操作なので、開いた中に置く。
+ */
 export function AccountRowForms({ row }: { row: AccountRow }) {
   const [state, formAction, pending] = useActionState(updateAccount, EMPTY_STATE);
   // 停止のほとんどは未入金なので、それを既定で選んでおく
@@ -106,14 +129,15 @@ export function AccountRowForms({ row }: { row: AccountRow }) {
       <div className="flex flex-wrap items-center gap-2">
         <Pill tone={active ? "green" : "rose"}>{row.status}</Pill>
         <span className="text-xs font-medium text-slate-800">{row.orgName}</span>
-        {/* 同じ会社名で複数のアカウントが並ぶことがあるため、担当者名で見分けられるようにする */}
-        <span className="text-xs text-slate-700">{row.userName ?? "（担当者名なし）"}</span>
-        <span className="text-xs text-slate-500">{row.email ?? "（ログイン未作成）"}</span>
+        <span className="text-xs text-slate-500">
+          {row.logins.length === 0 ? "ログイン未作成" : `ログイン ${row.logins.length}つ`}
+        </span>
       </div>
       {!active && row.suspendedReason && (
         <p className="text-xs text-slate-500">停止の理由：{row.suspendedReason}</p>
       )}
 
+      {/* 停止・再開は会社単位。開かなくても押せる場所に置く */}
       <div className="flex flex-wrap items-end gap-2">
         {active ? (
           <form action={formAction} className="flex flex-wrap items-end gap-2">
@@ -142,7 +166,7 @@ export function AccountRowForms({ row }: { row: AccountRow }) {
               </label>
             )}
             <button type="submit" disabled={pending} className={btnClass("default", "sm")}>
-              停止する
+              {row.logins.length > 1 ? `停止する（ログイン${row.logins.length}つ全部）` : "停止する"}
             </button>
           </form>
         ) : (
@@ -154,24 +178,43 @@ export function AccountRowForms({ row }: { row: AccountRow }) {
             </button>
           </form>
         )}
-
-        {row.userId && (
-          <form action={formAction}>
-            <input type="hidden" name="org_id" value={row.orgId} />
-            <input type="hidden" name="op" value="パスワード再発行" />
-            <input type="hidden" name="user_id" value={row.userId} />
-            <input type="hidden" name="email" value={row.email ?? ""} />
-            <button type="submit" disabled={pending} className={btnClass("default", "sm")}>
-              パスワード再発行
-            </button>
-          </form>
-        )}
       </div>
+
+      {row.logins.length > 0 && (
+        <details>
+          <summary className="cursor-pointer text-xs text-slate-500 hover:text-slate-700">
+            ログインを見る（{row.logins.length}）
+          </summary>
+          <ul className="mt-1 space-y-1 rounded border border-slate-200 bg-slate-50 px-2 py-1.5">
+            {row.logins.map((login) => (
+              <li key={login.userId} className="flex flex-wrap items-center gap-2">
+                {login.isOwner && <Pill tone="slate">代表</Pill>}
+                <span className="text-xs text-slate-800">{login.name}</span>
+                <span className="text-xs text-slate-500">{login.email}</span>
+                {/* 人ごとの操作はこれだけ。停止は会社単位なので上に置いてある */}
+                <form action={formAction}>
+                  <input type="hidden" name="org_id" value={row.orgId} />
+                  <input type="hidden" name="op" value="パスワード再発行" />
+                  <input type="hidden" name="user_id" value={login.userId} />
+                  <input type="hidden" name="email" value={login.email} />
+                  <button type="submit" disabled={pending} className={btnClass("default", "sm")}>
+                    パスワード再発行
+                  </button>
+                </form>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1 text-xs text-slate-400">
+            停止・再開は会社単位です。ログインを1つだけ止めることはできません。
+          </p>
+        </details>
+      )}
 
       <Result state={state} />
     </div>
   );
 }
+
 
 export type PendingRequest = {
   id: string;

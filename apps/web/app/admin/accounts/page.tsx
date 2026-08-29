@@ -11,12 +11,24 @@
 // 【対応が要るものを上に出す】
 // 停止中の組織を先頭に並べる。件数が増えたときに、放置されている契約が
 // 一覧の下に埋もれないようにする。
+//
+// 【一覧は会社が単位】（ユーザー決定 2026-08-29）
+// ログインごとに行を作らない。同じ会社が何度も並ぶと「別の会社が2つある」ように
+// 見え、実際にそれで同じ会社の組織を二重に作る事故が起きた。
+// ログインは行を開いたときに出す。停止・再開は会社単位（org_access）。
 
 import Link from "next/link";
 import { additionalLoginMonthlyYen } from "@ai-nyusatsu-bu/domain";
 import { Panel } from "@/components/ui";
 import { requireAdmin } from "@/lib/admin";
-import { AccountRowForms, IssueForm, PendingRequests, type AccountRow, type PendingRequest } from "./account-forms";
+import {
+  AccountRowForms,
+  IssueForm,
+  PendingRequests,
+  type AccountLogin,
+  type AccountRow,
+  type PendingRequest,
+} from "./account-forms";
 
 type OrgRow = { id: string; name: string; created_at: string };
 type UserRow = { id: string; org_id: string; email: string; name: string; role: string; created_at: string };
@@ -58,25 +70,20 @@ export default async function AdminAccountsPage() {
   if (loadError) console.error(`[admin] アカウント一覧の取得に失敗しました: ${loadError}`);
   if (pendingRows.error) console.error(`[admin] アカウント追加の依頼を読めませんでした: ${pendingRows.error.message}`);
 
-  // 組織ごとのログイン数。発行するといくらになるかを出すのに要る
-  const loginCountByOrg = new Map<string, number>();
-  for (const user of users.data ?? []) {
-    loginCountByOrg.set(user.org_id, (loginCountByOrg.get(user.org_id) ?? 0) + 1);
+  // 会社ごとのログイン。代表（1人目）を先頭にして、あとは作られた順に並べる
+  const loginsByOrg = new Map<string, AccountLogin[]>();
+  for (const user of [...(users.data ?? [])].sort((a, b) => a.created_at.localeCompare(b.created_at))) {
+    const list = loginsByOrg.get(user.org_id) ?? [];
+    list.push({ userId: user.id, name: user.name, email: user.email, isOwner: user.role === "owner" });
+    loginsByOrg.set(user.org_id, list);
+  }
+  for (const list of loginsByOrg.values()) {
+    list.sort((a, b) => Number(b.isOwner) - Number(a.isOwner));
   }
   const orgNameById = new Map((orgs.data ?? []).map((org) => [org.id, org.name]));
-
   const accessByOrg = new Map((access.data ?? []).map((row) => [row.org_id, row]));
-  const ownerByOrg = new Map<string, UserRow>();
-  for (const user of users.data ?? []) {
-    const current = ownerByOrg.get(user.org_id);
-    // owner を優先し、同じ役割なら先に作られたほうを代表とする
-    if (!current) ownerByOrg.set(user.org_id, user);
-    else if (current.role !== "owner" && user.role === "owner") ownerByOrg.set(user.org_id, user);
-    else if (current.role === user.role && user.created_at < current.created_at) ownerByOrg.set(user.org_id, user);
-  }
 
   const rows: AccountRow[] = (orgs.data ?? []).map((org) => {
-    const owner = ownerByOrg.get(org.id) ?? null;
     const state = accessByOrg.get(org.id);
     return {
       orgId: org.id,
@@ -84,9 +91,7 @@ export default async function AdminAccountsPage() {
       // 行が無い組織も停止として扱う（supabase/migrations/20260825000007_org_access.sql）
       status: state?.status ?? "停止",
       suspendedReason: state?.suspended_reason ?? null,
-      userId: owner?.id ?? null,
-      userName: owner?.name ?? null,
-      email: owner?.email ?? null,
+      logins: loginsByOrg.get(org.id) ?? [],
       createdAt: org.created_at,
     };
   });
@@ -118,7 +123,7 @@ export default async function AdminAccountsPage() {
       {/* 依頼は放置すると顧客が待たされる。発行フォームのすぐ下に置く */}
       <PendingRequests
         requests={(pendingRows.data ?? []).map((row): PendingRequest => {
-          const after = (loginCountByOrg.get(row.org_id) ?? 0) + 1;
+          const after = (loginsByOrg.get(row.org_id)?.length ?? 0) + 1;
           return {
             id: row.id,
             orgId: row.org_id,
