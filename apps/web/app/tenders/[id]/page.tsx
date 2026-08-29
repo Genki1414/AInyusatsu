@@ -533,7 +533,7 @@ export default async function TenderDetailPage({
   }
 
   return (
-    <AppShell active="tenders" orgName={orgName}>
+    <AppShell active="tenders" orgName={orgName} userName={userName}>
       <Link href="/proposals" className="text-xs text-slate-500 hover:underline">
         ← 一覧へ
       </Link>

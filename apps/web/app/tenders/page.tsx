@@ -111,7 +111,7 @@ const inputClass =
 
 export default async function TendersPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const params = await searchParams;
-  const { supabase, orgName } = await requireOrgContext();
+  const { supabase, orgName, userName } = await requireOrgContext();
 
   const now = new Date();
   const keyword = (params.q ?? "").trim();
@@ -223,7 +223,7 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
   }
 
   return (
-    <AppShell active="tenders" orgName={orgName}>
+    <AppShell active="tenders" orgName={orgName} userName={userName}>
       <Panel
         dense
         title={

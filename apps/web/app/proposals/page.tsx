@@ -42,7 +42,7 @@ function daysLeft(iso: string | null): number | null {
 }
 
 export default async function ProposalsPage() {
-  const { supabase, orgId, orgName } = await requireOrgContext();
+  const { supabase, orgId, orgName, userName } = await requireOrgContext();
 
   const [{ data: profile }, { data: proposals }] = await Promise.all([
     supabase
@@ -68,7 +68,7 @@ export default async function ProposalsPage() {
   const excluded = live.filter((p) => p.status === "対象外");
 
   return (
-    <AppShell active="proposals" orgName={orgName}>
+    <AppShell active="proposals" orgName={orgName} userName={userName}>
       <Panel
         title="照合条件"
         right={

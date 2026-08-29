@@ -40,7 +40,7 @@ function daysLeft(iso: string | null, now: Date): number | null {
 }
 
 export default async function HomePage() {
-  const { supabase, orgId, orgName } = await requireOrgContext();
+  const { supabase, orgId, orgName, userName } = await requireOrgContext();
   const now = new Date();
 
   const [
@@ -113,7 +113,7 @@ export default async function HomePage() {
   const consideringRows = livePropos.filter((p) => p.status === "検討中");
 
   return (
-    <AppShell active="home" orgName={orgName}>
+    <AppShell active="home" orgName={orgName} userName={userName}>
       {setupLeft.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2">
           <Compass size={14} className="shrink-0 text-blue-800" />
