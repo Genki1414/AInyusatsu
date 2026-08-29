@@ -113,14 +113,13 @@ export async function provisionTenant(
 
   let created;
   try {
-    // 送信枠は必ず渡す。渡さないと営業AI側の既定値（月4,000通）になり、
-    // 契約の500通に対して8倍送れる状態になる（packages/domain/src/sales_ai.ts）
-    const quota = basePlanQuota();
+    // 月の枠は必ず渡す。渡さないと営業AI側の既定値（月4,000通）になり、
+    // 契約の500通に対して8倍送れる状態になる（packages/domain/src/sales_ai.ts）。
+    // 日の上限は渡さない（ユーザー決定 2026-08-29。月の枠だけで管理する）
     created = await createTenant(conn, {
       name: validated.value.orgName,
       senderEmail: validated.value.senderEmail,
-      monthlySendQuota: quota.monthlySends,
-      dailySendQuota: quota.dailySends,
+      monthlySendQuota: basePlanQuota().monthlySends,
     });
   } catch (err) {
     return fail(`テナントを作れませんでした（${describe(err)}）`);

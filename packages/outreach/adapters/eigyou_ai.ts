@@ -425,8 +425,13 @@ export type CreateTenantInput = {
    * 省略すると営業AI側が config.FORM_MAX_PER_TENANT_PER_MONTH_DEFAULT（4,000通）を使う。
    */
   monthlySendQuota: number;
-  /** 1日あたりの上限（通/日）。省略すると営業AI側の既定値（300通）になる */
-  dailySendQuota: number;
+  /**
+   * 1日あたりの上限（通/日）。**省略してよい。**
+   * 省略すると営業AI側の既定値（300通/日）になる。
+   * AI入札部は月の枠だけで管理する（ユーザー決定 2026-08-29）。
+   * 月500通しか無いので、日次が実質的な制約になることはない。
+   */
+  dailySendQuota?: number;
 };
 export type CreatedTenant = {
   tenantId: number;
@@ -468,14 +473,14 @@ export async function createTenant(
   if (!Number.isInteger(input.monthlySendQuota) || input.monthlySendQuota <= 0) {
     throw new OutreachError("OUT_OF_SCOPE", "月の送信枠（monthlySendQuota）は正の整数で指定してください");
   }
-  if (!Number.isInteger(input.dailySendQuota) || input.dailySendQuota <= 0) {
+  if (input.dailySendQuota !== undefined && (!Number.isInteger(input.dailySendQuota) || input.dailySendQuota <= 0)) {
     throw new OutreachError("OUT_OF_SCOPE", "日の送信枠（dailySendQuota）は正の整数で指定してください");
   }
   const payload = (await postOps(connection, "/api/ops/tenants", {
     name: input.name,
     sender_email: input.senderEmail,
     monthly_send_quota: input.monthlySendQuota,
-    daily_send_quota: input.dailySendQuota,
+    ...(input.dailySendQuota !== undefined ? { daily_send_quota: input.dailySendQuota } : {}),
     ...(input.senderName ? { sender_name: input.senderName } : {}),
     ...(input.senderAddress ? { sender_address: input.senderAddress } : {}),
     ...(input.optoutUrl ? { optout_url: input.optoutUrl } : {}),

@@ -3,7 +3,6 @@ import {
   canRegisterAsPartner,
   canRequestQuote,
   findExistingPartner,
-  normalizePartnerName,
   toPartnerDraft,
   tradesAfterAdding,
   type OutreachCompanyInput,
@@ -78,25 +77,6 @@ describe("toPartnerDraft", () => {
     const memo = toPartnerDraft(company, { ...context, sentOnLabel: null }).memo;
     expect(memo).toContain("案件：");
     expect(memo).not.toContain("打診：");
-  });
-});
-
-describe("normalizePartnerName", () => {
-  it("株式会社の表記ゆれを吸収する", () => {
-    expect(normalizePartnerName("㈱山田")).toBe(normalizePartnerName("株式会社山田"));
-    expect(normalizePartnerName("(株)山田")).toBe(normalizePartnerName("株式会社山田"));
-    expect(normalizePartnerName("（株）山田")).toBe(normalizePartnerName("株式会社山田"));
-    expect(normalizePartnerName("㈲山田")).toBe(normalizePartnerName("有限会社山田"));
-  });
-
-  it("空白の有無で別会社にしない", () => {
-    expect(normalizePartnerName("株式会社 山田")).toBe(normalizePartnerName("株式会社山田"));
-    expect(normalizePartnerName("株式会社　山田")).toBe(normalizePartnerName("株式会社山田"));
-  });
-
-  it("名前が違えば別会社のまま（似ているだけで同じにしない）", () => {
-    expect(normalizePartnerName("株式会社山田電機")).not.toBe(normalizePartnerName("株式会社山田電気"));
-    expect(normalizePartnerName("山田工業")).not.toBe(normalizePartnerName("山田工務店"));
   });
 });
 

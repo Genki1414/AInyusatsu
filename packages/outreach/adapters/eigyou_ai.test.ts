@@ -266,11 +266,11 @@ describe("purchaseQuota", () => {
 
 describe("createTenant", () => {
   // 基本プランの枠。渡さないと営業AI側の既定値（月4,000通）になる
+  // 日の上限は渡さない（月の枠だけで管理する。ユーザー決定 2026-08-29）
   const base = {
     name: "山田電気株式会社",
     senderEmail: "info@yamada.example",
     monthlySendQuota: 500,
-    dailySendQuota: 50,
   };
   const ok = {
     ok: true,
@@ -298,8 +298,21 @@ describe("createTenant", () => {
       name: "山田電気株式会社",
       sender_email: "info@yamada.example",
       monthly_send_quota: 500,
-      daily_send_quota: 50,
     });
+  });
+
+  it("日の上限は渡さない（省略＝営業AI側の既定値のまま）", async () => {
+    const spy = mockFetch(200, ok);
+    await createTenant(opsConnection, base);
+    const [, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).not.toHaveProperty("daily_send_quota");
+  });
+
+  it("必要なら日の上限も渡せる", async () => {
+    const spy = mockFetch(200, ok);
+    await createTenant(opsConnection, { ...base, dailySendQuota: 50 });
+    const [, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toMatchObject({ daily_send_quota: 50 });
   });
 
   it("任意項目(sender_name/sender_address/optout_url)も渡せる", async () => {
@@ -315,7 +328,6 @@ describe("createTenant", () => {
       name: "山田電気株式会社",
       sender_email: "info@yamada.example",
       monthly_send_quota: 500,
-      daily_send_quota: 50,
       sender_name: "山田電気",
       sender_address: "東京都千代田区1-1-1",
       optout_url: "https://example.com/optout",
@@ -329,7 +341,7 @@ describe("createTenant", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it("送信枠が正の整数でなければ呼びに行かない", async () => {
+  it("月の枠が正の整数でなければ呼びに行かない", async () => {
     const spy = mockFetch(200, {});
     await expect(createTenant(opsConnection, { ...base, monthlySendQuota: 0 })).rejects.toThrow(OutreachError);
     await expect(createTenant(opsConnection, { ...base, dailySendQuota: -1 })).rejects.toThrow(OutreachError);

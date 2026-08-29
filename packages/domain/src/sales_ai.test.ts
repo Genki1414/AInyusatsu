@@ -244,8 +244,8 @@ describe("validateProvisionTenant", () => {
 // mailing_identity.test.ts の normalizeMailingIdentity/combineAddress に移した。
 
 describe("basePlanQuota", () => {
-  it("基本プランは月500通・日50通", () => {
-    expect(basePlanQuota()).toEqual({ monthlySends: 500, dailySends: 50 });
+  it("基本プランは月500通。日の上限は設けない（ユーザー決定 2026-08-29）", () => {
+    expect(basePlanQuota()).toEqual({ monthlySends: 500 });
   });
 
   it("営業AI側の既定値（4,000通）とは別物であることを固定する", () => {
