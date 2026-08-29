@@ -11,6 +11,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { looksLikeEmail, normalizeMailingIdentity } from "@ai-nyusatsu-bu/domain";
+import { createServiceClient } from "@ai-nyusatsu-bu/db";
 import { createClient } from "@/lib/supabase/server";
 import { requireOrgContext } from "@/lib/auth";
 import { syncSalesAiSenderIdentity } from "@/lib/sales_ai_sync";
@@ -75,7 +76,9 @@ export async function saveCompanyName(_prevState: CompanyNameState, formData: Fo
     return { error: "保存に失敗しました。時間をおいて再度お試しください。", saved: false, syncNote: null };
   }
 
-  const sync = await syncSalesAiSenderIdentity(supabase, orgId);
+  // api_key は authenticated から列の読み取り権限を外してあるため、ここは
+  // 顧客のセッションではなく service_role で読む（apps/web/lib/sales-ai.ts と同じ理由）
+  const sync = await syncSalesAiSenderIdentity(createServiceClient(), orgId);
 
   // ヘッダーの表示名は全画面で使うため、まとめて再検証する。
   revalidatePath("/", "layout");
@@ -170,7 +173,9 @@ export async function saveMailingIdentity(
     return { error: "保存に失敗しました。時間をおいて再度お試しください。", saved: false, syncNote: null };
   }
 
-  const sync = await syncSalesAiSenderIdentity(supabase, orgId);
+  // api_key は authenticated から列の読み取り権限を外してあるため、ここは
+  // 顧客のセッションではなく service_role で読む（apps/web/lib/sales-ai.ts と同じ理由）
+  const sync = await syncSalesAiSenderIdentity(createServiceClient(), orgId);
   return {
     error: null,
     saved: true,

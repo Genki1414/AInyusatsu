@@ -7,11 +7,17 @@
 // ここを通して営業AI側の送信元テンプレートへそのまま反映する。
 //
 // 【どこから呼ぶか】
-// - apps/web/app/company/actions.ts（顧客が自社情報・郵送名義を保存したとき。
-//   顧客自身のセッションのクライアントで呼ぶ。sales_ai_connectionsのRLSは
-//   自組織なら読めるので、api_keyもそのまま読める）
+// - apps/web/app/company/actions.ts（顧客が自社情報・郵送名義を保存したとき）
 // - apps/web/app/admin/sales-ai/actions.ts（本部がテナントを作った直後、および
-//   「今すぐ同期する」ボタン。service_roleのクライアントで呼ぶ）
+//   「今すぐ同期する」ボタン）
+//
+// 【必ず service_role で呼ぶ】
+// sales_ai_connections.api_key は authenticated から列の読み取り権限を外してある
+// （supabase/migrations/20260828000002_sales_ai_connections_admin.sql。営業AIの
+// APIキーを顧客のRLSの範囲で読めるままにすると、直に営業AIのAPIを叩けてしまい、
+// 「件数を見てから送る」「対応表に無い業種では送らない」という歯止めが外れるため）。
+// 顧客自身のセッションのクライアントを渡すとapi_keyが読めず必ず失敗するので、
+// 呼び出し側は createServiceClient()（@ai-nyusatsu-bu/db）を渡すこと。
 //
 // 【送信元は契約者本人の名義】
 // 会社名・送信元メールは organizations.name / reply_to（無ければオーナーのメール）を

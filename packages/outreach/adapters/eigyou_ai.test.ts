@@ -2,10 +2,12 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import {
   createTargetList,
   createTenant,
+  DEFAULT_CANCEL_RECENT_DAYS,
   getQuotaStatus,
   getKillSwitchStatus,
-  listRepliedMembers,
+  listSentCompanies,
   listTrades,
+  markReplied,
   OutreachError,
   previewTargets,
   purchaseQuota,
@@ -111,26 +113,58 @@ describe("createTargetList", () => {
 });
 
 describe("sendTargetList", () => {
-  // 営業AI側 target_lists.send_list() の実際の応答形。トップレベルに sent/count/requested は無い
+  // 営業AIが実際に返す形（eigyouAI target_lists.send_list()）。
+  // 以前ここを {sent: 12} という架空の形でモックしていたため、
+  // 「送ったのに送れませんでした」と出る不具合をテストが見逃していた。
   const realResponse = {
-    campaign_id: 99,
+    campaign_id: 31,
     target_count: 12,
     dry_run: false,
-    stats: { sent: 10, failed: 1, blocked: 1, suppressed: 0, stopped: 0 },
+    stats: { sent: 12, failed: 0, blocked: 0, suppressed: 0, stopped: 0 },
     cancelled_recent: 0,
   };
 
-  it("dry_run を false にして送信を頼む", async () => {
+  it("dry_run を false にし、直近に送った会社を外して送信を頼む", async () => {
     const spy = mockFetch(200, realResponse);
     const result = await sendTargetList(connection, 7, { subject: "件名", body: "本文" });
     expect(result).toEqual({
       requested: 12,
-      stats: { sent: 10, failed: 1, blocked: 1, suppressed: 0, stopped: 0 },
-      note: null,
+      sent: 12,
+      failed: 0,
+      blocked: 0,
+      suppressed: 0,
+      stopped: 0,
+      cancelledRecent: 0,
+      dryRun: false,
     });
     const [url, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("https://sales.example.com/api/tenant/lists/7/send");
-    expect(JSON.parse(init.body as string)).toMatchObject({ dry_run: false, subject: "件名", body: "本文" });
+    expect(JSON.parse(init.body as string)).toMatchObject({
+      dry_run: false,
+      subject: "件名",
+      body: "本文",
+      cancel_recent_days: DEFAULT_CANCEL_RECENT_DAYS,
+    });
+  });
+
+  it("stats の内訳をそのまま返す（送り残しを画面で出せるように）", async () => {
+    mockFetch(200, {
+      ...realResponse,
+      target_count: 120,
+      stats: { sent: 50, failed: 70, blocked: 0, suppressed: 0, stopped: 0 },
+      cancelled_recent: 4,
+    });
+    const result = await sendTargetList(connection, 7, { subject: "件名", body: "本文" });
+    expect(result.requested).toBe(120);
+    expect(result.sent).toBe(50);
+    expect(result.failed).toBe(70);
+    expect(result.cancelledRecent).toBe(4);
+  });
+
+  it("ドライランで返ってきたらそのまま伝える（成功と混同しない）", async () => {
+    mockFetch(200, { ...realResponse, dry_run: true });
+    const result = await sendTargetList(connection, 7, { subject: "件名", body: "本文" });
+    expect(result.dryRun).toBe(true);
   });
 
   it("件名か本文が空なら呼びに行かない", async () => {
@@ -140,22 +174,15 @@ describe("sendTargetList", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it("以前のトップレベルのsent/count/requestedしか無い応答は読めず止める(修正前の実際のバグの再現)", async () => {
-    mockFetch(200, { sent: 12 });
+  it("stats.sent が読めなければ0にせず止める", async () => {
+    mockFetch(200, { campaign_id: 1, target_count: 3, dry_run: false });
     await expect(sendTargetList(connection, 7, { subject: "件名", body: "本文" })).rejects.toMatchObject({
       code: "PARSE_INVALID",
     });
   });
 
-  it("target_countが返らなければ0にせず止める", async () => {
-    mockFetch(200, { ok: true });
-    await expect(sendTargetList(connection, 7, { subject: "件名", body: "本文" })).rejects.toMatchObject({
-      code: "PARSE_INVALID",
-    });
-  });
-
-  it("statsが返らなければ止める", async () => {
-    mockFetch(200, { target_count: 5 });
+  it("target_count が読めなければ止める", async () => {
+    mockFetch(200, { campaign_id: 1, dry_run: false, stats: { sent: 3 } });
     await expect(sendTargetList(connection, 7, { subject: "件名", body: "本文" })).rejects.toMatchObject({
       code: "PARSE_INVALID",
     });
@@ -389,8 +416,8 @@ describe("setSenderIdentity", () => {
   });
 });
 
-describe("listRepliedMembers", () => {
-  it("GETでstatus=repliedを付けて呼び、会社の配列を返す", async () => {
+describe("listSentCompanies", () => {
+  it("GETでstatus=success&limit=200を付けて呼び、会社の配列を返す", async () => {
     const spy = mockFetch(200, {
       list: { id: 7 },
       members: [
@@ -403,49 +430,72 @@ describe("listRepliedMembers", () => {
           website_url: "https://yamada.example",
           contact_url: "https://yamada.example/contact",
           replied: 1,
-          replied_at: "2026-08-20T10:00:00",
         },
       ],
     });
-    const result = await listRepliedMembers(connection, 7);
+    const result = await listSentCompanies(connection, 7);
     expect(result).toEqual([
       {
         companyId: 501,
         name: "山田電気株式会社",
         pref: "宮城県",
-        phone: "022-123-4567",
+        tel: "022-123-4567",
         email: "info@yamada.example",
-        websiteUrl: "https://yamada.example",
         contactUrl: "https://yamada.example/contact",
-        repliedAt: "2026-08-20T10:00:00",
+        websiteUrl: "https://yamada.example",
+        replied: true,
       },
     ]);
     const [url, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe("https://sales.example.com/api/tenant/lists/7?status=replied");
+    expect(url).toBe("https://sales.example.com/api/tenant/lists/7?status=success&limit=200");
     expect(init.method).toBe("GET");
   });
 
-  it("空文字の項目はnullにする(社名不明は既定文言)", async () => {
-    mockFetch(200, { members: [{ id: 502, name: "", pref: "", phone: "", email: "", website_url: "", contact_url: "", replied_at: "" }] });
-    const result = await listRepliedMembers(connection, 7);
+  it("空文字の項目はnullにする(社名不明は既定文言、replied無しはfalse)", async () => {
+    mockFetch(200, { members: [{ id: 502, name: "", pref: "", phone: "", email: "", website_url: "", contact_url: "" }] });
+    const result = await listSentCompanies(connection, 7);
     expect(result).toEqual([
-      { companyId: 502, name: "（社名不明）", pref: null, phone: null, email: null, websiteUrl: null, contactUrl: null, repliedAt: null },
+      { companyId: 502, name: "（社名不明）", pref: null, tel: null, email: null, contactUrl: null, websiteUrl: null, replied: false },
     ]);
   });
 
   it("membersが無ければ空配列", async () => {
     mockFetch(200, { list: { id: 7 } });
-    expect(await listRepliedMembers(connection, 7)).toEqual([]);
+    expect(await listSentCompanies(connection, 7)).toEqual([]);
   });
 
-  it("会社IDが読めない行があれば止める", async () => {
+  it("会社IDが読めない行は0にする(止めない。社名等は表示できるため)", async () => {
     mockFetch(200, { members: [{ name: "山田電気" }] });
-    await expect(listRepliedMembers(connection, 7)).rejects.toMatchObject({ code: "PARSE_INVALID" });
+    const result = await listSentCompanies(connection, 7);
+    expect(result[0].companyId).toBe(0);
   });
 
   it("営業AIがerrorを返したら止める", async () => {
-    mockFetch(404, { error: "リストが見つかりません" });
-    await expect(listRepliedMembers(connection, 999)).rejects.toMatchObject({ code: "OUT_OF_SCOPE" });
+    mockFetch(200, { error: "リストが見つかりません" });
+    await expect(listSentCompanies(connection, 999)).rejects.toMatchObject({ code: "OUT_OF_SCOPE" });
+  });
+});
+
+describe("markReplied", () => {
+  it("POSTでcompany_id・field=replied・value=trueを送る", async () => {
+    const spy = mockFetch(200, { ok: true });
+    await markReplied(connection, 7, 501, null);
+    const [url, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://sales.example.com/api/tenant/lists/7/outcome");
+    expect(JSON.parse(init.body as string)).toEqual({ company_id: 501, field: "replied", value: true });
+  });
+
+  it("memoがあれば含める", async () => {
+    const spy = mockFetch(200, { ok: true });
+    await markReplied(connection, 7, 501, "協力会社として登録（電気）");
+    expect(JSON.parse((spy.mock.calls[0] as unknown as [string, RequestInit])[1].body as string)).toMatchObject({
+      memo: "協力会社として登録（電気）",
+    });
+  });
+
+  it("営業AIがerrorを返したら止める", async () => {
+    mockFetch(200, { error: "リストが見つかりません" });
+    await expect(markReplied(connection, 999, 501, null)).rejects.toMatchObject({ code: "OUT_OF_SCOPE" });
   });
 });
 

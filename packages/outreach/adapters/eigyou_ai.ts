@@ -39,6 +39,16 @@
 
 const REQUEST_TIMEOUT_MS = 20_000;
 
+/**
+ * 直近この日数以内に送った会社は、今回の送信から外す。
+ *
+ * 営業AIの can_contact() には接触の頻度・回数の制限がもう無い
+ * （eigyouAI HANDOFF.md T44 で撤廃。残っているのは配信停止・テナント除外・重複のみ）。
+ * 企業データは全テナント共有なので、何もしないと同じ会社へ何度も届く。
+ * 相手はこれから協力会社になってもらう会社なので、そこは守る。
+ */
+export const DEFAULT_CANCEL_RECENT_DAYS = 30;
+
 export type OutreachErrorCode =
   | "AUTH_REQUIRED"
   | "RATE_LIMITED"
@@ -94,13 +104,39 @@ export type PreviewResult = {
 
 export type CreatedList = { listId: number; count: number };
 
+/**
+ * 送信の結果。営業AI側の応答をそのまま写す。
+ *
+ * 【なぜ「頼んだ数」と「送れた数」を分けるか】
+ * 営業AIは1回の呼び出しで全件を送るとは限らない。1回あたりの上限
+ * （config.FORM_MAX_PER_RUN）・テナントの月/日/時間の上限・Kill Switch・
+ * 配信停止のどれかに当たると、対象に入っていても送られない。
+ * requested だけを見せると「50社へ送信しました」と出したのに実際は12社、
+ * ということが起きる。
+ *
+ * 参照：eigyouAI target_lists.send_list() の戻り値と senders.send_campaign() の stats。
+ */
 export type SendResult = {
-  /** 送信を頼んだ会社の数（リストに入っていた件数。営業AI側の target_count） */
+  /** 対象になった会社の数（送信可能な会社を絞り、cancel_recent_days で外したあと） */
   requested: number;
-  /** 実際の内訳（成功・失敗・ブロック等）。営業AI側の stats をそのまま渡す */
-  stats: { sent: number; failed: number; blocked: number; suppressed: number; stopped: number };
-  /** 営業AI側が返したメッセージ（そのまま画面に出す） */
-  note: string | null;
+  /** 実際にフォームへ送れた数 */
+  sent: number;
+  /** 送信を試みたが失敗した数。営業AI側の送信上限に当たった分もここに入る */
+  failed: number;
+  /** 配信停止・テナント除外などで送らなかった数 */
+  blocked: number;
+  /** 恒久的な失敗として配信停止に入れられた数 */
+  suppressed: number;
+  /** 営業AI側の停止スイッチで止まった数 */
+  stopped: number;
+  /** cancel_recent_days で対象から外れた数 */
+  cancelledRecent: number;
+  /**
+   * 営業AIが「送っていない」と言っている（dry_run のまま返ってきた）。
+   * こちらは常に false を送るので通常あり得ないが、真に受けて
+   * 「送信しました」と出すと取り返しがつかないので、必ず見る
+   */
+  dryRun: boolean;
 };
 
 /** 残り送信可能数（T55）。senders.py の判定と同じ計算式（直近30日ローリング）。 */
@@ -187,6 +223,11 @@ function requireNumber(value: unknown, label: string): number {
     throw new OutreachError("PARSE_INVALID", `営業AIの応答に${label}がありません`);
   }
   return value;
+}
+
+/** 内訳は無くても送信自体は成立している。ここで止めずに0として扱う。 */
+function optionalNumber(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
 function toFilters(filters: OutreachFilters): Record<string, unknown> {
@@ -276,6 +317,7 @@ export async function sendTargetList(
   connection: SalesAiConnection,
   listId: number,
   message: { subject: string; body: string },
+  cancelRecentDays: number = DEFAULT_CANCEL_RECENT_DAYS,
 ): Promise<SendResult> {
   if (message.subject.trim() === "" || message.body.trim() === "") {
     // 空の本文を送ると、受け取った会社に何の用件か分からない
@@ -286,6 +328,10 @@ export async function sendTargetList(
     body: message.body,
     // 営業AI側の既定は dry_run:true（送らない）。実際に送るので明示的に false にする
     dry_run: false,
+    // 直近に送った会社を外す。同じ会社へ短期間に何度も送ると、
+    // これから協力会社になってもらう相手との関係が始まらない。
+    // 記録は営業AI側に一本化する（こちらに送信済みの表を持つと必ず食い違う）
+    cancel_recent_days: cancelRecentDays,
   })) as Record<string, unknown>;
 
   if (typeof payload.error === "string") {
@@ -296,14 +342,19 @@ export async function sendTargetList(
   if (!statsRaw) {
     throw new OutreachError("PARSE_INVALID", "営業AIの応答に内訳（stats）がありません");
   }
-  const stats = {
+  return {
+    requested,
     sent: requireNumber(statsRaw.sent, "stats.sent"),
-    failed: requireNumber(statsRaw.failed, "stats.failed"),
-    blocked: requireNumber(statsRaw.blocked, "stats.blocked"),
-    suppressed: requireNumber(statsRaw.suppressed, "stats.suppressed"),
-    stopped: requireNumber(statsRaw.stopped, "stats.stopped"),
+    failed: optionalNumber(statsRaw.failed),
+    blocked: optionalNumber(statsRaw.blocked),
+    suppressed: optionalNumber(statsRaw.suppressed),
+    stopped: optionalNumber(statsRaw.stopped),
+    cancelledRecent: optionalNumber(payload.cancelled_recent),
+    // 営業AIが「送っていない」と言っている（dry_run のまま返ってきた）。こちらは常に
+    // false を送るので通常あり得ないが、真に受けて「送信しました」と出すと取り返しが
+    // つかないので、必ず見る
+    dryRun: payload.dry_run === true,
   };
-  return { requested, stats, note: typeof payload.message === "string" ? payload.message : null };
 }
 
 /**
@@ -539,47 +590,89 @@ export async function listTrades(connection: SalesAiConnection): Promise<TradeEn
     .filter((t) => t.code !== "");
 }
 
-/** 返信があった1社。結果の取り込み（協力会社として登録する）の元データ。 */
-export type RepliedMember = {
+/** 営業AIのリストに入っている会社1社。協力会社として登録するのに要るものだけ。 */
+export type OutreachCompany = {
+  /** 営業AI側の companies.id。返信の記録に使う */
   companyId: number;
   name: string;
   pref: string | null;
-  phone: string | null;
+  tel: string | null;
   email: string | null;
-  websiteUrl: string | null;
   contactUrl: string | null;
-  repliedAt: string | null;
+  websiteUrl: string | null;
+  /** すでに「返信あり」を記録済みか */
+  replied: boolean;
 };
 
+function text(value: unknown): string | null {
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+}
+
 /**
- * 送信先リストのうち、返信があった会社だけを見る。
+ * 実際にフォームへ送れた会社を引く。
  *
- * 【誰が「返信あり」を付けるか】
- * 営業AI側でメールの自動取り込みはしていない（β版）。人が営業AIの画面で
- * 「返信あり」を手で付けたものだけがここに出る。
+ * 【なぜ status=replied ではないか】
+ * 営業AIの `replied` は**人が手で立てるフラグ**で、
+ * `POST /api/tenant/lists/<id>/outcome` からしかセットされない
+ * （api.py `h_tenant_list_member_outcome`：「β版。メール自動取得等はしない」）。
+ * 営業AIはメールボックスを見ていないので、待っていても永遠に立たない。
  *
- * 参照：eigyouAI api.py `GET /api/tenant/lists/<id>?status=replied`
+ * 返信は打診文に書いた連絡先＝**利用者自身のメールに届く**（「顧客は営業AIの画面を
+ * 開かない」ため、営業AI側の画面で人が付けるのを待っても永遠に立たない）。
+ * だから「送った会社」を出して、返信をもらった会社を利用者に選んでもらう
+ * （選んだあとは markReplied() で営業AI側にも記録する）。
+ *
+ * 参照：eigyouAI api.py `GET /api/tenant/lists/<id>?status=success`
  */
-export async function listRepliedMembers(connection: SalesAiConnection, listId: number): Promise<RepliedMember[]> {
-  const payload = (await get(connection, `/api/tenant/lists/${listId}?status=replied`)) as Record<string, unknown>;
+export async function listSentCompanies(connection: SalesAiConnection, listId: number): Promise<OutreachCompany[]> {
+  const payload = (await get(connection, `/api/tenant/lists/${listId}?status=success&limit=200`)) as Record<
+    string,
+    unknown
+  >;
   if (typeof payload.error === "string") {
-    throw new OutreachError("OUT_OF_SCOPE", `返信を確認できませんでした：${payload.error}`);
+    throw new OutreachError("OUT_OF_SCOPE", `送信済みの会社を確認できませんでした：${payload.error}`);
   }
   const members = Array.isArray(payload.members) ? payload.members : [];
-  return members.map((raw) => {
-    const row = (raw ?? {}) as Record<string, unknown>;
-    const str = (key: string): string | null => (typeof row[key] === "string" && row[key] !== "" ? (row[key] as string) : null);
+  return members.map((row) => {
+    const record = (row ?? {}) as Record<string, unknown>;
     return {
-      companyId: requireNumber(row.id, "会社ID"),
-      name: str("name") ?? "（社名不明）",
-      pref: str("pref"),
-      phone: str("phone"),
-      email: str("email"),
-      websiteUrl: str("website_url"),
-      contactUrl: str("contact_url"),
-      repliedAt: str("replied_at"),
+      companyId: typeof record.id === "number" ? record.id : 0,
+      name: text(record.name) ?? "（社名不明）",
+      pref: text(record.pref),
+      tel: text(record.phone),
+      email: text(record.email),
+      contactUrl: text(record.contact_url),
+      websiteUrl: text(record.website_url),
+      replied: record.replied === 1 || record.replied === true,
     };
   });
+}
+
+/**
+ * 「返信があった」を営業AI側にも記録する。
+ *
+ * 協力会社として登録したときに呼ぶ。**両方の記録を揃えるため。**
+ * 営業AIのダッシュボードは `target_list_members.replied` を数えていて
+ * （`h_tenant_dashboard`）、こちらだけで登録すると営業AI側は
+ * 「1件も返信が無い」ままになる。
+ *
+ * 参照：eigyouAI api.py `POST /api/tenant/lists/<id>/outcome`
+ */
+export async function markReplied(
+  connection: SalesAiConnection,
+  listId: number,
+  companyId: number,
+  memo: string | null,
+): Promise<void> {
+  const payload = (await post(connection, `/api/tenant/lists/${listId}/outcome`, {
+    company_id: companyId,
+    field: "replied",
+    value: true,
+    ...(memo ? { memo } : {}),
+  })) as Record<string, unknown>;
+  if (typeof payload.error === "string") {
+    throw new OutreachError("OUT_OF_SCOPE", `返信を記録できませんでした：${payload.error}`);
+  }
 }
 
 /** 自テナントの送信が今止められているか。参照：eigyouAI api.py `GET /api/tenant/kill-switch`。 */

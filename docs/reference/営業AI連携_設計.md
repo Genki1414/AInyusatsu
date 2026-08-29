@@ -68,45 +68,61 @@ AI入札部：POST /api/tenant/lists/preview（業種＋都道府県で絞る）
   ↓
 利用者：「◯社へ送信する」（確認ダイアログ）   ← 人がやるのはここだけ
   ↓
-AI入札部：POST /api/tenant/lists      （リストを作る）
-AI入札部：POST /api/tenant/lists/<id>/send（dry_run:false で送信を頼む）
+AI入札部：POST /api/tenant/lists      （初回のみ。リストを作る。
+          番号は outreach_sends に控える。同じ案件×業種の2回目以降は
+          控えた番号へ積む——新しいリストを作ると新しいキャンペーンになり、
+          もう送った会社にもう一度届くため）
+AI入札部：POST /api/tenant/lists/<id>/send（dry_run:false、
+          cancel_recent_days:30 を付けて送信を頼む。直近30日に送った会社は
+          企業データがテナント横断で共有のため、ここで必ず外す）
   ↓
 営業AI：can_contact / 上限 / 停止スイッチを見てから、フォームへ送信
 ```
 
 **件数を見ないと送信ボタンが出ない。** 何社に送るか知らないまま押させない。
 
+**1回では全部送れないことがある。** 営業AIは1回の呼び出しで最大50社まで
+（`FORM_MAX_PER_RUN`）、1テナント1時間で最大50社
+（`FORM_MAX_PER_TENANT_PER_HOUR`）。超えた分は送られずに残るので、
+「50社へ送信しました。残り70社はまだ送れていません」のように**送れなかった分を
+必ず出す**（`summarizeOutreachSend()`）。ボタンは「続きを送信する」に変わり、
+もう一度押すと同じリストへ、送れていない会社にだけ送る。
+
 ### 3. 結果（実装済み）
+
+**「返信のあった会社」を営業AIから引かない。** 営業AIの `replied` は**人が手で
+立てるフラグ**で、営業AIはメールボックスを見ていない（β版。api.py の
+docstringに明記）。返信は打診文に書いた連絡先＝**利用者自身のメールに届く**ので、
+待っていても営業AI側には永遠に立たない。代わりに「送った会社」を出して、
+返信をもらった会社を利用者に選んでもらう。
 
 ```
 営業AI：送信結果を form_send_log と target_list_members に持つ
   ↓
-AI入札部：案件×業種で作った送信先リストのlist_idを sales_ai_outreach_lists に記録
-      （sendOutreach()が送信のたびに追加。1つの案件×業種に複数のlist_idができうる）
+利用者：案件の見積依頼タブで「送った会社を見る」（依頼先が埋まったあとも出る。
+      1社登録したら一覧が消える、では続きを登録できないため）
   ↓
-利用者：「返信を確認する」（何日か後でもよい。案件の見積依頼タブから）
+AI入札部：outreach_sends に控えた list_id で
+      GET /api/tenant/lists/<id>?status=success を呼び、実際に送れた会社を出す
   ↓
-AI入札部：その案件×業種に紐づく全list_idについて
-      GET /api/tenant/lists/<id>?status=replied を呼び、返信のあった会社をまとめる
-      （営業AI側で人が「返信あり」を付けたものだけが出る。自動のメール取り込みは無い）
+利用者：返信をもらった会社の「協力会社として登録」を押す
   ↓
-利用者：「選んだ会社を協力会社として登録する」
-  ↓
-AI入札部：partners に追加（登録済みはメールアドレスで見分けて二重登録しない）
-      → 次の案件から見積依頼を出せる
+AI入札部：partners に追加（社名で照合し、二重登録しない。㈱・(株)・空白の
+      違いだけは吸収する）。メールアドレスが無い会社は登録できても
+      見積依頼は送れないため、その旨を一覧とメッセージに出す
+      ↓
+      POST /api/tenant/lists/<id>/outcome で営業AI側にも replied を記録する
+      （営業AIのダッシュボードは target_list_members.replied を数えているため。
+      失敗しても登録自体は取り消さない）
 ```
 
 **ここが繋がって、開拓が価値になった。** 送っただけでは何も増えない、を解消した。
 
-実装：`apps/web/app/tenders/[id]/outreach-import-actions.ts`
-（`checkRepliedCandidates`/`registerRepliedPartners`）、
-`packages/outreach/adapters/eigyou_ai.ts` の `listRepliedMembers()`、
-`supabase/migrations/20260828000004_sales_ai_outreach_lists.sql`。
-
-選ばれた会社IDは、登録の直前にもう一度営業AI側から読み直す（画面に出ていた
-社名・連絡先をそのまま信じない）。トレード（業種）はAI入札部側の語彙をそのまま使う
-——このブロック自体が「その業種で探した」文脈の中にあるので、営業AI側の業種コードを
-逆変換する必要が無い。
+実装：`apps/web/app/tenders/[id]/outreach-actions.ts`
+（`loadOutreachResults`/`registerPartnerFromOutreach`）、
+`packages/outreach/adapters/eigyou_ai.ts` の `listSentCompanies()`/`markReplied()`、
+`packages/domain/src/outreach_partner.ts`（詰め替えの純ロジック）、
+`supabase/migrations/20260828000003_outreach_sends.sql`。
 
 ## 使うAPI（すべて既存）
 
@@ -116,13 +132,15 @@ AI入札部：partners に追加（登録済みはメールアドレスで見分
 |---|---|---|
 | 件数の確認 | `POST /api/tenant/lists/preview` | 実装済み |
 | リストの作成 | `POST /api/tenant/lists` | 実装済み |
-| 送信 | `POST /api/tenant/lists/<id>/send` | 実装済み |
-| 結果の取得 | `GET /api/tenant/lists/<id>?status=replied` | 実装済み・**未使用** |
-| 今月の送信数 | `GET /api/tenant/dashboard` | 実装済み・**未使用** |
-| 停止されているか | `GET /api/tenant/kill-switch` | 実装済み・**未使用** |
+| 送信（`cancel_recent_days`込み） | `POST /api/tenant/lists/<id>/send` | 実装済み |
+| 送った会社の取得 | `GET /api/tenant/lists/<id>?status=success` | 実装済み（`listSentCompanies`） |
+| 返信の記録 | `POST /api/tenant/lists/<id>/outcome` | 実装済み（`markReplied`） |
+| 業種コードの一覧（T56） | `GET /api/tenant/trades` | 実装済み（`listTrades`） |
+| 今月の送信数 | `GET /api/tenant/dashboard` | 実装済み・**未使用**（`GET /api/tenant/quota`のほうが判定式と一致するため使わない） |
+| 停止されているか | `GET /api/tenant/kill-switch` | 実装済み（`getKillSwitchStatus`。送信前の警告表示に使用） |
 | テナントの作成（本部） | `POST /api/ops/tenants` | 実装済み |
-| 送信の停止（本部） | `POST /api/ops/kill-switch` | 実装済み |
-| 残り送信可能数（T55） | `GET /api/tenant/quota` | 実装済み・アダプタ済み（`getQuotaStatus`）・**呼び出し元（画面）未実装** |
+| 送信の停止（本部） | `POST /api/ops/kill-switch` | 実装済み（`setKillSwitch`。契約の停止・再開に連動） |
+| 残り送信可能数（T55） | `GET /api/tenant/quota` | 実装済み（`getQuotaStatus`。見積依頼タブに一言添える形で表示） |
 | クォータ追加購入（T55、本部専用） | `POST /api/ops/tenants/<id>/quota-purchase` | 実装済み・アダプタ済み（`purchaseQuota`）・**どこからも呼んでいない**（後述） |
 
 **AI入札部が使っているのは上の3つだけ。** 残りは繋げば使える。
@@ -221,16 +239,14 @@ AI入札部が必要とするのは **電気・設備保守・廃棄物処理・
 
 ## 決めていない論点
 
-### 二重送信をどちらで防ぐか
+### 二重送信をどちらで防ぐか（解決）
 
-営業AIの送信に `cancel_recent_days`（指定日数以内に送った会社を除外）がある。
-AI入札部側には「この案件×業種は送信済み」の記録が**無い**。
-
-- 案：送信のたびに `cancel_recent_days: 30` を渡し、営業AI側に任せる
-- 案：AI入札部にも送信済みの記録を持ち、ボタンを出さない
-
-**前者を勧める。** 記録を2か所に持つと必ず食い違う。
-ただし利用者から見ると「押したのに0社」になるので、その理由を画面に出す必要がある。
+**前者（営業AI側に任せる）で実装した。** 送信のたびに `cancel_recent_days: 30` を
+渡す（`DEFAULT_CANCEL_RECENT_DAYS`）。記録を2か所に持たないという方針どおり、
+AI入札部側は「送信済みかどうか」の判定は持たない。ただし**同じリストへ送り直す
+ための番号**（どのキャンペーンに積むか）は必要で、それは `outreach_sends` に
+`(org_id, tender_id, trade)` 単位で1件だけ持つ（案件×業種で1リスト）。
+除外されたことは `cancelledRecent` として画面に出す（`summarizeOutreachSend()`）。
 
 ### 送信元の情報が二重になる（解決。ユーザー決定 2026-08-28→その2）
 
@@ -257,6 +273,14 @@ AI入札部側には「この案件×業種は送信済み」の記録が**無�
   （入力欄は無い＝本部が値を打ち直すことはない）
 
 `company_profiles`（入札資格の業種・等級等）とは別物のまま、二重に持たせていない。
+
+**`sales_ai_connections.api_key` は顧客のRLSでも読めない**（列の読み取り権限を
+`authenticated` から外してある。`supabase/migrations/20260828000002_sales_ai_connections_admin.sql`）。
+案件画面（`outreach-actions.ts`）や `/company` からの自動同期呼び出しは、
+`apps/web/lib/sales-ai.ts` の `loadSalesAiConnection()` や
+`createServiceClient()`（`syncSalesAiSenderIdentity()` の呼び出し側）で
+service_role として読む。顧客のセッションのクライアントをそのまま渡すと
+api_keyが読めず必ず失敗するので、新しい呼び出し元を足すときは注意すること。
 
 ### クォータ追加購入の運用キー・テナントIDをどこに持つか（T55。解決）
 

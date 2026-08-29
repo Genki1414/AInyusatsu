@@ -20,13 +20,15 @@ import { useActionState, useCallback, useRef, useState } from "react";
 import Link from "next/link";
 import { ConfirmSubmitButton } from "@/components/ConfirmSubmitButton";
 import { CopyButton } from "@/components/CopyButton";
-import { previewOutreachTargets, sendOutreach, type OutreachState } from "./outreach-actions";
 import {
-  checkRepliedCandidates,
-  registerRepliedPartners,
-  type CheckRepliesState,
-  type RegisterRepliesState,
-} from "./outreach-import-actions";
+  loadOutreachResults,
+  previewOutreachTargets,
+  registerPartnerFromOutreach,
+  sendOutreach,
+  type OutreachResultsState,
+  type OutreachState,
+  type RegisterPartnerState,
+} from "./outreach-actions";
 import { btnClass, Panel, Pill } from "@/components/ui";
 import { buildOutreachMessage, buildQuoteRequestEmail, groupLotsByTrade, type QuoteRequestLot } from "@ai-nyusatsu-bu/domain";
 import { AREA_OPTIONS, PREFECTURE_OPTIONS, TRADE_OPTIONS } from "@/lib/catalog";
@@ -91,16 +93,22 @@ const EMPTY_OUTREACH: OutreachState = {
   count: null,
   sample: [],
   listId: null,
+  hasRemaining: false,
   quotaNote: null,
   killSwitchWarning: null,
 };
 
 /**
- * 営業AIで候補企業を探す。
+ * 営業AIで候補企業を探して送る。
  *
- * ここでやるのは「何社いるか見る」と「送信先リストを作る」まで。
- * 送信は営業AIの画面から人が行う（CLAUDE.md「やらないこと：問い合わせフォームへの自動送信」）。
- * 業種が対応表に無い組織ではボタン自体を出さない（呼んでも止まるが、押させない）。
+ * 【押されたときだけ送る】
+ * 件数を見る（preview）と、送信（リスト作成→送信）の2段。定期実行やジョブから
+ * 呼ばない（CLAUDE.md「やらないこと：問い合わせフォームへの無人の自動送信」）。
+ * 実際にフォームへ送るのは営業AIで、除外・上限・停止も営業AI側が持つ。
+ *
+ * 【対応表に無い業種では出さない】
+ * 業種が変換できないまま投げると営業AI側で条件が捨てられ、その県の全社が対象になる。
+ * 対応表は本部が設定する（/admin/accounts）。
  */
 function SalesAiBlock({ tenderId, trade }: { tenderId: string; trade: string }) {
   const [state, formAction, pending] = useActionState(previewOutreachTargets, EMPTY_OUTREACH);
@@ -123,17 +131,23 @@ function SalesAiBlock({ tenderId, trade }: { tenderId: string; trade: string }) 
           </button>
         </form>
 
-        {/* 何社いるかを見てからでないと送れない。件数を知らずに送らせない */}
-        {found > 0 && !stopped && !sendState.message && (
+        {/* 何社いるかを見てからでないと送れない。件数を知らずに送らせない。
+            送り残しがあるときは、もう一度押せるようにボタンを出したままにする
+            （営業AIは1回に50社までしか送らない。送信済みの会社には送らない） */}
+        {found > 0 && !stopped && (!sendState.message || sendState.hasRemaining) && (
           <form action={sendFormAction}>
             <input type="hidden" name="tender_id" value={tenderId} />
             <input type="hidden" name="trade" value={trade} />
             <ConfirmSubmitButton
               className={btnClass("primary", "sm")}
               disabled={sending}
-              confirmMessage={`${found}社の問い合わせフォームへ、${trade}のお取引の打診を送ります。送信は取り消せません。よろしいですか。`}
+              confirmMessage={
+                sendState.hasRemaining
+                  ? `まだ送れていない会社へ、${trade}のお取引の打診を送ります。送信は取り消せません。よろしいですか。`
+                  : `${found}社の問い合わせフォームへ、${trade}のお取引の打診を送ります。送信は取り消せません。よろしいですか。`
+              }
             >
-              {sending ? "送信中..." : `${found}社へ送信する`}
+              {sending ? "送信中..." : sendState.hasRemaining ? "続きを送信する" : `${found}社へ送信する`}
             </ConfirmSubmitButton>
           </form>
         )}
@@ -165,85 +179,110 @@ function SalesAiBlock({ tenderId, trade }: { tenderId: string; trade: string }) 
         送るのは下の打診文です。実際にフォームへ送るのは営業AIで、送信先の除外・回数の上限・
         停止の設定はすべて営業AI側の設定が効きます。
       </p>
-
-      <RepliedCandidatesBlock tenderId={tenderId} trade={trade} />
     </div>
   );
 }
 
-const EMPTY_CHECK_REPLIES: CheckRepliesState = { error: null, candidates: [], trade: null };
-const EMPTY_REGISTER_REPLIES: RegisterRepliesState = { error: null, message: null };
+// "use server" のファイルからは async 関数しか export できないため、初期値はこちらに置く
+const EMPTY_RESULTS: OutreachResultsState = { error: null, message: null, companies: [] };
+const EMPTY_REGISTER: RegisterPartnerState = { error: null, message: null };
 
 /**
- * 返信があった会社を確認して、協力会社として登録する（結果の取り込み）。
+ * 打診に返信をくれた会社を、協力会社として登録する1行。
  *
- * docs/reference/営業AI連携_設計.md「3. 結果（未実装）」の実装。営業AI側で人が
- * 「返信あり」を付けたものだけがここに出る（自動でのメール取り込みはしていない）。
+ * 【なぜ「返信のあった会社」を営業AIから引かないか】
+ * 営業AIの replied は人が手で立てるフラグで、営業AIはメールボックスを見ていない。
+ * 返信は打診文に書いた連絡先＝利用者自身のメールに届くので、
+ * 「送った会社」を出して、返信をもらった会社を利用者に選んでもらう。
  */
-function RepliedCandidatesBlock({ tenderId, trade }: { tenderId: string; trade: string }) {
-  const [checkState, checkAction, checking] = useActionState(checkRepliedCandidates, EMPTY_CHECK_REPLIES);
-  const [registerState, registerAction, registering] = useActionState(registerRepliedPartners, EMPTY_REGISTER_REPLIES);
-  const checked = checkState.trade !== null;
-  const selectable = checkState.candidates.filter((c) => !c.alreadyPartner);
+function OutreachResultRow({
+  tenderId,
+  trade,
+  company,
+}: {
+  tenderId: string;
+  trade: string;
+  company: OutreachResultsState["companies"][number];
+}) {
+  const [state, formAction, pending] = useActionState(registerPartnerFromOutreach, EMPTY_REGISTER);
+  const done = Boolean(state.message);
 
   return (
-    <div className="mt-2 border-t border-violet-200 pt-2">
-      <form action={checkAction}>
+    <li className="border-b border-violet-100 py-1 last:border-0">
+      <form action={formAction} className="flex flex-wrap items-center gap-2">
         <input type="hidden" name="tender_id" value={tenderId} />
         <input type="hidden" name="trade" value={trade} />
-        <button type="submit" disabled={checking} className={btnClass("default", "sm")}>
-          {checking ? "確認中..." : "返信を確認する"}
-        </button>
-      </form>
+        <input type="hidden" name="company_id" value={String(company.companyId)} />
+        <input type="hidden" name="name" value={company.name} />
+        <input type="hidden" name="pref" value={company.pref ?? ""} />
+        <input type="hidden" name="tel" value={company.tel ?? ""} />
+        <input type="hidden" name="email" value={company.email ?? ""} />
+        <input type="hidden" name="contact_url" value={company.contactUrl ?? ""} />
+        <input type="hidden" name="website_url" value={company.websiteUrl ?? ""} />
 
-      {checkState.error && (
-        <p role="alert" className="mt-1 text-xs leading-relaxed text-rose-700">
-          {checkState.error}
+        <span className="text-xs text-slate-800">{company.name}</span>
+        {company.pref && <span className="text-xs text-slate-400">{company.pref}</span>}
+        {/* メールアドレスが無い会社は登録できても見積依頼を出せない。先に見せる */}
+        {!company.email && <span className="text-xs text-amber-700">メール未取得</span>}
+        {company.replied && <span className="text-xs text-emerald-700">返信あり</span>}
+        {!done && (
+          <button type="submit" disabled={pending} className={btnClass("default", "sm")}>
+            {pending ? "登録中..." : "協力会社として登録"}
+          </button>
+        )}
+      </form>
+      {state.error && (
+        <p role="alert" className="text-xs leading-relaxed text-rose-700">
+          {state.error}
         </p>
       )}
+      {state.message && <p className="text-xs leading-relaxed text-emerald-800">{state.message}</p>}
+    </li>
+  );
+}
 
-      {checked && checkState.candidates.length === 0 && !checkState.error && (
-        <p className="mt-1 text-xs leading-relaxed text-slate-500">まだ返信はありません。</p>
-      )}
+/**
+ * 営業AIへ送った会社の一覧。返信をもらった会社をここから協力会社にする。
+ *
+ * **ここが繋がって初めて開拓が価値になる。** 送っただけでは協力会社は増えない。
+ * 返信は数日後に来るので、案件画面をあとから開いても見られるようにしてある
+ * （リストの番号は outreach_sends に控えてある）。
+ */
+function OutreachResults({ tenderId, trade, sentOnLabel }: { tenderId: string; trade: string; sentOnLabel: string | null }) {
+  const [state, formAction, pending] = useActionState(loadOutreachResults, EMPTY_RESULTS);
 
-      {checked && checkState.candidates.length > 0 && (
-        <form action={registerAction} className="mt-1">
+  return (
+    <div className="mt-1 rounded border border-violet-200 bg-violet-50 px-2 py-1.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-xs font-medium text-violet-900">営業AIで打診した会社</p>
+        {sentOnLabel && <span className="text-xs text-slate-500">最後の送信 {sentOnLabel}</span>}
+        <form action={formAction}>
           <input type="hidden" name="tender_id" value={tenderId} />
           <input type="hidden" name="trade" value={trade} />
-          <ul className="space-y-1">
-            {checkState.candidates.map((c) => (
-              <li key={c.companyId} className="flex flex-wrap items-center gap-2 text-xs text-slate-700">
-                <label className="flex items-center gap-1.5">
-                  <input
-                    type="checkbox"
-                    name="company_id"
-                    value={c.companyId}
-                    disabled={c.alreadyPartner}
-                    defaultChecked={!c.alreadyPartner}
-                  />
-                  <span>{c.name}</span>
-                </label>
-                {c.pref && <span className="text-slate-400">{c.pref}</span>}
-                {c.email && <span className="text-slate-400">{c.email}</span>}
-                {c.alreadyPartner && <Pill tone="slate">登録済み</Pill>}
-              </li>
-            ))}
-          </ul>
-          {selectable.length > 0 && (
-            <button type="submit" disabled={registering} className={`${btnClass("primary", "sm")} mt-2`}>
-              {registering ? "登録中..." : "選んだ会社を協力会社として登録する"}
-            </button>
-          )}
-          {registerState.error && (
-            <p role="alert" className="mt-1 text-xs leading-relaxed text-rose-700">
-              {registerState.error}
-            </p>
-          )}
-          {registerState.message && (
-            <p className="mt-1 text-xs leading-relaxed text-emerald-800">{registerState.message}</p>
-          )}
+          <input type="hidden" name="sent_on" value={sentOnLabel ?? ""} />
+          <button type="submit" disabled={pending} className={btnClass("default", "sm")}>
+            {pending ? "確認中..." : "送った会社を見る"}
+          </button>
         </form>
+      </div>
+
+      {state.error && (
+        <p role="alert" className="mt-1 text-xs leading-relaxed text-rose-700">
+          {state.error}
+        </p>
       )}
+      {state.message && <p className="mt-1 text-xs leading-relaxed text-violet-900">{state.message}</p>}
+      {state.companies.length > 0 && (
+        <ul className="mt-1">
+          {state.companies.map((company) => (
+            <OutreachResultRow key={company.companyId || company.name} tenderId={tenderId} trade={trade} company={company} />
+          ))}
+        </ul>
+      )}
+      <p className="mt-1 text-xs leading-relaxed text-slate-500">
+        返信は、打診文に書いたご自身のメールアドレスに届きます。
+        返信をもらった会社を登録すると、次の案件から見積依頼を出せます。
+      </p>
     </div>
   );
 }
@@ -477,6 +516,7 @@ export function RequestTab({
   officialStatus,
   recommendations,
   outreachTrades,
+  outreachSends,
 }: {
   tenderId: string;
   senderOrgName: string;
@@ -495,6 +535,12 @@ export function RequestTab({
   recommendations: Record<string, PartnerRecommendationResult | null>;
   /** 営業AIの対応表にある業種。ここに無い業種では候補を探せない */
   outreachTrades: string[];
+  /**
+   * すでに営業AIへ送った業種と、最後に送信した日時の表示。
+   * 一度でも送っていれば、依頼先が埋まったあとも結果を見られるようにする
+   * （返信は数日後に来るし、1社登録しただけで一覧が消えては困る）
+   */
+  outreachSends: Record<string, string | null>;
 }) {
   const boundAction = sendQuoteRequests.bind(null, tenderId);
   const [state, formAction, pending] = useActionState(boundAction, initialState);
@@ -645,6 +691,15 @@ export function RequestTab({
                 />
               )}
 
+              {/* 依頼先が埋まったあとも出す。1社登録したら一覧が消える、では続きを登録できない */}
+              {group.trade in outreachSends && (
+                <OutreachResults
+                  tenderId={tenderId}
+                  trade={group.trade}
+                  sentOnLabel={outreachSends[group.trade]}
+                />
+              )}
+
               <label className="mt-3 block text-xs">
                 <span className="font-medium text-slate-700">依頼文（編集できます）</span>
                 <textarea name={`body_${group.trade}`} defaultValue={body} rows={8} className={`${input} mt-1 block w-full font-mono`} />
@@ -656,7 +711,7 @@ export function RequestTab({
         <Panel title="回答期限">
           <label className="flex flex-wrap items-center gap-2 text-xs">
             <input type="datetime-local" name="due_at" defaultValue={suggestedDueAt ?? ""} required className={input} />
-            <span className="text-slate-500">期限の24時間前に未回答の会社へ自動で催促します（タスク4-4で実装予定）。</span>
+            <span className="text-slate-500">期限の24時間前に未回答の会社へ自動で催促します（1社につき1回だけ）。</span>
           </label>
         </Panel>
 
