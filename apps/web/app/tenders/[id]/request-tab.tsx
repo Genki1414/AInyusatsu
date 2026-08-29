@@ -700,7 +700,7 @@ export function RequestTab({
         <Panel title="回答期限">
           <label className="flex flex-wrap items-center gap-2 text-xs">
             <input type="datetime-local" name="due_at" defaultValue={suggestedDueAt ?? ""} required className={input} />
-            <span className="text-slate-500">期限の24時間前に未回答の会社へ自動で催促します（タスク4-4で実装予定）。</span>
+            <span className="text-slate-500">期限の24時間前に未回答の会社へ自動で催促します（1社につき1回だけ）。</span>
           </label>
         </Panel>
 
