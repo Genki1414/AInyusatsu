@@ -9,13 +9,16 @@ import { btnClass, Pill } from "@/components/ui";
 import {
   checkConnection,
   deleteConnection,
+  fetchTrades,
   provisionTenant,
   saveConnection,
   syncSenderIdentity,
   type SalesAiAdminState,
+  type TradesState,
 } from "./actions";
 
 const EMPTY_STATE: SalesAiAdminState = { error: null, message: null };
+const EMPTY_TRADES: TradesState = { error: null, trades: null };
 
 const input =
   "rounded border border-slate-300 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300";
@@ -59,6 +62,7 @@ export function ConnectionRowForms({ row }: { row: ConnectionRow }) {
   const [delState, delAction, delPending] = useActionState(deleteConnection, EMPTY_STATE);
   const [chkState, chkAction, chkPending] = useActionState(checkConnection, EMPTY_STATE);
   const [syncState, syncAction, syncPending] = useActionState(syncSenderIdentity, EMPTY_STATE);
+  const [tradesState, tradesAction, tradesPending] = useActionState(fetchTrades, EMPTY_TRADES);
 
   const connected = row.tenantId !== null;
 
@@ -152,6 +156,26 @@ export function ConnectionRowForms({ row }: { row: ConnectionRow }) {
             </button>
             <Result state={manState} />
           </form>
+          {connected && (
+            <div className="mt-2 border-t border-slate-100 pt-2">
+              <form action={tradesAction}>
+                <input type="hidden" name="org_id" value={row.orgId} />
+                <button type="submit" disabled={tradesPending} className={btnClass("ghost", "sm")}>
+                  {tradesPending ? "確認中..." : "業種コードを確認する"}
+                </button>
+              </form>
+              {tradesState.error && <p className="mt-1 text-xs leading-relaxed text-rose-700">{tradesState.error}</p>}
+              {tradesState.trades && (
+                <ul className="mt-1 grid grid-cols-2 gap-x-4 gap-y-0.5 font-mono text-xs text-slate-700 sm:grid-cols-3">
+                  {tradesState.trades.map((t) => (
+                    <li key={t.code}>
+                      {t.label} = {t.code}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
           {connected && (
             <form action={delAction} className="mt-2">
               <input type="hidden" name="org_id" value={row.orgId} />

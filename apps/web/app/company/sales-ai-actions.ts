@@ -11,11 +11,12 @@
 // ここにも案件画面にも、送信を呼ぶ処理は書かない。
 
 import { revalidatePath } from "next/cache";
-import { OutreachError, previewTargets } from "@ai-nyusatsu-bu/outreach";
+import { listTrades, OutreachError, previewTargets, type TradeEntry } from "@ai-nyusatsu-bu/outreach";
 import { validateSalesAiSettings, type TradeMap } from "@ai-nyusatsu-bu/domain";
 import { requireOrgContext } from "@/lib/auth";
 
 export type SalesAiState = { error: string | null; message: string | null };
+export type TradesState = { error: string | null; trades: TradeEntry[] | null };
 
 function text(formData: FormData, key: string): string {
   const value = formData.get(key);
@@ -97,5 +98,31 @@ export async function checkSalesAiConnection(_prev: SalesAiState, _formData: For
       .eq("org_id", orgId);
     revalidatePath("/company");
     return { error: `つながりませんでした（${reason}）`, message: null };
+  }
+}
+
+/**
+ * 営業AI側が対応している業種のコードを見る（T56）。
+ *
+ * 対応表（trade_map）に書くコードを当てずっぽうで入力せずに済むように、
+ * 営業AI側の実際の語彙を取得して画面に出す。対応表への反映は引き続き手で行う
+ * （このアクションは表示するだけで、trade_mapは書き換えない）。
+ */
+export async function fetchSalesAiTrades(_prev: TradesState, _formData: FormData): Promise<TradesState> {
+  const { supabase, orgId } = await requireOrgContext();
+
+  const { data } = await supabase
+    .from("sales_ai_connections")
+    .select("base_url, api_key")
+    .eq("org_id", orgId)
+    .maybeSingle<{ base_url: string; api_key: string }>();
+  if (!data) return { error: "先に保存してください。", trades: null };
+
+  try {
+    const trades = await listTrades({ baseUrl: data.base_url, apiKey: data.api_key });
+    return { error: null, trades };
+  } catch (err) {
+    const reason = err instanceof OutreachError ? `${err.code}：${err.message}` : String(err);
+    return { error: `業種コードを取得できませんでした（${reason}）`, trades: null };
   }
 }

@@ -10,11 +10,12 @@
 
 import { useActionState } from "react";
 import { btnClass, Panel } from "@/components/ui";
-import { checkSalesAiConnection, saveSalesAiSettings, type SalesAiState } from "./sales-ai-actions";
+import { checkSalesAiConnection, fetchSalesAiTrades, saveSalesAiSettings, type SalesAiState, type TradesState } from "./sales-ai-actions";
 
 // "use server" のファイルからは async 関数しか export できないため、初期値はこちらに置く
 // （apps/web/AGENTS.md「実際に踏んだ落とし穴」）
 const EMPTY: SalesAiState = { error: null, message: null };
+const EMPTY_TRADES: TradesState = { error: null, trades: null };
 
 const input = "rounded border border-slate-300 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300";
 
@@ -44,6 +45,7 @@ function Result({ state }: { state: SalesAiState }) {
 export function SalesAiForm({ view }: { view: SalesAiView }) {
   const [saveState, saveAction, saving] = useActionState(saveSalesAiSettings, EMPTY);
   const [checkState, checkAction, checking] = useActionState(checkSalesAiConnection, EMPTY);
+  const [tradesState, tradesAction, loadingTrades] = useActionState(fetchSalesAiTrades, EMPTY_TRADES);
 
   return (
     <Panel title="営業AI連携（協力会社の開拓）">
@@ -87,7 +89,7 @@ export function SalesAiForm({ view }: { view: SalesAiView }) {
         </label>
         <p className="text-xs leading-relaxed text-slate-500">
           1行に1件、「この製品の業種 = 営業AIの業種コード」の形で書きます。
-          営業AI側の業種コードは営業AIの画面でご確認ください（一覧を取得する仕組みがまだないため、手で書く必要があります）。
+          営業AI側の業種コードは、下の「業種コードを確認する」で一覧を表示できます。
           <span className="text-amber-700">
             対応表に無い業種では、候補を探せません。
           </span>
@@ -99,6 +101,28 @@ export function SalesAiForm({ view }: { view: SalesAiView }) {
           {saving ? "保存中..." : "保存する"}
         </button>
       </form>
+
+      <div className="mt-3 border-t border-slate-100 pt-3">
+        <form action={tradesAction}>
+          <button type="submit" disabled={loadingTrades} className={btnClass("default", "sm")}>
+            {loadingTrades ? "確認中..." : "業種コードを確認する"}
+          </button>
+        </form>
+        {tradesState.error && <p className="mt-1 text-xs leading-relaxed text-rose-700">{tradesState.error}</p>}
+        {tradesState.trades && (
+          <ul className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-xs text-slate-700 sm:grid-cols-3">
+            {tradesState.trades.map((t) => (
+              <li key={t.code}>
+                {t.label} = {t.code}
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="mt-2 text-xs leading-relaxed text-slate-500">
+          営業AI側で実際に対応している業種だけが出ます（先に接続情報を保存しておいてください）。
+          対応表の右側（＝の右）に、ここに出たコードをそのまま書き写してください。
+        </p>
+      </div>
 
       <div className="mt-3 border-t border-slate-100 pt-3">
         <form action={checkAction} className="flex flex-wrap items-center gap-2">

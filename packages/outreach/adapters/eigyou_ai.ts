@@ -511,6 +511,34 @@ export async function setSenderIdentity(
   return { templateId };
 }
 
+/** 営業AI側の業種1件（コードと表示名）。T56。 */
+export type TradeEntry = { code: string; label: string };
+
+/**
+ * 営業AI側が対応している業種の語彙を見る（T56）。
+ *
+ * 【何のためにあるか】
+ * これまで「AI入札の業種 = 営業AIの業種コード」の対応表（trade_map）は、営業AI側の
+ * コード一覧を見る手段が無く、契約者が手で書くしかなかった（company/sales-ai-form.tsx）。
+ * このAPIで実際に対応しているコードと表示名が見えるので、対応表を当てずっぽうで
+ * 書かずに済む。テナントに依存しない値（どのテナントでも同じ）。
+ *
+ * 参照：eigyouAI api.py `GET /api/tenant/trades`
+ */
+export async function listTrades(connection: SalesAiConnection): Promise<TradeEntry[]> {
+  const payload = (await get(connection, "/api/tenant/trades")) as Record<string, unknown>;
+  const trades = Array.isArray(payload.trades) ? payload.trades : [];
+  return trades
+    .map((raw) => {
+      const row = (raw ?? {}) as Record<string, unknown>;
+      return {
+        code: typeof row.code === "string" ? row.code : "",
+        label: typeof row.label === "string" ? row.label : "",
+      };
+    })
+    .filter((t) => t.code !== "");
+}
+
 /** 返信があった1社。結果の取り込み（協力会社として登録する）の元データ。 */
 export type RepliedMember = {
   companyId: number;
@@ -555,7 +583,7 @@ export async function listRepliedMembers(connection: SalesAiConnection, listId: 
 }
 
 /**
- * テナット別のKill Switch(送信の即時停止・解除)を操作する。
+ * テナント別のKill Switch(送信の即時停止・解除)を操作する。
  *
  * 【いつ呼ぶか】
  * AI入札部側で契約者の組織を停止／再開したとき(本部の /admin/accounts)。

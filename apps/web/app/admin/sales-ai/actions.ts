@@ -25,13 +25,15 @@
 // （CLAUDE.md「やらないこと：問い合わせフォームへの自動送信」）。ここにも送信を呼ぶ処理は書かない。
 
 import { revalidatePath } from "next/cache";
-import { createTenant, OutreachError, previewTargets } from "@ai-nyusatsu-bu/outreach";
+import { createTenant, listTrades, OutreachError, previewTargets, type TradeEntry } from "@ai-nyusatsu-bu/outreach";
 import { validateProvisionTenant, validateSalesAiSettings, type TradeMap } from "@ai-nyusatsu-bu/domain";
 import { requireAdmin } from "@/lib/admin";
 import { opsConnection, syncSalesAiSenderIdentity } from "@/lib/sales_ai_sync";
 
 export type SalesAiAdminState = { error: string | null; message: string | null };
 const EMPTY: SalesAiAdminState = { error: null, message: null };
+
+export type TradesState = { error: string | null; trades: TradeEntry[] | null };
 
 function fail(error: string): SalesAiAdminState {
   return { ...EMPTY, error };
@@ -226,6 +228,29 @@ export async function checkConnection(_prevState: SalesAiAdminState, formData: F
     await admin.from("sales_ai_connections").update({ checked_at: now, check_error: reason, updated_at: now }).eq("org_id", orgId);
     revalidatePath("/admin/sales-ai");
     return { error: `つながりませんでした（${reason}）`, message: null };
+  }
+}
+
+/**
+ * 営業AI側が対応している業種のコードを見る（T56）。
+ *
+ * 「業種の対応表（trade_map）」を手で書くとき、営業AI側の実際のコードを
+ * 当てずっぽうで書かずに済むようにするための一覧表示。対応表自体はここでは書き換えない
+ * （引き続き「接続を手で編集する」のテキストエリアに手で書き写す）。
+ */
+export async function fetchTrades(_prevState: TradesState, formData: FormData): Promise<TradesState> {
+  const { admin } = await requireAdmin();
+  const orgId = text(formData, "org_id");
+  if (orgId === "") return { error: "組織が指定されていません", trades: null };
+
+  const data = await loadConnection(admin, orgId);
+  if (!data) return { error: "先に接続を設定してください", trades: null };
+
+  try {
+    const trades = await listTrades({ baseUrl: data.base_url, apiKey: data.api_key });
+    return { error: null, trades };
+  } catch (err) {
+    return { error: `業種コードを取得できませんでした（${describe(err)}）`, trades: null };
   }
 }
 

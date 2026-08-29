@@ -4,6 +4,7 @@ import {
   createTenant,
   getQuotaStatus,
   listRepliedMembers,
+  listTrades,
   OutreachError,
   previewTargets,
   purchaseQuota,
@@ -444,6 +445,35 @@ describe("listRepliedMembers", () => {
   it("営業AIがerrorを返したら止める", async () => {
     mockFetch(404, { error: "リストが見つかりません" });
     await expect(listRepliedMembers(connection, 999)).rejects.toMatchObject({ code: "OUT_OF_SCOPE" });
+  });
+});
+
+describe("listTrades", () => {
+  it("GETで業種の配列を返す", async () => {
+    const spy = mockFetch(200, {
+      trades: [
+        { code: "tobi", label: "とび・土工" },
+        { code: "tosou", label: "塗装" },
+      ],
+    });
+    const result = await listTrades(connection);
+    expect(result).toEqual([
+      { code: "tobi", label: "とび・土工" },
+      { code: "tosou", label: "塗装" },
+    ]);
+    const [url, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://sales.example.com/api/tenant/trades");
+    expect(init.method).toBe("GET");
+  });
+
+  it("codeが読めない項目は除く", async () => {
+    mockFetch(200, { trades: [{ label: "コード無し" }, { code: "kaitai", label: "解体" }] });
+    expect(await listTrades(connection)).toEqual([{ code: "kaitai", label: "解体" }]);
+  });
+
+  it("tradesが無ければ空配列", async () => {
+    mockFetch(200, {});
+    expect(await listTrades(connection)).toEqual([]);
   });
 });
 
