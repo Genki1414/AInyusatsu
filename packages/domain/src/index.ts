@@ -59,6 +59,7 @@ export * from "./award_match";
 export * from "./partner_gaps";
 export * from "./account_request";
 export * from "./company_name";
+export * from "./tender_stance";
 export * from "./ops_alert";
 export * from "./outreach_partner";
 export * from "./partner_outreach";

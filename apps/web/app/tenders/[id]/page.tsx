@@ -10,7 +10,9 @@ import { notFound } from "next/navigation";
 import {
   amountBand,
   buildChecklist,
+  buildRoadmap,
   checklistProgress,
+  isTenderStance,
   classifyAgencyClass,
   documentAvailabilities,
   groupLotsByTrade,
@@ -25,8 +27,10 @@ import {
   type MarketRate,
   type MatchedAward,
 } from "@ai-nyusatsu-bu/domain";
+import type { TenderStance } from "@ai-nyusatsu-bu/domain";
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
 import { AppShell } from "@/components/AppShell";
+import { StancePanel } from "./stance-panel";
 import { CopyButton } from "@/components/CopyButton";
 import { CollectPill, Field, Panel, ProposePill } from "@/components/ui";
 import { requireOrgContext } from "@/lib/auth";
@@ -377,6 +381,7 @@ export default async function TenderDetailPage({
     { data: companyTender },
     { data: forms },
     { data: formStates },
+    { count: sentRequestCount },
   ] = await Promise.all([
     supabase
       .from("tenders")
@@ -408,15 +413,26 @@ export default async function TenderDetailPage({
     supabase.from("partners").select("id, name, base, email, trades, areas, rating, memo").eq("active", true).returns<RequestTabPartner[]>(),
     supabase
       .from("company_tenders")
-      .select("official_status, work_status, bid_price")
+      .select("official_status, work_status, bid_price, stance")
       .eq("tender_id", id)
-      .maybeSingle<{ official_status: OfficialStatus; work_status: string; bid_price: number | null }>(),
+      .maybeSingle<{
+        official_status: OfficialStatus;
+        work_status: string;
+        bid_price: number | null;
+        stance: string | null;
+      }>(),
     supabase.from("tender_forms").select("id, name, source, required, note").eq("tender_id", id).returns<ChecklistForm[]>(),
     supabase
       .from("company_tender_forms")
       .select("form_id, state")
       .eq("tender_id", id)
       .returns<{ form_id: string; state: FormState }[]>(),
+    // 段取りで「見積を依頼したか」を見る。中身は要らないので件数だけ
+    supabase
+      .from("quote_requests")
+      .select("id", { count: "exact", head: true })
+      .eq("tender_id", id)
+      .not("sent_at", "is", null),
   ]);
 
   if (!tender) notFound();
@@ -544,11 +560,33 @@ export default async function TenderDetailPage({
     }
   }
 
+  // 【この案件をどうするか】と、参加を決めたあとの段取り。
+  // 参加のときだけ段取りを組む（検討・保留の段階で急かしても、やることが決まっていない）
+  const stance: TenderStance = isTenderStance(companyTender?.stance) ? companyTender.stance : "未定";
+  const roadmap =
+    stance === "参加"
+      ? buildRoadmap({
+          officialStatus,
+          quoteRequested: (sentRequestCount ?? 0) > 0,
+          quoteReceived: false,
+          bidPriceDecided: companyTender?.bid_price !== null && companyTender?.bid_price !== undefined,
+          formsReady: checklistDone.canSubmit,
+          submitted: companyTender?.work_status === "提出済",
+          qaDeadline: tender.qa_deadline,
+          submitDeadline: tender.submit_deadline,
+          bidOpenAt: tender.bid_open_at,
+        })
+      : [];
+
   return (
     <AppShell active="tenders" orgName={orgName} userName={userName}>
       <Link href="/proposals" className="text-xs text-slate-500 hover:underline">
         ← 一覧へ
       </Link>
+
+      {/* まず決めるのは「やるかどうか」。タブの中に埋めると、決めないまま
+          資料や見積を見に行くことになる */}
+      <StancePanel tenderId={id} stance={stance} steps={roadmap} />
 
       <Panel>
         <div className="flex flex-wrap items-start gap-3">

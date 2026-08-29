@@ -23,6 +23,7 @@ import {
   parseDeadlineWithin,
   PENDING_COLLECT_STATUSES,
   proposalsByTender,
+  SELECTABLE_STANCES,
   tenderVerdict,
   type BrowseProposal,
 } from "@ai-nyusatsu-bu/domain";
@@ -52,6 +53,7 @@ type SearchParams = {
   qual?: string;
   grade?: string;
   within?: string;
+  stance?: string;
   sort?: string;
   page?: string;
 };
@@ -120,12 +122,15 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
   const qual = pickOption(params.qual, QUAL_CATEGORIES);
   const grade = pickOption(params.grade, GRADE_OPTIONS);
   const within = parseDeadlineWithin(params.within);
+  // 「未定」は company_tenders の行が無い案件も含むので、絞り込みには出さない
+  // （行が無いものは内部結合で落ちる。出せない選択肢は置かない）
+  const stance = pickOption(params.stance, [...SELECTABLE_STANCES]);
   const sortKey: SortKey = params.sort === "newest" ? "newest" : "deadline";
   const sort = SORTS[sortKey];
   const page = pageFrom(params.page);
   const from = (page - 1) * PAGE_SIZE;
 
-  const filtered = hasActiveFilter([keyword, item, area, qual, grade, within]);
+  const filtered = hasActiveFilter([keyword, item, area, qual, grade, within, stance]);
 
   // キーワードは案件名だけでなく発注機関名でも探せるようにする。
   // 機関は数百件なので、先に機関を引いてから案件を絞る。
@@ -142,9 +147,12 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
   // 上限に達したら、拾いきれなかった機関がある。黙って絞らずに画面で断る。
   const agencyMatchTruncated = agencyIds.length === AGENCY_MATCH_LIMIT;
 
+  // 判断で絞るときだけ company_tenders を内部結合する。
+  // 常に結合すると、まだ何も決めていない案件（行が無い）が一覧から消える
+  const columns = "id, name, item, grade, areas, budget, submit_deadline, collect_status, agencies(name)";
   let query = supabase
     .from("tenders")
-    .select("id, name, item, grade, areas, budget, submit_deadline, collect_status, agencies(name)", {
+    .select(stance === "" ? columns : `${columns}, company_tenders!inner(stance)`, {
       count: "exact",
     })
     .in("collect_status", [...BROWSABLE_COLLECT_STATUSES])
@@ -164,6 +172,7 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
     query = query.overlaps("areas", expandAreaFilter(area, REGION_PREFECTURES));
   }
   if (within !== null) query = query.lte("submit_deadline", deadlineCutoff(within, now).toISOString());
+  if (stance !== "") query = query.eq("company_tenders.stance", stance);
 
   const [{ data: tenders, count, error }, { count: pendingCount }, { count: totalCount }] = await Promise.all([
     query.returns<TenderRow[]>(),
@@ -216,6 +225,7 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
     if (qual !== "") search.set("qual", qual);
     if (grade !== "") search.set("grade", grade);
     if (within !== null) search.set("within", String(within));
+    if (stance !== "") search.set("stance", stance);
     if (sortKey !== "deadline") search.set("sort", sortKey);
     if (target > 1) search.set("page", String(target));
     const query = search.toString();
@@ -292,6 +302,15 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {/* 進行中・検討中の案件をここから見る。「未定」は行が無い案件も含むため出さない */}
+            <select name="stance" defaultValue={stance} className={inputClass} aria-label="この案件をどうするか">
+              <option value="">判断：すべて</option>
+              {SELECTABLE_STANCES.map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
             <select name="within" defaultValue={within ?? ""} className={inputClass} aria-label="提出期限">
               <option value="">提出期限：すべて</option>
               {DEADLINE_WITHIN_OPTIONS.map((d) => (
