@@ -129,7 +129,7 @@ AI入札部が必要とする業種（電気・清掃・警備・情報処理・
 |---|---|
 | 件数の確認 | `POST /api/tenant/lists/preview` |
 | リストの作成 | `POST /api/tenant/lists` |
-| 送信 | `POST /api/tenant/lists/<id>/send`（`dry_run: false`、`cancel_recent_days: 30`） |
+| 送信 | `POST /api/tenant/lists/<id>/send`（`dry_run: false`） |
 | 送った会社の確認（結果の取り込み） | `GET /api/tenant/lists/<id>?status=success` |
 | 返信の記録 | `POST /api/tenant/lists/<id>/outcome` |
 | 残り送信可能数（T55） | `GET /api/tenant/quota` |
@@ -139,8 +139,8 @@ AI入札部が必要とする業種（電気・清掃・警備・情報処理・
 認証は `Authorization: Bearer <tenant.api_key>`。
 
 営業AI側の既定は `dry_run: true`（送らない）なので、明示的に `false` を送っている。
-`cancel_recent_days: 30` で、直近30日に送った会社を今回の送信対象から外している
-（企業データはテナント横断で共有のため）。
+`cancel_recent_days`（直近に送った会社を今回の対象から外す機能）は指定していない
+（ユーザー決定 2026-08-29。要らないと判断した）。営業AI側は未指定なら誰も除外しない。
 
 クォータ追加購入（500通/¥5,000単位。T55）は `POST /api/ops/tenants/<id>/quota-purchase`。
 こちらはテナントの`api_key`ではなく本部専用の運用キーで呼ぶ別枠のAPIで、

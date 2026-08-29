@@ -2,7 +2,6 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import {
   createTargetList,
   createTenant,
-  DEFAULT_CANCEL_RECENT_DAYS,
   getQuotaStatus,
   getKillSwitchStatus,
   listSentCompanies,
@@ -121,10 +120,9 @@ describe("sendTargetList", () => {
     target_count: 12,
     dry_run: false,
     stats: { sent: 12, failed: 0, blocked: 0, suppressed: 0, stopped: 0 },
-    cancelled_recent: 0,
   };
 
-  it("dry_run を false にし、直近に送った会社を外して送信を頼む", async () => {
+  it("dry_run を false にして送信を頼む", async () => {
     const spy = mockFetch(200, realResponse);
     const result = await sendTargetList(connection, 7, { subject: "件名", body: "本文" });
     expect(result).toEqual({
@@ -134,17 +132,14 @@ describe("sendTargetList", () => {
       blocked: 0,
       suppressed: 0,
       stopped: 0,
-      cancelledRecent: 0,
       dryRun: false,
     });
     const [url, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("https://sales.example.com/api/tenant/lists/7/send");
-    expect(JSON.parse(init.body as string)).toMatchObject({
-      dry_run: false,
-      subject: "件名",
-      body: "本文",
-      cancel_recent_days: DEFAULT_CANCEL_RECENT_DAYS,
-    });
+    const body = JSON.parse(init.body as string);
+    expect(body).toMatchObject({ dry_run: false, subject: "件名", body: "本文" });
+    // 直近に送った会社を除外する動きは要らない（ユーザー決定）。指定しない
+    expect(body.cancel_recent_days).toBeUndefined();
   });
 
   it("stats の内訳をそのまま返す（送り残しを画面で出せるように）", async () => {
@@ -152,13 +147,11 @@ describe("sendTargetList", () => {
       ...realResponse,
       target_count: 120,
       stats: { sent: 50, failed: 70, blocked: 0, suppressed: 0, stopped: 0 },
-      cancelled_recent: 4,
     });
     const result = await sendTargetList(connection, 7, { subject: "件名", body: "本文" });
     expect(result.requested).toBe(120);
     expect(result.sent).toBe(50);
     expect(result.failed).toBe(70);
-    expect(result.cancelledRecent).toBe(4);
   });
 
   it("ドライランで返ってきたらそのまま伝える（成功と混同しない）", async () => {

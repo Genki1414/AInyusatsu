@@ -189,7 +189,6 @@ export type OutreachSendCounts = {
   blocked: number;
   suppressed: number;
   stopped: number;
-  cancelledRecent: number;
   dryRun: boolean;
 };
 
@@ -218,14 +217,10 @@ export function summarizeOutreachSend(counts: OutreachSendCounts): OutreachSendS
   if (counts.blocked > 0) parts.push(`配信停止・除外設定により${counts.blocked}社`);
   if (counts.failed > 0) parts.push(`送信できず${counts.failed}社（送信上限に達した分を含みます）`);
   const detail = parts.length > 0 ? `送れなかった内訳：${parts.join("／")}。` : "";
-  const cancelled =
-    counts.cancelledRecent > 0
-      ? `直近に送ったばかりの${counts.cancelledRecent}社は今回の対象から外れています。`
-      : "";
 
   if (counts.sent === 0) {
     return {
-      message: `1社にも送信できませんでした。${detail}${cancelled}`,
+      message: `1社にも送信できませんでした。${detail}`,
       nothingSent: true,
       hasRemaining: counts.requested > 0,
     };
@@ -236,13 +231,13 @@ export function summarizeOutreachSend(counts: OutreachSendCounts): OutreachSendS
     return {
       message:
         `${counts.sent}社へ送信しました。残り${remaining}社はまだ送れていません。${detail}` +
-        `${cancelled}もう一度「送信する」を押すと、送れていない会社にだけ送ります。`,
+        "もう一度「送信する」を押すと、送れていない会社にだけ送ります。",
       nothingSent: false,
       hasRemaining: true,
     };
   }
   return {
-    message: `${counts.sent}社へ送信しました。${cancelled}`,
+    message: `${counts.sent}社へ送信しました。`,
     nothingSent: false,
     hasRemaining: false,
   };

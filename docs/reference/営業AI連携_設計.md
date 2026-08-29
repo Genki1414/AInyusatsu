@@ -72,9 +72,9 @@ AI入札部：POST /api/tenant/lists      （初回のみ。リストを作る�
           番号は outreach_sends に控える。同じ案件×業種の2回目以降は
           控えた番号へ積む——新しいリストを作ると新しいキャンペーンになり、
           もう送った会社にもう一度届くため）
-AI入札部：POST /api/tenant/lists/<id>/send（dry_run:false、
-          cancel_recent_days:30 を付けて送信を頼む。直近30日に送った会社は
-          企業データがテナント横断で共有のため、ここで必ず外す）
+AI入札部：POST /api/tenant/lists/<id>/send（dry_run:falseで送信を頼む。
+          cancel_recent_days は指定しない——直近に送った会社を除外する
+          動きは要らないというユーザー決定 2026-08-29）
   ↓
 営業AI：can_contact / 上限 / 停止スイッチを見てから、フォームへ送信
 ```
@@ -132,7 +132,7 @@ AI入札部：partners に追加（社名で照合し、二重登録しない。
 |---|---|---|
 | 件数の確認 | `POST /api/tenant/lists/preview` | 実装済み |
 | リストの作成 | `POST /api/tenant/lists` | 実装済み |
-| 送信（`cancel_recent_days`込み） | `POST /api/tenant/lists/<id>/send` | 実装済み |
+| 送信 | `POST /api/tenant/lists/<id>/send` | 実装済み（`cancel_recent_days`は指定しない） |
 | 送った会社の取得 | `GET /api/tenant/lists/<id>?status=success` | 実装済み（`listSentCompanies`） |
 | 返信の記録 | `POST /api/tenant/lists/<id>/outcome` | 実装済み（`markReplied`） |
 | 業種コードの一覧（T56） | `GET /api/tenant/trades` | 実装済み（`listTrades`） |
@@ -239,14 +239,19 @@ AI入札部が必要とするのは **電気・設備保守・廃棄物処理・
 
 ## 決めていない論点
 
-### 二重送信をどちらで防ぐか（解決）
+### 二重送信をどちらで防ぐか（解決。2種類を分けて考える）
 
-**前者（営業AI側に任せる）で実装した。** 送信のたびに `cancel_recent_days: 30` を
-渡す（`DEFAULT_CANCEL_RECENT_DAYS`）。記録を2か所に持たないという方針どおり、
-AI入札部側は「送信済みかどうか」の判定は持たない。ただし**同じリストへ送り直す
-ための番号**（どのキャンペーンに積むか）は必要で、それは `outreach_sends` に
-`(org_id, tender_id, trade)` 単位で1件だけ持つ（案件×業種で1リスト）。
-除外されたことは `cancelledRecent` として画面に出す（`summarizeOutreachSend()`）。
+**(1) 同じキャンペーン内での送り直し。** 営業AIは1回に最大50社までしか送らない。
+残りを送るとき新しいリストを作ると新しいキャンペーンになり、営業AI側の
+送信済み判定（`touches(campaign_id, company_id)`）がやり直しになって、
+もう送った会社にもう一度届く。これは防ぐ必要があるので、
+`outreach_sends` に `(org_id, tender_id, trade)` 単位でリスト番号を1件だけ控え、
+2回目以降の送信は必ずそこへ積む（新しいリストを作らない）。
+
+**(2) 期間をまたいだ再送（直近に送った会社を除外する `cancel_recent_days`）は使わない。**
+（**ユーザー決定 2026-08-29**）。実装はしたが、以後の送信では `cancel_recent_days` を
+渡さない。営業AI側は未指定なら誰も除外しないので、直近に送った会社にも
+普通に送信対象になる。
 
 ### 送信元の情報が二重になる（解決。ユーザー決定 2026-08-28→その2）
 

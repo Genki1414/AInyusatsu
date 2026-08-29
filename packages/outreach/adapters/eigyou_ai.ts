@@ -39,16 +39,6 @@
 
 const REQUEST_TIMEOUT_MS = 20_000;
 
-/**
- * 直近この日数以内に送った会社は、今回の送信から外す。
- *
- * 営業AIの can_contact() には接触の頻度・回数の制限がもう無い
- * （eigyouAI HANDOFF.md T44 で撤廃。残っているのは配信停止・テナント除外・重複のみ）。
- * 企業データは全テナント共有なので、何もしないと同じ会社へ何度も届く。
- * 相手はこれから協力会社になってもらう会社なので、そこは守る。
- */
-export const DEFAULT_CANCEL_RECENT_DAYS = 30;
-
 export type OutreachErrorCode =
   | "AUTH_REQUIRED"
   | "RATE_LIMITED"
@@ -117,7 +107,7 @@ export type CreatedList = { listId: number; count: number };
  * 参照：eigyouAI target_lists.send_list() の戻り値と senders.send_campaign() の stats。
  */
 export type SendResult = {
-  /** 対象になった会社の数（送信可能な会社を絞り、cancel_recent_days で外したあと） */
+  /** 対象になった会社の数（送信可能な会社を絞ったあと） */
   requested: number;
   /** 実際にフォームへ送れた数 */
   sent: number;
@@ -129,8 +119,6 @@ export type SendResult = {
   suppressed: number;
   /** 営業AI側の停止スイッチで止まった数 */
   stopped: number;
-  /** cancel_recent_days で対象から外れた数 */
-  cancelledRecent: number;
   /**
    * 営業AIが「送っていない」と言っている（dry_run のまま返ってきた）。
    * こちらは常に false を送るので通常あり得ないが、真に受けて
@@ -312,12 +300,12 @@ export async function createTargetList(
  * `{campaign_id, target_count, dry_run, stats: {sent,failed,blocked,suppressed,stopped}, cancelled_recent}`。
  * トップレベルに sent / count / requested は無い（以前はここを読んでおり、実送信のたびに
  * PARSE_INVALID になっていた。target_count と stats を読むよう修正）。
+ * `cancelled_recent` は cancel_recent_days を指定していないので常に0（読まない）。
  */
 export async function sendTargetList(
   connection: SalesAiConnection,
   listId: number,
   message: { subject: string; body: string },
-  cancelRecentDays: number = DEFAULT_CANCEL_RECENT_DAYS,
 ): Promise<SendResult> {
   if (message.subject.trim() === "" || message.body.trim() === "") {
     // 空の本文を送ると、受け取った会社に何の用件か分からない
@@ -328,10 +316,8 @@ export async function sendTargetList(
     body: message.body,
     // 営業AI側の既定は dry_run:true（送らない）。実際に送るので明示的に false にする
     dry_run: false,
-    // 直近に送った会社を外す。同じ会社へ短期間に何度も送ると、
-    // これから協力会社になってもらう相手との関係が始まらない。
-    // 記録は営業AI側に一本化する（こちらに送信済みの表を持つと必ず食い違う）
-    cancel_recent_days: cancelRecentDays,
+    // cancel_recent_days は指定しない（ユーザー決定。直近に送った会社を除外する
+    // 動きは要らない）。未指定なら営業AI側は誰も除外しない
   })) as Record<string, unknown>;
 
   if (typeof payload.error === "string") {
@@ -349,7 +335,6 @@ export async function sendTargetList(
     blocked: optionalNumber(statsRaw.blocked),
     suppressed: optionalNumber(statsRaw.suppressed),
     stopped: optionalNumber(statsRaw.stopped),
-    cancelledRecent: optionalNumber(payload.cancelled_recent),
     // 営業AIが「送っていない」と言っている（dry_run のまま返ってきた）。こちらは常に
     // false を送るので通常あり得ないが、真に受けて「送信しました」と出すと取り返しが
     // つかないので、必ず見る
