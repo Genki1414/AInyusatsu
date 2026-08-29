@@ -227,3 +227,91 @@ export async function updateAccount(
 
   return fail(`知らない操作です：${op}`);
 }
+
+/**
+ * 顧客からの依頼に応じて、既存の組織に2人目以降のログインを発行する。
+ *
+ * 【新しい組織を作らせない】
+ * handle_new_user() は raw_user_meta_data に org_id が無いと**必ず新しい組織を作る**
+ * （supabase/migrations/20260829000001_account_requests.sql）。
+ * ここで org_id を渡さないと、同じ会社なのに別組織ができて、案件も協力会社も見えない。
+ *
+ * 【依頼が無いと発行しない】
+ * 追加するたびに月5,000円が発生する（docs/reference/価格.md）。
+ * 依頼の行を根拠として残さないと、請求の理由が分からなくなる。
+ */
+export async function issueAdditionalAccount(
+  _prevState: AccountActionState,
+  formData: FormData,
+): Promise<AccountActionState> {
+  const { admin } = await requireAdmin();
+
+  const requestId = text(formData, "request_id").trim();
+  if (requestId === "") return fail("依頼が指定されていません");
+
+  const { data: request, error: requestError } = await admin
+    .from("account_requests")
+    .select("id, org_id, name, email, status")
+    .eq("id", requestId)
+    .maybeSingle<{ id: string; org_id: string; name: string; email: string; status: string }>();
+  if (requestError) return fail(`依頼を読めませんでした：${requestError.message}`);
+  if (!request) return fail("依頼が見つかりません");
+  if (request.status !== "依頼中") return fail(`この依頼は「${request.status}」です。発行できません`);
+
+  const password = newInitialPassword();
+  const { data: created, error: createError } = await admin.auth.admin.createUser({
+    email: request.email,
+    password,
+    // 本部が本人確認をしたうえで発行するので、確認メールは挟まない
+    email_confirm: true,
+    // org_id を渡すことで、新しい組織を作らずに既存の組織へ参加する
+    user_metadata: { org_id: request.org_id, name: request.name },
+  });
+  if (createError || !created?.user) {
+    const detail = createError?.message ?? "原因が返りませんでした";
+    const duplicated = /already|registered|exists/i.test(detail);
+    return fail(
+      duplicated
+        ? `${request.email} はすでに登録されています。依頼を取り下げてください`
+        : `アカウントを作成できませんでした：${detail}`,
+    );
+  }
+
+  // 本当に同じ組織に入ったかを確かめる。ここが違っていると、
+  // ログインはできるのに案件も協力会社も見えないアカウントができる
+  const { data: profile, error: profileError } = await admin
+    .from("users")
+    .select("org_id")
+    .eq("id", created.user.id)
+    .maybeSingle<{ org_id: string }>();
+  if (profileError || !profile) {
+    return fail(
+      `${request.email} のログインは作成されましたが、組織を確認できませんでした（${profileError?.message ?? "users 行がありません"}）。` +
+        "Supabaseの認証ユーザーを削除してから、やり直してください",
+    );
+  }
+  if (profile.org_id !== request.org_id) {
+    return fail(
+      `${request.email} が別の組織に作られました（依頼=${request.org_id} / 実際=${profile.org_id}）。` +
+        "マイグレーション 20260829000001 が適用されているか確認し、Supabaseの認証ユーザーを削除してやり直してください",
+    );
+  }
+
+  // 発行できたので依頼を閉じる。閉じられなくてもアカウントは使えるため、
+  // 発行そのものは成功として返し、理由は画面に出す
+  const { error: closeError } = await admin
+    .from("account_requests")
+    .update({ status: "発行済み", resolved_at: new Date().toISOString() })
+    .eq("id", request.id);
+
+  revalidatePath("/admin/accounts");
+  revalidatePath("/billing");
+  return {
+    error: null,
+    message:
+      `${request.name}（${request.email}）のログインを発行しました。初期パスワードは一度しか表示されません` +
+      (closeError ? `／依頼を「発行済み」にできませんでした（${closeError.message}）` : ""),
+    password,
+    email: request.email,
+  };
+}

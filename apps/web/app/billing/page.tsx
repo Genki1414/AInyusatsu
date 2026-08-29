@@ -14,9 +14,12 @@
 import { isActive, suspendedMessage } from "@ai-nyusatsu-bu/domain";
 import { AppShell } from "@/components/AppShell";
 import { requireOrgContext } from "@/lib/auth";
+import { AccountRequestForm, type AccountRequestView } from "./account-request-form";
 import { BillingForm, type BillingView } from "./billing-form";
 
 type AccessRow = { status: string; suspended_reason: string | null; activated_at: string | null };
+type LoginRow = { name: string; email: string; role: string };
+type RequestRow = { id: string; name: string; email: string; created_at: string };
 
 function jstDay(at: string | null): string | null {
   if (at === null) return null;
@@ -28,15 +31,47 @@ function jstDay(at: string | null): string | null {
 export default async function BillingPage() {
   const { supabase, orgId, orgName } = await requireOrgContext();
 
-  const { data, error } = await supabase
-    .from("org_access")
-    .select("status, suspended_reason, activated_at")
-    .eq("org_id", orgId)
-    .maybeSingle<AccessRow>();
+  // ログインの一覧と依頼中のものも同時に引く。順番に待つ理由が無い
+  const [{ data, error }, logins, requests] = await Promise.all([
+    supabase
+      .from("org_access")
+      .select("status, suspended_reason, activated_at")
+      .eq("org_id", orgId)
+      .maybeSingle<AccessRow>(),
+    supabase
+      .from("users")
+      .select("name, email, role")
+      .eq("org_id", orgId)
+      .order("created_at", { ascending: true })
+      .returns<LoginRow[]>(),
+    supabase
+      .from("account_requests")
+      .select("id, name, email, created_at")
+      .eq("org_id", orgId)
+      .eq("status", "依頼中")
+      .order("created_at", { ascending: true })
+      .returns<RequestRow[]>(),
+  ]);
   if (error) {
     // 読めなくても画面は出す。握りつぶさずログには残す
     console.error(`[billing] 利用状態の取得に失敗しました（org=${orgId}）: ${error.message}`);
   }
+  if (logins.error) console.error(`[billing] ログインの一覧を読めませんでした（org=${orgId}）: ${logins.error.message}`);
+  if (requests.error) console.error(`[billing] 追加の依頼を読めませんでした（org=${orgId}）: ${requests.error.message}`);
+
+  const accountView: AccountRequestView = {
+    logins: (logins.data ?? []).map((row) => ({
+      name: row.name,
+      email: row.email,
+      isOwner: row.role === "owner",
+    })),
+    pending: (requests.data ?? []).map((row) => ({
+      id: row.id,
+      name: row.name,
+      email: row.email,
+      createdOn: jstDay(row.created_at) ?? "—",
+    })),
+  };
 
   // ここを開けている時点で requireOrgContext を通っている＝利用中。
   // それでも状態は読んだ値のまま出す（画面と実際がずれていたら気づけるように）
@@ -54,6 +89,8 @@ export default async function BillingPage() {
   return (
     <AppShell active="billing" orgName={orgName}>
       <BillingForm view={view} />
+      {/* 料金が増える操作なので、ここで作れるのは依頼まで。発行は本部 */}
+      <AccountRequestForm view={accountView} />
     </AppShell>
   );
 }

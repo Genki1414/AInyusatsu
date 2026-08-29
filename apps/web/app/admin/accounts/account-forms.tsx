@@ -11,7 +11,7 @@ import { useActionState, useState } from "react";
 import { SUSPEND_REASONS } from "@ai-nyusatsu-bu/domain";
 import { btnClass, Panel, Pill } from "@/components/ui";
 import { CopyButton } from "@/components/CopyButton";
-import { issueAccount, updateAccount, type AccountActionState } from "./actions";
+import { issueAccount, issueAdditionalAccount, updateAccount, type AccountActionState } from "./actions";
 
 // "use server" のファイルからは async 関数しか export できないため、初期値はこちらに置く。
 // 参照：https://nextjs.org/docs/messages/invalid-use-server-value
@@ -170,5 +170,72 @@ export function AccountRowForms({ row }: { row: AccountRow }) {
 
       <Result state={state} />
     </div>
+  );
+}
+
+export type PendingRequest = {
+  id: string;
+  orgId: string;
+  orgName: string;
+  name: string;
+  email: string;
+  note: string | null;
+  createdOn: string;
+  /** 発行するとログインが何つになるか */
+  loginsAfter: number;
+  /** 発行後の追加料金（月・円） */
+  monthlyAfter: number;
+};
+
+/**
+ * アカウント追加の依頼一覧（本部）。
+ *
+ * 【一覧の上に出す】
+ * 依頼は放置すると顧客が待たされる。発行フォームのすぐ下に置いて、
+ * 開いたときに必ず目に入るようにする。件数が0なら何も出さない。
+ *
+ * 【発行するといくら増えるかを出す】
+ * 押す前に金額が見えていないと、本部側でも請求の変化に気づけない。
+ */
+export function PendingRequests({ requests }: { requests: PendingRequest[] }) {
+  const [state, formAction, pending] = useActionState(issueAdditionalAccount, EMPTY_STATE);
+  if (requests.length === 0) return null;
+
+  return (
+    <Panel title={`アカウント追加の依頼（${requests.length}件）`}>
+      <div className="space-y-2">
+        {requests.map((request) => (
+          <div key={request.id} className="border-b border-slate-100 pb-2 last:border-0 last:pb-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-medium text-slate-800">{request.orgName}</span>
+              <span className="text-xs text-slate-700">{request.name}</span>
+              <span className="text-xs text-slate-500">{request.email}</span>
+              <span className="text-xs text-slate-400">{request.createdOn} 依頼</span>
+            </div>
+            {request.note && <p className="mt-0.5 text-xs text-slate-500">備考：{request.note}</p>}
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              {/* 発行すると請求が変わる。押す前に見えるようにする */}
+              <span className="text-xs text-amber-700">
+                発行するとログイン{request.loginsAfter}つ・追加料金 月
+                {request.monthlyAfter.toLocaleString("ja-JP")}円
+              </span>
+              <form action={formAction}>
+                <input type="hidden" name="request_id" value={request.id} />
+                <button type="submit" disabled={pending} className={btnClass("primary", "sm")}>
+                  {pending ? "発行中..." : "発行する"}
+                </button>
+              </form>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-2">
+        <Result state={state} />
+      </div>
+      <p className="mt-1 text-xs leading-relaxed text-slate-500">
+        既存の会社に2人目以降のログインを足します。新しい会社を作るときは上の「アカウントを発行する」から。
+        初期パスワードは、本部から本人へお伝えください。
+      </p>
+    </Panel>
   );
 }
