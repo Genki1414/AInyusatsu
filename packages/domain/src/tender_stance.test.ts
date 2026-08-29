@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  acceptsAmount,
+  amountLabel,
   buildRoadmap,
+  canEnterResult,
+  isBidResult,
+  isWon,
+  SELECTABLE_BID_RESULTS,
   currentStep,
   daysUntilDate,
   deadlineLabel,
@@ -148,5 +154,48 @@ describe("isUrgent", () => {
 
   it("期限が取れていなければ急ぎ扱いしない（分からないものを赤くしない）", () => {
     expect(isUrgent(null)).toBe(false);
+  });
+});
+
+describe("入札の結果", () => {
+  it("選べるのは4つ（未入力は初期値なので選ばせない）", () => {
+    expect(SELECTABLE_BID_RESULTS).toEqual(["落札", "落札できず", "辞退", "中止"]);
+  });
+
+  it("知らない値は受け付けない", () => {
+    expect(isBidResult("落札")).toBe(true);
+    expect(isBidResult("勝ち")).toBe(false);
+  });
+
+  it("金額のラベルは、誰の金額かで書き分ける", () => {
+    expect(amountLabel("落札")).toContain("御社");
+    expect(amountLabel("落札できず")).toContain("他社");
+  });
+
+  it("辞退・中止では金額を入れさせない（決まった金額が無い）", () => {
+    expect(acceptsAmount("辞退")).toBe(false);
+    expect(acceptsAmount("中止")).toBe(false);
+    expect(acceptsAmount("落札")).toBe(true);
+    expect(acceptsAmount("落札できず")).toBe(true);
+  });
+
+  it("開札の日を過ぎてから入れられる", () => {
+    expect(canEnterResult({ bidOpenAt: "2026-08-28T10:00:00+09:00", submitDeadline: null }, NOW)).toBe(true);
+    expect(canEnterResult({ bidOpenAt: "2026-09-15T10:00:00+09:00", submitDeadline: null }, NOW)).toBe(false);
+  });
+
+  it("開札が分からなければ提出期限で代える", () => {
+    expect(canEnterResult({ bidOpenAt: null, submitDeadline: "2026-08-20T17:00:00+09:00" }, NOW)).toBe(true);
+    expect(canEnterResult({ bidOpenAt: null, submitDeadline: "2026-09-12T17:00:00+09:00" }, NOW)).toBe(false);
+  });
+
+  it("どちらも取れていなければ、いつでも入れられる（推測で止めない）", () => {
+    expect(canEnterResult({ bidOpenAt: null, submitDeadline: null }, NOW)).toBe(true);
+  });
+
+  it("落札かどうかを判定できる", () => {
+    expect(isWon("落札")).toBe(true);
+    expect(isWon("落札できず")).toBe(false);
+    expect(isWon(null)).toBe(false);
   });
 });

@@ -11,7 +11,9 @@ import {
   amountBand,
   buildChecklist,
   buildRoadmap,
+  canEnterResult,
   checklistProgress,
+  isBidResult,
   isTenderStance,
   classifyAgencyClass,
   documentAvailabilities,
@@ -413,13 +415,16 @@ export default async function TenderDetailPage({
     supabase.from("partners").select("id, name, base, email, trades, areas, rating, memo").eq("active", true).returns<RequestTabPartner[]>(),
     supabase
       .from("company_tenders")
-      .select("official_status, work_status, bid_price, stance")
+      .select("official_status, work_status, bid_price, stance, bid_result, result_amount, result_memo")
       .eq("tender_id", id)
       .maybeSingle<{
         official_status: OfficialStatus;
         work_status: string;
         bid_price: number | null;
         stance: string | null;
+        bid_result: string | null;
+        result_amount: number | null;
+        result_memo: string | null;
       }>(),
     supabase.from("tender_forms").select("id, name, source, required, note").eq("tender_id", id).returns<ChecklistForm[]>(),
     supabase
@@ -586,7 +591,18 @@ export default async function TenderDetailPage({
 
       {/* まず決めるのは「やるかどうか」。タブの中に埋めると、決めないまま
           資料や見積を見に行くことになる */}
-      <StancePanel tenderId={id} stance={stance} steps={roadmap} />
+      <StancePanel
+        tenderId={id}
+        stance={stance}
+        steps={roadmap}
+        result={isBidResult(companyTender?.bid_result) ? companyTender.bid_result : "未入力"}
+        resultAmount={companyTender?.result_amount ?? null}
+        resultMemo={companyTender?.result_memo ?? null}
+        canEnterResult={canEnterResult({
+          bidOpenAt: tender.bid_open_at,
+          submitDeadline: tender.submit_deadline,
+        })}
+      />
 
       <Panel>
         <div className="flex flex-wrap items-start gap-3">

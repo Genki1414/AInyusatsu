@@ -177,3 +177,58 @@ export function deadlineLabel(daysLeft: number | null): string {
 export function isUrgent(daysLeft: number | null): boolean {
   return daysLeft !== null && daysLeft <= 3;
 }
+
+// ── 入札の結果 ──────────────────────────────────────────────
+//
+// 【なぜ利用者が入れるか】
+// 開札の結果は発注機関が公表するが、形も時期も機関ごとにばらばらで自動では拾えない。
+// 落札実績オープンデータは月次で、案件との突き合わせも名称頼りなので、
+// 「この案件で自社が落札したか」は分からない。
+// **取れないものを取れたことにしない**（CLAUDE.md 最重要の前提7）。
+
+export const BID_RESULTS = ["未入力", "落札", "落札できず", "辞退", "中止"] as const;
+export type BidResult = (typeof BID_RESULTS)[number];
+
+/** 利用者が選べるもの。「未入力」は初期値。 */
+export const SELECTABLE_BID_RESULTS: readonly BidResult[] = ["落札", "落札できず", "辞退", "中止"];
+
+export function isBidResult(value: string | null | undefined): value is BidResult {
+  return typeof value === "string" && (BID_RESULTS as readonly string[]).includes(value);
+}
+
+/**
+ * 金額の入力欄に出すラベル。結果によって、誰の金額かが変わる。
+ * どちらも「その案件がいくらで決まったか」で、次の応札価格を決める材料は同じ。
+ */
+export function amountLabel(result: BidResult): string | null {
+  if (result === "落札") return "落札金額（御社）";
+  if (result === "落札できず") return "落札金額（他社。分かれば）";
+  // 辞退・中止では、決まった金額が無いか、入れる意味がない
+  return null;
+}
+
+/** 金額を入れられる結果か。 */
+export function acceptsAmount(result: BidResult): boolean {
+  return amountLabel(result) !== null;
+}
+
+/**
+ * 結果を入れる段階か。
+ *
+ * 開札の日時が分かっていれば、その日を過ぎてから。分からなければ提出期限で代える。
+ * **どちらも取れていなければ、いつでも入れられるようにする**（推測で止めない）。
+ */
+export function canEnterResult(
+  input: { bidOpenAt: string | null; submitDeadline: string | null },
+  now: Date = new Date(),
+): boolean {
+  const at = input.bidOpenAt ?? input.submitDeadline;
+  if (at === null) return true;
+  const days = daysUntilDate(at, now);
+  return days === null || days <= 0;
+}
+
+/** 結果を入れ終わった案件か（一覧で「落札案件」として出す判定に使う）。 */
+export function isWon(result: string | null | undefined): boolean {
+  return result === "落札";
+}
