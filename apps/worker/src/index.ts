@@ -18,6 +18,7 @@
 //   APP_URL                   協力会社の回答ページのURL（旧 NEXT_PUBLIC_APP_URL も可）
 //   GEPS_CONTACT_*            調達ポータルの資料取得
 //   ANALYZE_DAILY_LIMIT       1回の解析で処理する件数の上限（既定50）
+//   ADMIN_EMAILS              本部への異常通知の宛先（カンマ区切り。Webの運営画面と同じ値）
 //   DISABLED_JOBS             止めたいジョブ名をカンマ区切りで（例: analyze-pending）
 
 import { PgBoss } from "pg-boss";
@@ -30,6 +31,7 @@ import { runMatchTenders } from "../jobs/match_tenders";
 import { runNotifyDigest } from "../jobs/notify_digest";
 import { runNotifyInstant } from "../jobs/notify_instant";
 import { runCoverageCheck } from "../jobs/coverage_check";
+import { runNotifyOps } from "../jobs/notify_ops";
 import { runQuoteReminders } from "../jobs/remind_quotes";
 import { runDiffImport } from "../jobs/import_awards";
 import { refreshMarketRates } from "../jobs/refresh_market_rates";
@@ -56,6 +58,7 @@ const HANDLERS: Record<JobName, () => Promise<unknown>> = {
   "notify-digest": () => runNotifyDigest(),
   "notify-instant": () => runNotifyInstant(),
   "coverage-check": () => runCoverageCheck(),
+  "notify-ops": () => runNotifyOps(),
   "remind-quotes": () => runQuoteReminders(),
   // 落札実績は前日ぶんの差分を取り込む（当日ぶんはまだ公開されていない）
   "import-awards": () => runDiffImport(yesterday()),

@@ -27,6 +27,7 @@ export type JobName =
   | "notify-digest"
   | "notify-instant"
   | "coverage-check"
+  | "notify-ops"
   | "remind-quotes"
   | "import-awards"
   | "refresh-market-rates";
@@ -55,6 +56,9 @@ export const SCHEDULE: readonly ScheduledJob[] = [
   // 毎時走るが、1件につき1回しか送らない（notification_log の dedupe_key で記録する）。
   { name: "notify-instant", cron: "20 * * * *", description: "期限48時間前と、届いた見積の返信を知らせる" },
   { name: "coverage-check", cron: "0 6 * * *", description: "機関ごとに、想定頻度に対して取得できているかを確かめる" },
+  // 本部へ毎朝1通。異常が無くても送る（届かない日があること自体を異常の合図にする）。
+  // coverage-check のあとに置いて、その日の判定結果を載せる
+  { name: "notify-ops", cron: "20 6 * * *", description: "本部へ、収集の失敗・欠測・ジョブの失敗を知らせる" },
   { name: "remind-quotes", cron: "0 * * * *", description: "回答期限24時間前の未回答へ催促する" },
   { name: "import-awards", cron: "0 3 1 * *", description: "落札実績オープンデータの差分を取り込む（月次）" },
   { name: "refresh-market-rates", cron: "30 3 1 * *", description: "落札率の集計を作り直す（月次）" },
