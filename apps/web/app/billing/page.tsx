@@ -29,7 +29,7 @@ function jstDay(at: string | null): string | null {
 }
 
 export default async function BillingPage() {
-  const { supabase, orgId, orgName } = await requireOrgContext();
+  const { supabase, orgId, orgName, userName } = await requireOrgContext();
 
   // ログインの一覧と依頼中のものも同時に引く。順番に待つ理由が無い
   const [{ data, error }, logins, requests] = await Promise.all([
@@ -87,7 +87,7 @@ export default async function BillingPage() {
   };
 
   return (
-    <AppShell active="billing" orgName={orgName}>
+    <AppShell active="billing" orgName={orgName} userName={userName}>
       <BillingForm view={view} />
       {/* 料金が増える操作なので、ここで作れるのは依頼まで。発行は本部 */}
       <AccountRequestForm view={accountView} />

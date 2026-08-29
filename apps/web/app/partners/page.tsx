@@ -71,7 +71,7 @@ export default async function PartnersPage({
   searchParams: Promise<{ partner?: string; q?: string; trade?: string; saved?: string }>;
 }) {
   const { partner: partnerId, q, trade, saved } = await searchParams;
-  const { supabase, orgName } = await requireOrgContext();
+  const { supabase, orgName, userName } = await requireOrgContext();
 
   const [{ data: partners }, { data: lotRows }] = await Promise.all([
     supabase
@@ -130,7 +130,7 @@ export default async function PartnersPage({
   const savedMessage = saved === "created" ? "協力会社を追加しました。" : saved === "updated" ? "協力会社を更新しました。" : null;
 
   return (
-    <AppShell active="partners" orgName={orgName}>
+    <AppShell active="partners" orgName={orgName} userName={userName}>
       {savedMessage && (
         <div className="flex flex-wrap items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2">
           <CheckCircle2 size={14} className="shrink-0 text-emerald-700" />

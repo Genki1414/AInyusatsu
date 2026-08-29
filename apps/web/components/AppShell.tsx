@@ -18,7 +18,25 @@ const NAV = [
 
 export type NavKey = (typeof NAV)[number]["key"];
 
-export function AppShell({ active, orgName, children }: { active: NavKey; orgName: string; children: ReactNode }) {
+/**
+ * 認証後の共通枠。
+ *
+ * 【誰でログインしているかを常に出す】（ユーザー決定 2026-08-29）
+ * 1社に複数のログインがあるので、会社名だけでは自分が誰として入っているか分からない。
+ * 別の人のアカウントで見積依頼を送ってしまうと、差出人が食い違って相手が混乱する。
+ * userName は必須にしてある（呼び出し側で渡し忘れるとビルドが通らない）。
+ */
+export function AppShell({
+  active,
+  orgName,
+  userName,
+  children,
+}: {
+  active: NavKey;
+  orgName: string;
+  userName: string;
+  children: ReactNode;
+}) {
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800">
       <header className="sticky top-0 z-20 bg-slate-800 text-slate-100">
@@ -27,7 +45,10 @@ export function AppShell({ active, orgName, children }: { active: NavKey; orgNam
           <span className="text-sm font-semibold tracking-wide">AI入札部</span>
           <span className="rounded border border-slate-600 px-1 text-xs text-slate-400">β</span>
           <div className="ml-auto flex items-center gap-3">
-            <span className="hidden text-xs text-slate-300 sm:inline">{orgName}</span>
+            {/* 会社名だけだと、1社に複数ログインがあるとき誰で入っているか分からない。
+                狭い画面では名前を優先して残す（会社は自明なことが多いため） */}
+            <span className="hidden text-xs text-slate-400 sm:inline">{orgName}</span>
+            <span className="text-xs text-slate-200">{userName}</span>
             <form action={logout}>
               <button type="submit" className="rounded border border-slate-600 px-2 py-1 text-xs hover:bg-slate-700">
                 ログアウト

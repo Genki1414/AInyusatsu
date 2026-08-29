@@ -9,7 +9,7 @@ import { QualificationsForm, type QualificationsFormProfile } from "./qualificat
 const EMPTY_PROFILE: QualificationsFormProfile = { qual_categories: [], grades: {}, items: [], areas: [], qual_valid_to: null };
 
 export default async function QualificationsPage() {
-  const { supabase, orgId, orgName } = await requireOrgContext();
+  const { supabase, orgId, orgName, userName } = await requireOrgContext();
 
   const { data: profile } = await supabase
     .from("company_profiles")
@@ -18,7 +18,7 @@ export default async function QualificationsPage() {
     .maybeSingle<QualificationsFormProfile>();
 
   return (
-    <AppShell active="qualifications" orgName={orgName}>
+    <AppShell active="qualifications" orgName={orgName} userName={userName}>
       <Panel title="これから資格を取る方へ">
         <ol className="space-y-2">
           {[

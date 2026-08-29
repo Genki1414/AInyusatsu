@@ -112,7 +112,7 @@ export default async function CompanyPage() {
   };
 
   return (
-    <AppShell active="company" orgName={orgName}>
+    <AppShell active="company" orgName={orgName} userName={userName}>
       <CompanyForm
         orgName={orgName}
         overheadRate={org?.overhead_rate ?? 0.12}

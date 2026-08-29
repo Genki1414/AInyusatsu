@@ -38,7 +38,7 @@ const BLANK: CriteriaFormValues = {
 
 export default async function CriteriaPage({ searchParams }: { searchParams: Promise<{ set?: string }> }) {
   const { set } = await searchParams;
-  const { supabase, orgId, orgName } = await requireOrgContext();
+  const { supabase, orgId, orgName, userName } = await requireOrgContext();
 
   const [{ data: sets }, { data: profile }] = await Promise.all([
     supabase
@@ -69,7 +69,7 @@ export default async function CriteriaPage({ searchParams }: { searchParams: Pro
     : BLANK;
 
   return (
-    <AppShell active="criteria" orgName={orgName}>
+    <AppShell active="criteria" orgName={orgName} userName={userName}>
       <Panel title="条件セット" right={<Link href="/criteria" className="text-xs text-blue-800 underline">セットを追加</Link>}>
         {(sets ?? []).length === 0 ? (
           <p className="text-xs text-slate-500">まだ条件セットがありません。下のフォームから作成してください。</p>
