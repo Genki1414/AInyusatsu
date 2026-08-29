@@ -364,12 +364,15 @@ export async function loadOutreachResults(
 
   try {
     const companies = await listSentCompanies(resolved.connection, listId);
+    // 送信件数・返信件数は保存せず、開くたびに営業AI側（正）から数え直す。
+    // こちらで数を持つとズレる（送信は営業AI側で継続実行されるため）
+    const repliedCount = companies.filter((c) => c.replied).length;
     return {
       error: null,
       message:
         companies.length === 0
           ? "まだ1社にも送れていません。送信の直後は、営業AI側の処理が終わるまで出ないことがあります。"
-          : `${companies.length}社に送っています。返信をもらった会社を協力会社として登録してください。`,
+          : `${companies.length}社に送っています（うち返信を記録済み：${repliedCount}社）。返信をもらった会社を協力会社として登録してください。`,
       companies,
     };
   } catch (err) {
