@@ -13,15 +13,12 @@
 // packages/*/adapters にあるものが、実際に外部へデータを出している経路のすべて。
 // 使っていないものを並べても、使い始めたときに直し忘れる。
 //
-// 【要記入】が残っている項目は、公開前に必ず埋めること。
+// 【保存期間を変えるときは規約と揃えること】
+// 「契約終了後90日で削除」は利用規約 第14条にも書いてある。片方だけ直さない。
 
 import type { Metadata } from "next";
 
 export const metadata: Metadata = { title: "プライバシーポリシー｜AI入札部" };
-
-function Fill({ children }: { children: string }) {
-  return <mark className="bg-amber-200 px-1 font-semibold text-amber-900">【要記入：{children}】</mark>;
-}
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -197,7 +194,12 @@ export default function PrivacyPage() {
         <p className="mt-1">東北三上機材株式会社</p>
         <p>所在地：宮城県名取市小塚原字東遠泉63番地</p>
         <p>法人番号：4370001041531</p>
-        <p>個人情報に関するお問い合わせ窓口：<Fill>担当部署名と問い合わせ先メールアドレス</Fill></p>
+        <p>
+          個人情報に関するお問い合わせ窓口：
+          <a href="mailto:info@tohoku-mikamikizai.co.jp" className="text-blue-800 underline">
+            info@tohoku-mikamikizai.co.jp
+          </a>
+        </p>
       </section>
     </>
   );

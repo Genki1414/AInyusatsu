@@ -9,17 +9,14 @@
 // 規約に書いていないと、抽出の誤りがそのまま当社の責任になる。
 // 画面（提案・案件詳細）でも同じことを表示しているが、規約にも置く。
 //
-// 【要記入】が残っている項目は、公開前に必ず埋めること。
-// 埋めずに公開すると、そのまま顧客に見えてしまう（あえて目立つ書き方にしてある）。
+// 【条文を変えるときは価格表と揃えること】
+// 第5条（前払い・前月末日）と第11条（解約の予告は不要）は、
+// docs/reference/価格.md の「支払いと解約の決まり」と同じことを書いている。
+// 片方だけ直すと、規約と請求の運用が食い違う。
 
 import type { Metadata } from "next";
 
 export const metadata: Metadata = { title: "利用規約｜AI入札部" };
-
-/** 埋め忘れが顧客に見えるよう、わざと目立たせる。 */
-function Fill({ children }: { children: string }) {
-  return <mark className="bg-amber-200 px-1 font-semibold text-amber-900">【要記入：{children}】</mark>;
-}
 
 function Article({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
   return (
@@ -255,7 +252,12 @@ export default function TermsPage() {
         <p className="mt-1">東北三上機材株式会社</p>
         <p>所在地：宮城県名取市小塚原字東遠泉63番地</p>
         <p>法人番号：4370001041531</p>
-        <p>お問い合わせ：<Fill>問い合わせ先メールアドレス</Fill></p>
+        <p>
+          お問い合わせ：
+          <a href="mailto:info@tohoku-mikamikizai.co.jp" className="text-blue-800 underline">
+            info@tohoku-mikamikizai.co.jp
+          </a>
+        </p>
       </section>
     </>
   );
