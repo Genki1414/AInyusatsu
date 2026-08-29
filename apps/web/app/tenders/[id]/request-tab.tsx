@@ -101,6 +101,11 @@ const EMPTY_OUTREACH: OutreachState = {
 /**
  * 営業AIで候補企業を探して送る。
  *
+ * 【依頼先がいても出す】（ユーザー決定 2026-08-29）
+ * もともとは「協力会社がいない業種を埋める」機能として、依頼先が0社のときだけ
+ * 出していた。相見積を増やしたい場合もあるので、常に出す。
+ * ただし対応表に無い業種では出さない（呼び出し側で判定する）。
+ *
  * 【押されたときだけ送る】
  * 件数を見る（preview）と、送信（リスト作成→送信）の2段。定期実行やジョブから
  * 呼ばない（CLAUDE.md「やらないこと：問い合わせフォームへの無人の自動送信」）。
@@ -121,7 +126,13 @@ function SalesAiBlock({ tenderId, trade }: { tenderId: string; trade: string }) 
 
   return (
     <div className="rounded border border-violet-200 bg-violet-50 px-2 py-1.5">
-      <p className="text-xs font-medium text-violet-900">営業AIで候補を探して送る</p>
+      <p className="text-xs font-medium text-violet-900">
+        営業AIで新しい取引先を探して打診する
+      </p>
+      <p className="mt-0.5 text-xs leading-relaxed text-slate-600">
+        まだ取引の無い会社に、この案件で見積を出せるかを問い合わせます。
+        返信をもらった会社は、下の「送った会社を見る」から協力会社として登録できます。
+      </p>
       <div className="mt-1 flex flex-wrap gap-2">
         <form action={formAction}>
           <input type="hidden" name="tender_id" value={tenderId} />
@@ -307,7 +318,6 @@ function OutreachResults({ tenderId, trade, sentOnLabel }: { tenderId: string; t
 
 function OutreachBlock(props: {
   tenderId: string;
-  outreachTrade: boolean;
   trade: string;
   senderOrgName: string;
   senderContactName: string;
@@ -330,8 +340,6 @@ function OutreachBlock(props: {
         </Link>
         から登録するか、下の文面で新しい会社に打診してください。
       </p>
-
-      {props.outreachTrade && <SalesAiBlock tenderId={props.tenderId} trade={props.trade} />}
 
       <div className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5">
         <div className="flex flex-wrap items-center gap-2">
@@ -687,7 +695,6 @@ export function RequestTab({
               {candidates.length === 0 ? (
                 <OutreachBlock
                   tenderId={tenderId}
-                  outreachTrade={outreachTrades.includes(group.trade)}
                   trade={group.trade}
                   senderOrgName={senderOrgName}
                   senderContactName={senderContactName}
@@ -707,6 +714,14 @@ export function RequestTab({
                   recommended={recommendedMap}
                   onSelectedCountChange={handleSelectedCountChange}
                 />
+              )}
+
+              {/* 【依頼先がいても出す】（ユーザー決定 2026-08-29）
+                  もともとは「協力会社がいない業種を埋める」機能として、依頼先が0社のときだけ
+                  出していた。相見積を増やしたい場合もあるので、常に出す。
+                  対応表に無い業種では出さない（その県の全社が対象になってしまうため） */}
+              {outreachTrades.includes(group.trade) && (
+                <SalesAiBlock tenderId={tenderId} trade={group.trade} />
               )}
 
               {/* 依頼先が埋まったあとも出す。1社登録したら一覧が消える、では続きを登録できない */}
