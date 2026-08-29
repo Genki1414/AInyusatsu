@@ -265,21 +265,47 @@ describe("purchaseQuota", () => {
 });
 
 describe("createTenant", () => {
-  it("本部の運用キーでPOSTし、テナントIDとAPIキーを返す", async () => {
-    const spy = mockFetch(200, { ok: true, tenant_id: 77, api_key: "new-tenant-key" });
-    const result = await createTenant(opsConnection, { name: "山田電気株式会社", senderEmail: "info@yamada.example" });
-    expect(result).toEqual({ tenantId: 77, apiKey: "new-tenant-key" });
+  // 基本プランの枠。渡さないと営業AI側の既定値（月4,000通）になる
+  const base = {
+    name: "山田電気株式会社",
+    senderEmail: "info@yamada.example",
+    monthlySendQuota: 500,
+    dailySendQuota: 50,
+  };
+  const ok = {
+    ok: true,
+    tenant_id: 77,
+    api_key: "new-tenant-key",
+    monthly_send_quota: 500,
+    daily_send_quota: 50,
+    quota_is_default: false,
+  };
+
+  it("本部の運用キーでPOSTし、送信枠も一緒に渡す", async () => {
+    const spy = mockFetch(200, ok);
+    const result = await createTenant(opsConnection, base);
+    expect(result).toEqual({
+      tenantId: 77,
+      apiKey: "new-tenant-key",
+      monthlySendQuota: 500,
+      dailySendQuota: 50,
+      quotaIsDefault: false,
+    });
     const [url, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("https://sales.example.com/api/ops/tenants");
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer ops-key-456");
-    expect(JSON.parse(init.body as string)).toEqual({ name: "山田電気株式会社", sender_email: "info@yamada.example" });
+    expect(JSON.parse(init.body as string)).toEqual({
+      name: "山田電気株式会社",
+      sender_email: "info@yamada.example",
+      monthly_send_quota: 500,
+      daily_send_quota: 50,
+    });
   });
 
   it("任意項目(sender_name/sender_address/optout_url)も渡せる", async () => {
-    const spy = mockFetch(200, { ok: true, tenant_id: 77, api_key: "new-tenant-key" });
+    const spy = mockFetch(200, ok);
     await createTenant(opsConnection, {
-      name: "山田電気株式会社",
-      senderEmail: "info@yamada.example",
+      ...base,
       senderName: "山田電気",
       senderAddress: "東京都千代田区1-1-1",
       optoutUrl: "https://example.com/optout",
@@ -288,6 +314,8 @@ describe("createTenant", () => {
     expect(JSON.parse(init.body as string)).toEqual({
       name: "山田電気株式会社",
       sender_email: "info@yamada.example",
+      monthly_send_quota: 500,
+      daily_send_quota: 50,
       sender_name: "山田電気",
       sender_address: "東京都千代田区1-1-1",
       optout_url: "https://example.com/optout",
@@ -296,23 +324,38 @@ describe("createTenant", () => {
 
   it("会社名か送信元メールアドレスが空なら呼びに行かない", async () => {
     const spy = mockFetch(200, {});
-    await expect(createTenant(opsConnection, { name: " ", senderEmail: "a@example.com" })).rejects.toThrow(OutreachError);
-    await expect(createTenant(opsConnection, { name: "山田電気", senderEmail: " " })).rejects.toThrow(OutreachError);
+    await expect(createTenant(opsConnection, { ...base, name: " " })).rejects.toThrow(OutreachError);
+    await expect(createTenant(opsConnection, { ...base, senderEmail: " " })).rejects.toThrow(OutreachError);
     expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("送信枠が正の整数でなければ呼びに行かない", async () => {
+    const spy = mockFetch(200, {});
+    await expect(createTenant(opsConnection, { ...base, monthlySendQuota: 0 })).rejects.toThrow(OutreachError);
+    await expect(createTenant(opsConnection, { ...base, dailySendQuota: -1 })).rejects.toThrow(OutreachError);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("枠が既定値へ落ちていたら止める（契約の8倍送れる状態を作らない）", async () => {
+    mockFetch(200, { ...ok, monthly_send_quota: 4000, quota_is_default: true });
+    await expect(createTenant(opsConnection, base)).rejects.toMatchObject({ code: "OUT_OF_SCOPE" });
+  });
+
+  it("指定した枠と違う値が返ってきたら止める", async () => {
+    mockFetch(200, { ...ok, monthly_send_quota: 4000, quota_is_default: false });
+    await expect(createTenant(opsConnection, base)).rejects.toMatchObject({ code: "OUT_OF_SCOPE" });
   });
 
   it("APIキーが返らなければ0にせず止める", async () => {
     mockFetch(200, { ok: true, tenant_id: 77 });
-    await expect(
-      createTenant(opsConnection, { name: "山田電気株式会社", senderEmail: "info@yamada.example" }),
-    ).rejects.toMatchObject({ code: "PARSE_INVALID" });
+    await expect(createTenant(opsConnection, base)).rejects.toMatchObject({ code: "PARSE_INVALID" });
   });
 
   it("重複などの営業AI側のエラーはそのまま止める", async () => {
+    // 入力は正しくしておく。そうしないと送信枠の検証で先に落ち、
+    // HTTPエラーの扱いを確かめたことにならない
     mockFetch(400, { error: "sender_emailの形式が正しくありません" });
-    await expect(
-      createTenant(opsConnection, { name: "山田電気株式会社", senderEmail: "info@yamada.example" }),
-    ).rejects.toMatchObject({ code: "OUT_OF_SCOPE" });
+    await expect(createTenant(opsConnection, base)).rejects.toMatchObject({ code: "OUT_OF_SCOPE" });
   });
 });
 

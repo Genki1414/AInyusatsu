@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  basePlanQuota,
+  BASE_PLAN_MONTHLY_SENDS,
   canOutreach,
   formatTradeMap,
   maskApiKey,
@@ -240,3 +242,15 @@ describe("validateProvisionTenant", () => {
 
 // 送信元（顧客名義）の入力・検証（旧validateSenderIdentity）は
 // mailing_identity.test.ts の normalizeMailingIdentity/combineAddress に移した。
+
+describe("basePlanQuota", () => {
+  it("基本プランは月500通・日50通", () => {
+    expect(basePlanQuota()).toEqual({ monthlySends: 500, dailySends: 50 });
+  });
+
+  it("営業AI側の既定値（4,000通）とは別物であることを固定する", () => {
+    // 渡し忘れると4,000通になる。500から変わったらテストで気づけるようにしておく
+    expect(BASE_PLAN_MONTHLY_SENDS).toBe(500);
+    expect(BASE_PLAN_MONTHLY_SENDS).not.toBe(4000);
+  });
+});
