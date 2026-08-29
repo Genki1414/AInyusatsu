@@ -3,6 +3,7 @@ import {
   createTargetList,
   createTenant,
   getQuotaStatus,
+  getKillSwitchStatus,
   listRepliedMembers,
   listTrades,
   OutreachError,
@@ -474,6 +475,32 @@ describe("listTrades", () => {
   it("tradesが無ければ空配列", async () => {
     mockFetch(200, {});
     expect(await listTrades(connection)).toEqual([]);
+  });
+});
+
+describe("getKillSwitchStatus", () => {
+  it("止まっていなければstopped:falseとreason:nullを返す", async () => {
+    const spy = mockFetch(200, { stopped: false, reason: null });
+    const result = await getKillSwitchStatus(connection);
+    expect(result).toEqual({ stopped: false, reason: null });
+    const [url, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://sales.example.com/api/tenant/kill-switch");
+    expect(init.method).toBe("GET");
+  });
+
+  it("止まっていれば理由も返す", async () => {
+    mockFetch(200, { stopped: true, reason: "契約停止" });
+    expect(await getKillSwitchStatus(connection)).toEqual({ stopped: true, reason: "契約停止" });
+  });
+
+  it("reasonが空文字ならnullにする", async () => {
+    mockFetch(200, { stopped: true, reason: "" });
+    expect(await getKillSwitchStatus(connection)).toEqual({ stopped: true, reason: null });
+  });
+
+  it("stoppedが読めなければ止める", async () => {
+    mockFetch(200, {});
+    await expect(getKillSwitchStatus(connection)).rejects.toMatchObject({ code: "PARSE_INVALID" });
   });
 });
 

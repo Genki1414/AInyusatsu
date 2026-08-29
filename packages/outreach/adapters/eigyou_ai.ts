@@ -582,6 +582,28 @@ export async function listRepliedMembers(connection: SalesAiConnection, listId: 
   });
 }
 
+/** 自テナントの送信が今止められているか。参照：eigyouAI api.py `GET /api/tenant/kill-switch`。 */
+export type KillSwitchStatus = { stopped: boolean; reason: string | null };
+
+/**
+ * 自テナントの送信が今止められているかを見る（読み取り専用）。
+ *
+ * 【何のためにあるか】
+ * 送信ボタンを押す前に、止まっていることが分かるようにする（docs/reference/
+ * 営業AI連携_設計.md「AI入札部側に足すもの」4番）。契約停止に伴う連動
+ * （`setKillSwitch()`）以外にも、営業AI側で乱用対策等により個別に止められる
+ * ことがあるため、契約者側の状態（`org_access`）だけでは分からない。
+ *
+ * 参照：eigyouAI api.py `GET /api/tenant/kill-switch`
+ */
+export async function getKillSwitchStatus(connection: SalesAiConnection): Promise<KillSwitchStatus> {
+  const payload = (await get(connection, "/api/tenant/kill-switch")) as Record<string, unknown>;
+  if (typeof payload.stopped !== "boolean") {
+    throw new OutreachError("PARSE_INVALID", "営業AIの応答にstoppedがありません");
+  }
+  return { stopped: payload.stopped, reason: typeof payload.reason === "string" && payload.reason !== "" ? payload.reason : null };
+}
+
 /**
  * テナント別のKill Switch(送信の即時停止・解除)を操作する。
  *

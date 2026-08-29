@@ -85,7 +85,15 @@ function replyByLabel(dueAt: string | null): string | null {
 
 // "use server" のファイルからは async 関数しか export できないため、初期値はこちらに置く
 // （apps/web/AGENTS.md「実際に踏んだ落とし穴」）
-const EMPTY_OUTREACH: OutreachState = { error: null, message: null, count: null, sample: [], listId: null, quotaNote: null };
+const EMPTY_OUTREACH: OutreachState = {
+  error: null,
+  message: null,
+  count: null,
+  sample: [],
+  listId: null,
+  quotaNote: null,
+  killSwitchWarning: null,
+};
 
 /**
  * 営業AIで候補企業を探す。
@@ -99,6 +107,9 @@ function SalesAiBlock({ tenderId, trade }: { tenderId: string; trade: string }) 
   const [sendState, sendFormAction, sending] = useActionState(sendOutreach, EMPTY_OUTREACH);
   const shown = sendState.message || sendState.error ? sendState : state;
   const found = state.count ?? 0;
+  // 何社いるか見たときに止まっていると分かっていれば、送信ボタンは押させない
+  // （営業AI側の送信自体は止まるが、押せてしまうと届かない理由が分かりにくい）
+  const stopped = state.killSwitchWarning !== null;
 
   return (
     <div className="rounded border border-violet-200 bg-violet-50 px-2 py-1.5">
@@ -113,7 +124,7 @@ function SalesAiBlock({ tenderId, trade }: { tenderId: string; trade: string }) 
         </form>
 
         {/* 何社いるかを見てからでないと送れない。件数を知らずに送らせない */}
-        {found > 0 && !sendState.message && (
+        {found > 0 && !stopped && !sendState.message && (
           <form action={sendFormAction}>
             <input type="hidden" name="tender_id" value={tenderId} />
             <input type="hidden" name="trade" value={trade} />
@@ -134,6 +145,11 @@ function SalesAiBlock({ tenderId, trade }: { tenderId: string; trade: string }) 
         </p>
       )}
       {shown.message && <p className="mt-1 text-xs leading-relaxed text-violet-900">{shown.message}</p>}
+      {shown.killSwitchWarning && (
+        <p role="alert" className="mt-1 text-xs leading-relaxed text-rose-700">
+          {shown.killSwitchWarning}
+        </p>
+      )}
       {shown.quotaNote && <p className="mt-1 text-xs leading-relaxed text-slate-500">{shown.quotaNote}</p>}
       {state.sample.length > 0 && !sendState.message && (
         <ul className="mt-1 space-y-0.5">

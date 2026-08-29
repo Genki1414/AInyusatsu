@@ -15,7 +15,7 @@
 // 「その都道府県の全社」が対象になり、面識の無い会社への一斉送信になる。
 // 変換できない業種は、ここで止める。
 
-import { createTargetList, getQuotaStatus, OutreachError, previewTargets, sendTargetList } from "@ai-nyusatsu-bu/outreach";
+import { createTargetList, getKillSwitchStatus, getQuotaStatus, OutreachError, previewTargets, sendTargetList } from "@ai-nyusatsu-bu/outreach";
 import { buildOutreachMessage, prefectureFromPlace, toSalesAiTrade, type TradeMap } from "@ai-nyusatsu-bu/domain";
 import { requireOrgContext } from "@/lib/auth";
 
@@ -30,6 +30,8 @@ export type OutreachState = {
   listId: number | null;
   /** 今月の残り送信可能数（T55）。取れなかったときはnull（エラーにはしない） */
   quotaNote: string | null;
+  /** 営業AI側で送信が止められているときの警告。止まっていなければ、取れなかったときもnull */
+  killSwitchWarning: string | null;
 };
 
 function text(formData: FormData, key: string): string {
@@ -38,7 +40,7 @@ function text(formData: FormData, key: string): string {
 }
 
 function fail(error: string): OutreachState {
-  return { error, message: null, count: null, sample: [], listId: null, quotaNote: null };
+  return { error, message: null, count: null, sample: [], listId: null, quotaNote: null, killSwitchWarning: null };
 }
 
 /**
@@ -52,6 +54,21 @@ async function quotaNote(connection: { baseUrl: string; apiKey: string }): Promi
   try {
     const quota = await getQuotaStatus(connection);
     return `今月の残り送信可能数：${quota.remaining30d}通（直近30日、上限${quota.effectiveQuota30d}通）`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 送信が止められていれば警告文にする（docs/reference/営業AI連携_設計.md「AI入札部側に
+ * 足すもの」4番）。止まっていない、または状態が取れなかったときはnull（quotaNoteと同じく
+ * 失敗させない）。
+ */
+async function killSwitchWarning(connection: { baseUrl: string; apiKey: string }): Promise<string | null> {
+  try {
+    const status = await getKillSwitchStatus(connection);
+    if (!status.stopped) return null;
+    return `営業AI側で送信が止められています${status.reason ? `（理由：${status.reason}）` : ""}。送信ボタンを押しても届きません`;
   } catch {
     return null;
   }
@@ -173,6 +190,7 @@ export async function previewOutreachTargets(_prev: OutreachState, formData: For
       sample: preview.sample,
       listId: null,
       quotaNote: await quotaNote(resolved.connection),
+      killSwitchWarning: await killSwitchWarning(resolved.connection),
     };
   } catch (err) {
     return fail(`営業AIに問い合わせできませんでした（${describe(err)}）`);
@@ -243,6 +261,7 @@ export async function sendOutreach(_prev: OutreachState, formData: FormData): Pr
       sample: [],
       listId: created.listId,
       quotaNote: await quotaNote(resolved.connection),
+      killSwitchWarning: await killSwitchWarning(resolved.connection),
     };
   } catch (err) {
     // リストは作れたが送れなかった。作り直させないよう、リストの番号を残す
