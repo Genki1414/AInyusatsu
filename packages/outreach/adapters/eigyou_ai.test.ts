@@ -8,6 +8,7 @@ import {
   previewTargets,
   purchaseQuota,
   sendTargetList,
+  setKillSwitch,
   setSenderIdentity,
 } from "./eigyou_ai";
 
@@ -443,5 +444,38 @@ describe("listRepliedMembers", () => {
   it("営業AIがerrorを返したら止める", async () => {
     mockFetch(404, { error: "リストが見つかりません" });
     await expect(listRepliedMembers(connection, 999)).rejects.toMatchObject({ code: "OUT_OF_SCOPE" });
+  });
+});
+
+describe("setKillSwitch", () => {
+  it("本部の運用キーでscope=tenantを指定してPOSTする", async () => {
+    const spy = mockFetch(200, { ok: true });
+    await setKillSwitch(opsConnection, 42, true, "契約停止のため");
+    const [url, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://sales.example.com/api/ops/kill-switch");
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer ops-key-456");
+    expect(JSON.parse(init.body as string)).toEqual({
+      scope: "tenant",
+      tenant_id: 42,
+      stopped: true,
+      reason: "契約停止のため",
+    });
+  });
+
+  it("reasonは無くてもよい(解除のとき等)", async () => {
+    const spy = mockFetch(200, { ok: true });
+    await setKillSwitch(opsConnection, 42, false);
+    const [, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({ scope: "tenant", tenant_id: 42, stopped: false });
+  });
+
+  it("営業AIがerrorを返したら止める", async () => {
+    mockFetch(400, { error: "scope('global'|'tenant')とstopped(真偽値)は必須です" });
+    await expect(setKillSwitch(opsConnection, 42, true)).rejects.toMatchObject({ code: "OUT_OF_SCOPE" });
+  });
+
+  it("okがtrueで返らなければ止める", async () => {
+    mockFetch(200, {});
+    await expect(setKillSwitch(opsConnection, 42, true)).rejects.toMatchObject({ code: "PARSE_INVALID" });
   });
 });

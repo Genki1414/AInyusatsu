@@ -166,33 +166,33 @@ AI入札部：POST /api/ops/tenants/<id>/quota-purchase を叩く
 
 ## 営業AI側に足してほしいもの
 
-### A. 業種の語彙を返すAPI（唯一、本当に無いもの）
+### A. ~~業種の語彙を返すAPI~~（唯一、本当に無いもの。解決。T56）
 
 ```
 GET /api/tenant/trades
-→ [{"code": "denki", "label": "電気工事"}, ...]
+→ {"trades": [{"code": "tobi", "label": "とび・土工"}, {"code": "tosou", "label": "塗装"}, ...]}
 ```
 
-いまは AI入札部の業種（電気・清掃・警備…）と営業AIの業種コード（`tobi` 等）の
-対応表を**人が手で書いている**。営業AI側に語彙を返す手段が無いため。
+営業AI側に実装済み（eigyouAI T56、`h_tenant_trades_get`）。`config.TARGET_TRADES`を
+そのまま返す。同じコードに複数の表示名がある場合（「とび」「土工」がどちらも`tobi`）は
+「・」で連結して1件にまとめる。**AI入札部側でこれを呼んで対応表を自動で埋める画面は
+まだ作っていない**（今は`/admin/sales-ai`の「接続を手で編集する」で1行ずつ書く）。
 
-**これが無いと、業種を増やすたびに全顧客の対応表を手で直すことになる。**
-1本あれば、AI入札部が自動で対応表を埋められる。
+いまも業種そのものは3種類（`tobi`/`tosou`/`kaitai`）のまま——このAPIは語彙を
+「返す手段」を用意しただけで、業種を増やす作業（下のC）とは別。
 
-`config.TARGET_TRADES` をそのまま返すだけでよい。
-
-### B. テナント作成時に送信上限を渡せるようにする
+### B. ~~テナント作成時に送信上限を渡せるようにする~~（解決。T56）
 
 ```
 POST /api/ops/tenants
   { ..., "monthly_send_quota": 500, "daily_send_quota": 50 }
 ```
 
-いまの `POST /api/ops/tenants` は上限を受け取らないので、
-作ったあとDBを直接触ることになる。**契約のたびに手作業が挟まるのは事故のもと。**
-
-`tenants.monthly_send_quota` / `daily_send_quota` の列は既にある
-（`senders._check_quota()` が読む）。受け口を足すだけ。
+営業AI側で対応済み。どちらも任意項目（未指定ならNULL=既定値）で、0以下や文字列は400。
+`createTenant()`（`packages/outreach/adapters/eigyou_ai.ts`）はまだこの2つを渡していない
+——渡すようになれば「作ったあとDBを直接触る」手作業が要らなくなる。
+`/admin/sales-ai`の「営業AIにテナントを作る」フォームに入力欄を足すかは未定
+（基本プラン500通/月は今のところ営業AI側の既定値のままで足りているため）。
 
 ### C. 業種と企業を増やす（作業中）
 
@@ -274,11 +274,15 @@ AI入札部側には「この案件×業種は送信済み」の記録が**無�
 Playwrightで送るので費用はほぼゼロ（`docs/reference/価格.md`）。
 **費用から決めた数字ではない。** 1業種の開拓で何社に当たるのかが分かっていない。
 
-### 契約が止まったとき
+### 契約が止まったとき（解決）
 
-AI入札部で組織を停止（`org_access` が `停止`）したとき、
-営業AI側の送信も止めるべき。`POST /api/ops/kill-switch`（scope=tenant）がある。
-**いまは連動していない。**
+AI入札部で組織を停止・再開する（`/admin/accounts`）と、
+`setKillSwitch()`（`packages/outreach/adapters/eigyou_ai.ts`）が
+`POST /api/ops/kill-switch`（scope=tenant）を呼び、営業AI側の送信も連動して
+止める・再開する。営業AIのテナントがまだ無い組織（`sales_ai_connections.tenant_id`
+が無い）では何もしない。連動できなかった場合（運用キー未設定・営業AI側の
+一時的な障害等）は、停止・再開そのものは成立させたうえで、その旨を本部の画面に
+一言添える（`apps/web/app/admin/accounts/actions.ts` の `syncKillSwitch()`）。
 
 ## やらないと決めたこと
 

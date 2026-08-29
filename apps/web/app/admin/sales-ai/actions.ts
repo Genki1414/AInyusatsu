@@ -25,10 +25,10 @@
 // （CLAUDE.md「やらないこと：問い合わせフォームへの自動送信」）。ここにも送信を呼ぶ処理は書かない。
 
 import { revalidatePath } from "next/cache";
-import { createTenant, OutreachError, previewTargets, type SalesAiOpsConnection } from "@ai-nyusatsu-bu/outreach";
+import { createTenant, OutreachError, previewTargets } from "@ai-nyusatsu-bu/outreach";
 import { validateProvisionTenant, validateSalesAiSettings, type TradeMap } from "@ai-nyusatsu-bu/domain";
 import { requireAdmin } from "@/lib/admin";
-import { syncSalesAiSenderIdentity } from "@/lib/sales_ai_sync";
+import { opsConnection, syncSalesAiSenderIdentity } from "@/lib/sales_ai_sync";
 
 export type SalesAiAdminState = { error: string | null; message: string | null };
 const EMPTY: SalesAiAdminState = { error: null, message: null };
@@ -44,14 +44,6 @@ function text(formData: FormData, key: string): string {
 
 function describe(err: unknown): string {
   return err instanceof OutreachError ? `${err.code}：${err.message}` : String(err);
-}
-
-/** 本部専用の運用キーでの接続。未設定なら null（作る側で「設定してください」と出す）。 */
-function opsConnection(): SalesAiOpsConnection | null {
-  const opsApiKey = process.env.SALES_ENGINE_API_KEY;
-  if (!opsApiKey) return null;
-  const baseUrl = (process.env.EIGYOU_AI_BASE_URL || "https://ashibase.jp").trim();
-  return { baseUrl, opsApiKey };
 }
 
 type ConnectionRow = {

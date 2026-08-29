@@ -553,3 +553,36 @@ export async function listRepliedMembers(connection: SalesAiConnection, listId: 
     };
   });
 }
+
+/**
+ * テナット別のKill Switch(送信の即時停止・解除)を操作する。
+ *
+ * 【いつ呼ぶか】
+ * AI入札部側で契約者の組織を停止／再開したとき(本部の /admin/accounts)。
+ * 契約が止まっているのに営業AI側の送信だけ動き続けるのはおかしいので連動させる
+ * （docs/reference/営業AI連携_設計.md「契約が止まったとき」参照。以前は未連動だった）。
+ *
+ * 【本部専用の運用キーを使う】
+ * scope=tenantのKill Switch操作は営業AI側の運用API。テナントごとのapi_keyではない。
+ *
+ * 参照：eigyouAI api.py `POST /api/ops/kill-switch`
+ */
+export async function setKillSwitch(
+  connection: SalesAiOpsConnection,
+  tenantId: number,
+  stopped: boolean,
+  reason?: string,
+): Promise<void> {
+  const payload = (await postOps(connection, "/api/ops/kill-switch", {
+    scope: "tenant",
+    tenant_id: tenantId,
+    stopped,
+    ...(reason ? { reason } : {}),
+  })) as Record<string, unknown>;
+  if (typeof payload.error === "string") {
+    throw new OutreachError("OUT_OF_SCOPE", `Kill Switchを操作できませんでした：${payload.error}`);
+  }
+  if (payload.ok !== true) {
+    throw new OutreachError("PARSE_INVALID", "営業AIの応答が想定と異なります(okがtrueではありません)");
+  }
+}

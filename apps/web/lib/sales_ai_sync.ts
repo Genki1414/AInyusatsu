@@ -22,10 +22,22 @@
 // 呼び出し側で結果を見て、必要なら画面にひとこと添える。
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { setSenderIdentity, OutreachError } from "@ai-nyusatsu-bu/outreach";
+import { setSenderIdentity, OutreachError, type SalesAiOpsConnection } from "@ai-nyusatsu-bu/outreach";
 import { combineAddress, type MailingIdentityInput } from "@ai-nyusatsu-bu/domain";
 
 export type SyncResult = { ok: true } | { ok: false; reason: string };
+
+/**
+ * 本部専用の運用キーでの接続。未設定なら null（呼び出し側で「設定してください」と出す）。
+ * /admin/sales-ai（テナント作成・送信元同期）と /admin/accounts（Kill Switch連動）の
+ * 両方が使う、営業AI側の運用APIへの唯一の入り口。
+ */
+export function opsConnection(): SalesAiOpsConnection | null {
+  const opsApiKey = process.env.SALES_ENGINE_API_KEY;
+  if (!opsApiKey) return null;
+  const baseUrl = (process.env.EIGYOU_AI_BASE_URL || "https://ashibase.jp").trim();
+  return { baseUrl, opsApiKey };
+}
 
 type OrgRow = { name: string; reply_to: string | null };
 type IdentityRow = {
