@@ -420,8 +420,23 @@ export type CreateTenantInput = {
   senderName?: string;
   senderAddress?: string;
   optoutUrl?: string;
+  /**
+   * 契約プランの送信枠（通/月）。**必ず渡すこと。**
+   * 省略すると営業AI側が config.FORM_MAX_PER_TENANT_PER_MONTH_DEFAULT（4,000通）を使う。
+   */
+  monthlySendQuota: number;
+  /** 1日あたりの上限（通/日）。省略すると営業AI側の既定値（300通）になる */
+  dailySendQuota: number;
 };
-export type CreatedTenant = { tenantId: number; apiKey: string };
+export type CreatedTenant = {
+  tenantId: number;
+  apiKey: string;
+  /** 営業AI側で実際に効いている枠。渡した値と食い違っていないかを確かめるために返す */
+  monthlySendQuota: number | null;
+  dailySendQuota: number | null;
+  /** true なら枠が渡っておらず、営業AI側の既定値（4,000通）になっている */
+  quotaIsDefault: boolean;
+};
 
 /**
  * 本部が営業AIに新しいテナントを作る（契約者1社につき1テナント）。
@@ -432,6 +447,11 @@ export type CreatedTenant = { tenantId: number; apiKey: string };
  * 顧客の画面には一切出さない（「顧客は営業AIの画面を開かない」ユーザー決定 2026-08-28）。
  *
  * kindは指定しない（営業AI側の既定 "client"＝販売先。AI入札部の契約者は全員これでよい）。
+ *
+ * 【送信枠を必ず渡す】
+ * 渡さないと営業AI側が config.FORM_MAX_PER_TENANT_PER_MONTH_DEFAULT（4,000通）を使う。
+ * AI入札部の基本プランは500通なので、**契約の8倍**送れる状態になる。
+ * 応答の quota_is_default を見て、既定値に落ちていたらその場で失敗させる。
  *
  * 参照：eigyouAI api.py `POST /api/ops/tenants`
  */
@@ -445,9 +465,17 @@ export async function createTenant(
   if (input.senderEmail.trim() === "") {
     throw new OutreachError("OUT_OF_SCOPE", "送信元メールアドレス（senderEmail）が必要です");
   }
+  if (!Number.isInteger(input.monthlySendQuota) || input.monthlySendQuota <= 0) {
+    throw new OutreachError("OUT_OF_SCOPE", "月の送信枠（monthlySendQuota）は正の整数で指定してください");
+  }
+  if (!Number.isInteger(input.dailySendQuota) || input.dailySendQuota <= 0) {
+    throw new OutreachError("OUT_OF_SCOPE", "日の送信枠（dailySendQuota）は正の整数で指定してください");
+  }
   const payload = (await postOps(connection, "/api/ops/tenants", {
     name: input.name,
     sender_email: input.senderEmail,
+    monthly_send_quota: input.monthlySendQuota,
+    daily_send_quota: input.dailySendQuota,
     ...(input.senderName ? { sender_name: input.senderName } : {}),
     ...(input.senderAddress ? { sender_address: input.senderAddress } : {}),
     ...(input.optoutUrl ? { optout_url: input.optoutUrl } : {}),
@@ -460,7 +488,27 @@ export async function createTenant(
   if (typeof payload.api_key !== "string" || payload.api_key === "") {
     throw new OutreachError("PARSE_INVALID", "営業AIの応答にAPIキーがありません");
   }
-  return { tenantId, apiKey: payload.api_key };
+
+  // 枠が渡らずに既定値（4,000通）へ落ちていたら、そのまま使わせない。
+  // 気づかないまま契約の8倍を配るより、作成に失敗して直すほうがよい
+  const quotaIsDefault = payload.quota_is_default === true;
+  const monthly = typeof payload.monthly_send_quota === "number" ? payload.monthly_send_quota : null;
+  if (quotaIsDefault || (monthly !== null && monthly !== input.monthlySendQuota)) {
+    throw new OutreachError(
+      "OUT_OF_SCOPE",
+      `テナント（ID ${tenantId}）は作成されましたが、送信枠が指定どおりになっていません` +
+        `（指定 ${input.monthlySendQuota}通／実際 ${monthly ?? "不明"}通）。` +
+        "営業AI側で枠を直してください。このまま使うと契約より多く送れてしまいます",
+    );
+  }
+
+  return {
+    tenantId,
+    apiKey: payload.api_key,
+    monthlySendQuota: monthly,
+    dailySendQuota: typeof payload.daily_send_quota === "number" ? payload.daily_send_quota : null,
+    quotaIsDefault,
+  };
 }
 
 /**

@@ -26,7 +26,12 @@
 
 import { revalidatePath } from "next/cache";
 import { createTenant, listTrades, OutreachError, previewTargets, type TradeEntry } from "@ai-nyusatsu-bu/outreach";
-import { validateProvisionTenant, validateSalesAiSettings, type TradeMap } from "@ai-nyusatsu-bu/domain";
+import {
+  basePlanQuota,
+  validateProvisionTenant,
+  validateSalesAiSettings,
+  type TradeMap,
+} from "@ai-nyusatsu-bu/domain";
 import { requireAdmin } from "@/lib/admin";
 import { opsConnection, syncSalesAiSenderIdentity } from "@/lib/sales_ai_sync";
 
@@ -108,7 +113,15 @@ export async function provisionTenant(
 
   let created;
   try {
-    created = await createTenant(conn, { name: validated.value.orgName, senderEmail: validated.value.senderEmail });
+    // 送信枠は必ず渡す。渡さないと営業AI側の既定値（月4,000通）になり、
+    // 契約の500通に対して8倍送れる状態になる（packages/domain/src/sales_ai.ts）
+    const quota = basePlanQuota();
+    created = await createTenant(conn, {
+      name: validated.value.orgName,
+      senderEmail: validated.value.senderEmail,
+      monthlySendQuota: quota.monthlySends,
+      dailySendQuota: quota.dailySends,
+    });
   } catch (err) {
     return fail(`テナントを作れませんでした（${describe(err)}）`);
   }

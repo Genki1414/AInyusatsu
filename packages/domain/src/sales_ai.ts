@@ -270,3 +270,32 @@ export function validateProvisionTenant(input: { orgName: string; senderEmail: s
 // 送信元（顧客名義）の入力・検証は packages/domain/src/mailing_identity.ts に移した
 // （本部が毎回手入力する画面をやめ、顧客の自社情報から自動同期する形にしたため。
 // ユーザー決定 2026-08-28その2。apps/web/lib/sales_ai_sync.ts参照）。
+
+// ── 契約プランの送信枠 ───────────────────────────────────────
+//
+// 【必ず明示して渡すこと】
+// 営業AI側は tenants.monthly_send_quota が NULL のとき、
+// config.FORM_MAX_PER_TENANT_PER_MONTH_DEFAULT（＝4,000通）を使う
+// （eigyouAI senders.py の _check_quota()）。
+// これは営業AI単体の最低プランの想定値で、AI入札部の基本プラン（500通）とは別物。
+//
+// 渡し忘れると、契約は500通なのに実際は4,000通送れる状態になる。**8倍。**
+// 契約と実際に送れる量が食い違ったまま、誰も気づかない。
+
+/** 基本プランに含まれる送信数（通/月）。docs/reference/価格.md */
+export const BASE_PLAN_MONTHLY_SENDS = 500;
+
+/**
+ * 1日あたりの上限（通/日）。
+ *
+ * 月500通を1日に固め打ちさせない。相手はこれから協力会社になってもらう会社で、
+ * 同じ日に大量に届くと関係が始まらない。月の1割強にあたる50通を上限にする。
+ */
+export const BASE_PLAN_DAILY_SENDS = 50;
+
+export type PlanQuota = { monthlySends: number; dailySends: number };
+
+/** 契約プランの送信枠。いまは1プランしか無いので固定値を返す。 */
+export function basePlanQuota(): PlanQuota {
+  return { monthlySends: BASE_PLAN_MONTHLY_SENDS, dailySends: BASE_PLAN_DAILY_SENDS };
+}
