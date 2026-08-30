@@ -16,6 +16,7 @@ import {
   isBidResult,
   isTenderStance,
   classifyAgencyClass,
+  deadlineText,
   documentAvailabilities,
   groupLotsByTrade,
   matchAwardsByName,
@@ -351,13 +352,15 @@ function yen(n: number | null) {
   return n == null ? "非公表" : "¥" + n.toLocaleString("ja-JP");
 }
 
+/**
+ * 期限の表示。「2026/09/02（あと2日）」。
+ *
+ * 以前はここだけ経過ミリ秒を切り上げていたため、同じ画面の段取りと数字が食い違い、
+ * さらに**見る時刻で数字が変わっていた**（朝は残3日、夜は残2日）。
+ * 数え方は packages/domain/src/deadline.ts に1本化した。
+ */
 function due(iso: string | null) {
-  if (!iso) return "未確認";
-  const target = new Date(iso);
-  if (Number.isNaN(target.getTime())) return "未確認";
-  const d = Math.ceil((target.getTime() - Date.now()) / 86_400_000);
-  const formatted = target.toLocaleString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" });
-  return d >= 0 ? `${formatted}（残${d}日）` : `${formatted}（終了）`;
+  return deadlineText(iso);
 }
 
 export default async function TenderDetailPage({

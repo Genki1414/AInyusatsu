@@ -7,6 +7,7 @@ import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { Bar, Panel, Pill, ProposePill, ReasonIcon, Verdict, btnClass, verdictBarTone } from "@/components/ui";
 import { requireOrgContext } from "@/lib/auth";
+import { daysUntilDeadline } from "@ai-nyusatsu-bu/domain";
 import { setProposalStatus } from "./actions";
 
 type ProposalRow = {
@@ -34,11 +35,9 @@ function agencyName(agencies: Agencies) {
   return Array.isArray(agencies) ? (agencies[0]?.name ?? "") : agencies.name;
 }
 
+/** 残り日数は全画面で共通の数え方（packages/domain/src/deadline.ts）。 */
 function daysLeft(iso: string | null): number | null {
-  if (!iso) return null;
-  const target = new Date(iso);
-  if (Number.isNaN(target.getTime())) return null;
-  return Math.ceil((target.getTime() - Date.now()) / 86_400_000);
+  return daysUntilDeadline(iso);
 }
 
 export default async function ProposalsPage() {

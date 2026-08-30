@@ -8,11 +8,8 @@ import {
   isWon,
   SELECTABLE_BID_RESULTS,
   currentStep,
-  daysUntilDate,
-  deadlineLabel,
   isActiveStance,
   isTenderStance,
-  isUrgent,
   SELECTABLE_STANCES,
   STANCE_ORDER,
   type RoadmapInput,
@@ -53,24 +50,6 @@ describe("stance", () => {
   it("手を動かすものが先に並ぶ", () => {
     expect(STANCE_ORDER["参加"]).toBeLessThan(STANCE_ORDER["検討"]);
     expect(STANCE_ORDER["検討"]).toBeLessThan(STANCE_ORDER["見送り"]);
-  });
-});
-
-describe("daysUntilDate", () => {
-  it("日本時間の日付で数える（時刻の違いで1日ずれない）", () => {
-    // 8/29 10:00 から見た 9/12 17:00 は14日後
-    expect(daysUntilDate("2026-09-12T17:00:00+09:00", NOW)).toBe(14);
-    // 同じ日なら0（時刻が前でも当日）
-    expect(daysUntilDate("2026-08-29T09:00:00+09:00", NOW)).toBe(0);
-  });
-
-  it("過ぎていれば負の数", () => {
-    expect(daysUntilDate("2026-08-27T17:00:00+09:00", NOW)).toBe(-2);
-  });
-
-  it("期限が無ければ null（推測しない）", () => {
-    expect(daysUntilDate(null, NOW)).toBeNull();
-    expect(daysUntilDate("日付ではない", NOW)).toBeNull();
   });
 });
 
@@ -125,35 +104,6 @@ describe("buildRoadmap", () => {
   it("質問期限が無ければ、資料取得の期限は提出期限にする", () => {
     const steps = buildRoadmap({ ...未着手, qaDeadline: null }, NOW);
     expect(steps[0].deadline).toBe("2026-09-12T17:00:00+09:00");
-  });
-});
-
-describe("deadlineLabel", () => {
-  it("期限が取れていなければ未確認と出す", () => {
-    expect(deadlineLabel(null)).toBe("期限は未確認");
-  });
-
-  it("今日・明日・あと◯日を書き分ける", () => {
-    expect(deadlineLabel(0)).toBe("今日まで");
-    expect(deadlineLabel(1)).toBe("明日まで");
-    expect(deadlineLabel(5)).toBe("あと5日");
-  });
-
-  it("過ぎていることを隠さない", () => {
-    expect(deadlineLabel(-2)).toBe("2日過ぎています");
-  });
-});
-
-describe("isUrgent", () => {
-  it("3日以内は急ぎ", () => {
-    expect(isUrgent(3)).toBe(true);
-    expect(isUrgent(0)).toBe(true);
-    expect(isUrgent(-1)).toBe(true);
-    expect(isUrgent(4)).toBe(false);
-  });
-
-  it("期限が取れていなければ急ぎ扱いしない（分からないものを赤くしない）", () => {
-    expect(isUrgent(null)).toBe(false);
   });
 });
 
