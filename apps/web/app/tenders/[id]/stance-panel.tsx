@@ -11,7 +11,7 @@
 // 参加と決めた案件にだけ、次に何をするかを出す。
 
 import { Check } from "lucide-react";
-import { useActionState, useOptimistic, useState } from "react";
+import { startTransition, useActionState, useOptimistic, useState } from "react";
 import Link from "next/link";
 import {
   amountLabel,
@@ -74,7 +74,7 @@ function StepCheck({
 }: {
   step: RoadmapStep;
   done: boolean;
-  onToggle: (formData: FormData) => void;
+  onToggle: (step: RoadmapStep, checked: boolean) => void;
 }) {
   const locked = step.lockedReason !== null;
 
@@ -103,19 +103,16 @@ function StepCheck({
   }
 
   return (
-    <form action={onToggle} className="flex items-center">
-      <input type="hidden" name="step" value={step.key} />
-      <input type="hidden" name="checked" value={done ? "0" : "1"} />
-      <button
-        type="submit"
-        role="checkbox"
-        aria-checked={done}
-        aria-label={done ? `${step.label}（やった）を取り消す` : `${step.label}をやったことにする`}
-        className="flex items-center rounded focus:outline-none focus:ring-2 focus:ring-blue-300"
-      >
-        {box}
-      </button>
-    </form>
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={done}
+      aria-label={done ? `${step.label}（やった）を取り消す` : `${step.label}をやったことにする`}
+      onClick={() => onToggle(step, !done)}
+      className="flex items-center rounded focus:outline-none focus:ring-2 focus:ring-blue-300"
+    >
+      {box}
+    </button>
   );
 }
 
@@ -138,7 +135,7 @@ function Step({
   tenderId: string;
   done: boolean;
   current: boolean;
-  onToggle: (formData: FormData) => void;
+  onToggle: (step: RoadmapStep, checked: boolean) => void;
 }) {
   const date = deadlineDate(step.deadline);
   return (
@@ -216,14 +213,16 @@ function Roadmap({
       change.checked ? [...new Set([...current, change.key])] : current.filter((k) => k !== change.key),
   );
 
-  async function toggle(formData: FormData) {
-    const key = String(formData.get("step") ?? "");
-    const next = formData.get("checked") === "1";
-    addOptimistic({ key, checked: next });
-    setError(null);
-    const result = await toggleRoadmapStep(formData);
-    // 失敗したら、印は自動でサーバーの値に戻る。なぜ戻ったかを出す
-    if (result.error !== null) setError(result.error);
+  // useOptimistic の更新は transition の中でしか効かないので、
+  // startTransition で包む（formのactionをやめたため）
+  function toggle(step: RoadmapStep, next: boolean) {
+    startTransition(async () => {
+      addOptimistic({ key: step.key, checked: next });
+      setError(null);
+      const result = await toggleRoadmapStep(tenderId, step.key, next);
+      // 失敗したら、印は自動でサーバーの値に戻る。なぜ戻ったかを出す
+      if (result.error !== null) setError(result.error);
+    });
   }
 
   // 本サービスの記録で終わったと分かるものは、チェックが無くても済
