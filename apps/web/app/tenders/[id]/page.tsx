@@ -418,7 +418,7 @@ export default async function TenderDetailPage({
     supabase.from("partners").select("id, name, base, email, trades, areas, rating, memo").eq("active", true).returns<RequestTabPartner[]>(),
     supabase
       .from("company_tenders")
-      .select("official_status, work_status, bid_price, stance, bid_result, result_amount, result_memo")
+      .select("official_status, work_status, bid_price, stance, bid_result, result_amount, result_memo, roadmap_done")
       .eq("tender_id", id)
       .maybeSingle<{
         official_status: OfficialStatus;
@@ -426,6 +426,7 @@ export default async function TenderDetailPage({
         bid_price: number | null;
         stance: string | null;
         bid_result: string | null;
+        roadmap_done: string[] | null;
         result_amount: number | null;
         result_memo: string | null;
       }>(),
@@ -574,6 +575,7 @@ export default async function TenderDetailPage({
   const roadmap =
     stance === "参加"
       ? buildRoadmap({
+          checkedSteps: companyTender?.roadmap_done ?? [],
           officialStatus,
           quoteRequested: (sentRequestCount ?? 0) > 0,
           quoteReceived: false,

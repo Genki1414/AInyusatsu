@@ -10,6 +10,7 @@
 // 検討・保留の段階で「あと3日」と急かしても、やることが決まっていない。
 // 参加と決めた案件にだけ、次に何をするかを出す。
 
+import { Check } from "lucide-react";
 import { useActionState, useState } from "react";
 import Link from "next/link";
 import {
@@ -25,12 +26,20 @@ import {
   type TenderStance,
 } from "@ai-nyusatsu-bu/domain";
 import { btnClass, Panel, Pill } from "@/components/ui";
-import { setBidResult, setTenderStance, type BidResultState, type StanceState } from "./stance-actions";
+import {
+  setBidResult,
+  setTenderStance,
+  toggleRoadmapStep,
+  type BidResultState,
+  type RoadmapState,
+  type StanceState,
+} from "./stance-actions";
 
 // "use server" のファイルからは async 関数しか export できないため、初期値はこちらに置く
 // （apps/web/AGENTS.md「実際に踏んだ落とし穴」）
 const EMPTY: StanceState = { error: null, message: null };
 const EMPTY_RESULT: BidResultState = { error: null, message: null };
+const EMPTY_ROADMAP: RoadmapState = { error: null, message: null };
 
 const input =
   "rounded border border-slate-300 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300";
@@ -43,10 +52,69 @@ const TONE: Record<TenderStance, "green" | "amber" | "slate" | "rose"> = {
   見送り: "rose",
 };
 
-function StepMark({ state }: { state: RoadmapStep["state"] }) {
-  if (state === "済") return <span className="text-xs text-emerald-700">済</span>;
-  if (state === "いま") return <span className="text-xs font-semibold text-blue-800">いま</span>;
-  return <span className="text-xs text-slate-400">—</span>;
+/**
+ * やったかどうかのチェック（ユーザー要望 2026-08-31）。
+ *
+ * 【本サービスが知っている段取りは押せなくする】
+ * 見積依頼を送った等、記録で終わったと分かるものは、外させない。
+ * 画面が記録に反することを書くと、どちらが本当か分からなくなる。
+ * なぜ押せないかは、その場に文で出す（黙って効かないボタンにしない）。
+ *
+ * 【JSが無くても動く】
+ * チェックボックスの見た目のボタンをformで送る。onChangeで送る作りだと、
+ * 読み込み中に押した分が消える。
+ */
+function StepCheck({
+  step,
+  tenderId,
+}: {
+  step: RoadmapStep;
+  tenderId: string;
+}) {
+  const [state, formAction, pending] = useActionState(toggleRoadmapStep, EMPTY_ROADMAP);
+  const done = step.state === "済";
+  const locked = step.lockedReason !== null;
+
+  const box = (
+    <span
+      className={`flex h-4 w-4 items-center justify-center rounded border ${
+        done
+          ? locked
+            ? "border-emerald-600 bg-emerald-600/60"
+            : "border-emerald-600 bg-emerald-600"
+          : "border-slate-400 bg-white"
+      } ${pending ? "opacity-50" : ""}`}
+    >
+      {done && <Check className="h-3 w-3 text-white" strokeWidth={3} />}
+    </span>
+  );
+
+  if (locked) {
+    return (
+      <span className="flex h-4 w-4 items-center justify-center" title={step.lockedReason ?? undefined}>
+        {box}
+      </span>
+    );
+  }
+
+  return (
+    <form action={formAction} className="flex items-center">
+      <input type="hidden" name="tender_id" value={tenderId} />
+      <input type="hidden" name="step" value={step.key} />
+      <input type="hidden" name="checked" value={done ? "0" : "1"} />
+      <button
+        type="submit"
+        role="checkbox"
+        aria-checked={done}
+        aria-label={done ? `${step.label}（やった）を取り消す` : `${step.label}をやったことにする`}
+        disabled={pending}
+        className="flex items-center rounded focus:outline-none focus:ring-2 focus:ring-blue-300"
+      >
+        {box}
+      </button>
+      {state.error && <span className="sr-only">{state.error}</span>}
+    </form>
+  );
 }
 
 /**
@@ -66,14 +134,21 @@ function Step({ step, tenderId }: { step: RoadmapStep; tenderId: string }) {
         step.state === "これから" ? "text-slate-400" : ""
       }`}
     >
-      <span className="w-8 shrink-0">
-        <StepMark state={step.state} />
+      <span className="shrink-0 self-center">
+        <StepCheck step={step} tenderId={tenderId} />
       </span>
       <span className={`text-xs ${current ? "font-semibold text-slate-900" : "text-slate-700"}`}>{step.label}</span>
+      {/* やらずに進める段取りだと分かるようにする。ここで止まらせない */}
+      {step.optional && <span className="text-xs text-slate-400">任意</span>}
+      {current && <span className="text-xs font-semibold text-blue-800">いま</span>}
       {date !== null && <span className="text-xs tabular-nums text-slate-600">{date}</span>}
       <span className={`text-xs ${isDeadlineNear(step.daysLeft) ? "font-medium text-rose-700" : "text-slate-500"}`}>
         {remainingText(step.daysLeft)}
       </span>
+      {/* なぜ押せないかを、その場に出す（黙って効かないチェックにしない） */}
+      {step.lockedReason !== null && (
+        <span className="text-xs text-slate-400">{step.lockedReason}</span>
+      )}
       {current && <span className="w-full text-xs leading-relaxed text-slate-600">{step.note}</span>}
       {current && <StepLink label={step.label} tenderId={tenderId} />}
     </li>
