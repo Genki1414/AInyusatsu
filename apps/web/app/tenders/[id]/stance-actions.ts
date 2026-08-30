@@ -8,7 +8,7 @@
 // stance は人がどうしたいかなので、片方を変えてももう片方は動かさない。
 
 import { revalidatePath } from "next/cache";
-import { acceptsAmount, isBidResult, isTenderStance, isWon } from "@ai-nyusatsu-bu/domain";
+import { acceptsAmount, isBidResult, isRoadmapStepKey, isTenderStance, isWon } from "@ai-nyusatsu-bu/domain";
 import { requireOrgContext } from "@/lib/auth";
 
 export type StanceState = { error: string | null; message: string | null };
@@ -102,4 +102,52 @@ export async function setBidResult(_prev: BidResultState, formData: FormData): P
       ? "「落札」で記録しました。案件一覧の「結果：落札」から見られます。"
       : `「${result}」で記録しました。`,
   };
+}
+
+export type RoadmapState = { error: string | null; message: string | null };
+
+/**
+ * 段取りを1つ、やった／やっていないに切り替える。
+ *
+ * 【なぜ手で入れてもらうか】
+ * 質問を電話でしたか、開札の結果を確認したかは、本サービスには届かない。
+ * **取れないものを取れたことにしない**（CLAUDE.md 最重要の前提7）ので、ここは人が入れる。
+ *
+ * 【記録で分かるものは、記録が優先】
+ * 見積依頼を送った等、記録で終わったと分かる段取りは buildRoadmap 側で済になる。
+ * ここでチェックを外しても済のままなので、画面ではその欄を押せなくしてある。
+ *
+ * 【読んでから書く】
+ * 配列の一部だけを更新できないため、いまの値を読んで足し引きして書き戻す。
+ * 同じ案件を2つの画面で同時に触ると後勝ちになるが、段取りのチェックは
+ * 本人が1人で押すものなので、ここでは競合を作り込まない。
+ */
+export async function toggleRoadmapStep(_prev: RoadmapState, formData: FormData): Promise<RoadmapState> {
+  const { supabase, orgId } = await requireOrgContext();
+
+  const tenderId = text(formData, "tender_id").trim();
+  const step = text(formData, "step").trim();
+  const checked = text(formData, "checked").trim() === "1";
+  if (tenderId === "") return { error: "案件が指定されていません", message: null };
+  // 知らないキーを入れると、画面に出ないゴミが残る
+  if (!isRoadmapStepKey(step)) return { error: `「${step}」は段取りにありません`, message: null };
+
+  const { data: current, error: readError } = await supabase
+    .from("company_tenders")
+    .select("roadmap_done")
+    .eq("org_id", orgId)
+    .eq("tender_id", tenderId)
+    .maybeSingle<{ roadmap_done: string[] | null }>();
+  if (readError) return { error: `保存できませんでした（${readError.message}）`, message: null };
+
+  const before = current?.roadmap_done ?? [];
+  const after = checked ? [...new Set([...before, step])] : before.filter((k) => k !== step);
+
+  const { error } = await supabase
+    .from("company_tenders")
+    .upsert({ org_id: orgId, tender_id: tenderId, roadmap_done: after }, { onConflict: "org_id,tender_id" });
+  if (error) return { error: `保存できませんでした（${error.message}）`, message: null };
+
+  revalidatePath(`/tenders/${tenderId}`);
+  return { error: null, message: null };
 }

@@ -39,6 +39,8 @@ export function isActiveStance(stance: TenderStance): boolean {
 // ── 参加を決めたあとの段取り ────────────────────────────────
 
 export type RoadmapInput = {
+  /** 利用者が自分でチェックした段取り（ROADMAP_STEP_KEYS の値） */
+  checkedSteps: readonly string[];
   /** 資料の正式取得（自社名義）。未取得 / 申請中 / 取得済 */
   officialStatus: string;
   /** 見積依頼を1件でも送っているか */
@@ -61,7 +63,19 @@ export type RoadmapInput = {
 
 export type RoadmapStepState = "済" | "いま" | "これから";
 
+/**
+ * 段取りの識別子。**画面の文言とは別に持つ。**
+ * チェックの記録はこの値で保存するので、ラベルを直しても記録が消えない。
+ */
+export const ROADMAP_STEP_KEYS = ["docs", "qa", "quote", "price", "forms", "submit", "open"] as const;
+export type RoadmapStepKey = (typeof ROADMAP_STEP_KEYS)[number];
+
+export function isRoadmapStepKey(value: string | null | undefined): value is RoadmapStepKey {
+  return typeof value === "string" && (ROADMAP_STEP_KEYS as readonly string[]).includes(value);
+}
+
 export type RoadmapStep = {
+  key: RoadmapStepKey;
   /** 画面に出す短い動詞。「◯◯する」 */
   label: string;
   /** なぜ要るか・気をつけること。1文 */
@@ -71,6 +85,13 @@ export type RoadmapStep = {
   deadline: string | null;
   /** 期限までの日数。期限が無ければ null。過ぎていれば負の数 */
   daysLeft: number | null;
+  /**
+   * 本サービスの記録で終わったと分かっている理由。分からなければ null。
+   * **入っているあいだはチェックを外させない**（記録に反することを画面に書かせない）。
+   */
+  lockedReason: string | null;
+  /** やらずに進むことがある段取り。終わっていなくても「いま」にしない */
+  optional: boolean;
 };
 
 /**
@@ -84,62 +105,95 @@ export type RoadmapStep = {
  * 済んだものを消すと、何をやったか分からなくなる。印を変えて残す。
  */
 export function buildRoadmap(input: RoadmapInput, now: Date = new Date()): RoadmapStep[] {
+  // 本サービスの記録で終わったと分かるもの。分かる場合は理由を持たせて、
+  // 画面でチェックを外させない（記録に反することを書かせない）
+  const confirmed: Record<RoadmapStepKey, string | null> = {
+    docs: input.officialStatus === "取得済" ? "「資料」タブで「取得済」になっています" : null,
+    // 質問したかどうかは本サービスでは分からない。電話でも聞けるため
+    qa: null,
+    quote: input.quoteRequested ? "見積依頼を送った記録があります" : null,
+    price: input.bidPriceDecided ? "応札価格を決めた記録があります" : null,
+    forms: input.formsReady ? "提出書類がすべて「用意できた」になっています" : null,
+    submit: input.submitted ? "「提出済」になっています" : null,
+    // 開札の結果は機関ごとに公表の形が違い、自動では拾えない（最重要の前提7）
+    open: null,
+  };
+
   const steps: Omit<RoadmapStep, "state" | "daysLeft">[] = [
     {
+      key: "docs",
       label: "資料を御社の名義で取得する",
       note: "本部が取得した資料はAIの解析用です。参加するには御社ご自身で入札説明書等を取得してください。",
       deadline: input.qaDeadline ?? input.submitDeadline,
+      lockedReason: confirmed.docs,
+      optional: false,
     },
     {
+      key: "qa",
       label: "不明点を質問する",
-      note: "質問期限を過ぎると聞けません。仕様に迷いがあれば早めに。",
+      // 質問しないで進むこともあるので、これが終わっていなくても次へ進める
+      note: "質問期限を過ぎると聞けません。仕様に迷いがあれば早めに。聞かずに進むこともできます。",
       deadline: input.qaDeadline,
+      lockedReason: confirmed.qa,
+      optional: true,
     },
     {
+      key: "quote",
       label: "協力会社へ見積を依頼する",
       note: "回答を待つ時間が要ります。提出期限の直前に依頼しても間に合いません。",
       deadline: input.submitDeadline,
+      lockedReason: confirmed.quote,
+      optional: false,
     },
     {
+      key: "price",
       label: "見積を集めて応札価格を決める",
       note: "「見積・原価」タブで原価を集計し、応札価格を決めます。",
       deadline: input.submitDeadline,
+      lockedReason: confirmed.price,
+      optional: false,
     },
     {
+      key: "forms",
       label: "提出書類をそろえる",
       note: "「提出書類」タブの一覧を、すべて用意できた状態にします。",
       deadline: input.submitDeadline,
+      lockedReason: confirmed.forms,
+      optional: false,
     },
     {
+      key: "submit",
       label: "入札書を提出する",
       note: "提出期限を1分でも過ぎると受け付けられません。",
       deadline: input.submitDeadline,
+      lockedReason: confirmed.submit,
+      optional: false,
     },
     {
+      key: "open",
       label: "開札",
-      note: "結果を確認します。",
+      note: "結果を確認して、下の「入札の結果」に入れてください。",
       deadline: input.bidOpenAt,
+      lockedReason: confirmed.open,
+      optional: false,
     },
   ];
 
-  const done = [
-    input.officialStatus === "取得済",
-    // 質問は「しないで進む」ことがある。資料が取れていれば済んだものとして扱い、
-    // 期限だけ見せる（質問しなかったことを未完了として残さない）
-    input.officialStatus === "取得済",
-    input.quoteRequested,
-    input.bidPriceDecided,
-    input.formsReady,
-    input.submitted,
-    // 開札は待つだけ。こちらから終わらせるものではない
-    false,
-  ];
+  // 【済の決め方】
+  // 本サービスの記録で分かるものは、それを使う。
+  // 分からないものは、利用者が自分でチェックしたかどうかで決める。
+  // 記録で分かるものに手でチェックが付いていても、記録のほうが強い（外させない）。
+  const isDone = (step: (typeof steps)[number]) =>
+    step.lockedReason !== null || input.checkedSteps.includes(step.key);
 
-  const firstUndone = done.findIndex((d) => !d);
+  // 【「いま」は1つだけ】
+  // やらずに進む段取り（質問）は、終わっていなくても「いま」にしない。
+  // ここで止めると、質問しない案件がいつまでも先へ進まない。
+  const firstUndone = steps.findIndex((step) => !step.optional && !isDone(step));
 
   return steps.map((step, i) => ({
     ...step,
-    state: done[i] ? "済" : i === firstUndone ? "いま" : "これから",
+    state: isDone(step) ? "済" : i === firstUndone ? "いま" : "これから",
     daysLeft: daysUntilDeadline(step.deadline, now),
   }));
 }
