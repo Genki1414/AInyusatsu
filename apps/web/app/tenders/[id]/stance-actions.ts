@@ -121,17 +121,25 @@ export type RoadmapState = { error: string | null; message: string | null };
  * 押した瞬間にチェックが付くよう、画面側では useOptimistic で先に印を付ける。
  * ここが失敗したら、そのときに印を戻して理由を出す。
  *
+ * 【FormDataで受け取らない】
+ * 以前は tender_id / step / checked をformの hidden から読んでいた。
+ * 画面を組み直したときに hidden を1つ落としてしまい、押すたびに
+ * 「案件が指定されていません」で戻る状態になった（2026-08-31）。
+ * hidden の付け忘れは tsc も eslint も build も見つけられない。
+ * **引数で受け取れば、渡し忘れは型で止まる。**
+ *
  * 【読んでから書く】
  * 配列の一部だけを更新できないため、いまの値を読んで足し引きして書き戻す。
  * 同じ案件を2つの画面で同時に触ると後勝ちになるが、段取りのチェックは
  * 本人が1人で押すものなので、ここでは競合を作り込まない。
  */
-export async function toggleRoadmapStep(formData: FormData): Promise<RoadmapState> {
+export async function toggleRoadmapStep(
+  tenderId: string,
+  step: string,
+  checked: boolean,
+): Promise<RoadmapState> {
   const { supabase, orgId } = await requireOrgContext();
 
-  const tenderId = text(formData, "tender_id").trim();
-  const step = text(formData, "step").trim();
-  const checked = text(formData, "checked").trim() === "1";
   if (tenderId === "") return { error: "案件が指定されていません", message: null };
   // 知らないキーを入れると、画面に出ないゴミが残る
   if (!isRoadmapStepKey(step)) return { error: `「${step}」は段取りにありません`, message: null };
