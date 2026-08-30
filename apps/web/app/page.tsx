@@ -8,7 +8,7 @@ import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { Panel, Pill, ProposePill } from "@/components/ui";
 import { requireOrgContext } from "@/lib/auth";
-import { evaluateCoverage, type CoverageAgency } from "@ai-nyusatsu-bu/domain";
+import { daysUntilDeadline, evaluateCoverage, type CoverageAgency } from "@ai-nyusatsu-bu/domain";
 
 type ProposalDeadlineRow = {
   id: string;
@@ -32,11 +32,9 @@ type AgencyRow = {
   parent_id: string | null;
 };
 
+/** 残り日数は全画面で共通の数え方（packages/domain/src/deadline.ts）。 */
 function daysLeft(iso: string | null, now: Date): number | null {
-  if (!iso) return null;
-  const target = new Date(iso);
-  if (Number.isNaN(target.getTime())) return null;
-  return Math.ceil((target.getTime() - now.getTime()) / 86_400_000);
+  return daysUntilDeadline(iso, now);
 }
 
 export default async function HomePage() {

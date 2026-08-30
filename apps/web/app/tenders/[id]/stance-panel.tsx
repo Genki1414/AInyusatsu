@@ -14,9 +14,10 @@ import { useActionState, useState } from "react";
 import Link from "next/link";
 import {
   amountLabel,
-  deadlineLabel,
-  isUrgent,
+  deadlineDate,
+  isDeadlineNear,
   isWon,
+  remainingText,
   SELECTABLE_BID_RESULTS,
   SELECTABLE_STANCES,
   type BidResult,
@@ -48,9 +49,17 @@ function StepMark({ state }: { state: RoadmapStep["state"] }) {
   return <span className="text-xs text-slate-400">—</span>;
 }
 
-/** 段取り1行。期限が取れていないものは日付を出さない（推測しない）。 */
+/**
+ * 段取り1行。
+ *
+ * 【日付と残り日数を必ず並べる】
+ * 「あと2日」だけでは、いつが締切かを自分で数えることになる（ユーザー要望 2026-08-31）。
+ * 日付だけでは急ぎかどうかが一目で分からない。両方を出す。
+ * **期限が取れていない段取りは日付を作らない**（推測しない）。
+ */
 function Step({ step, tenderId }: { step: RoadmapStep; tenderId: string }) {
   const current = step.state === "いま";
+  const date = deadlineDate(step.deadline);
   return (
     <li
       className={`flex flex-wrap items-baseline gap-2 border-b border-slate-100 py-1.5 last:border-0 ${
@@ -61,8 +70,9 @@ function Step({ step, tenderId }: { step: RoadmapStep; tenderId: string }) {
         <StepMark state={step.state} />
       </span>
       <span className={`text-xs ${current ? "font-semibold text-slate-900" : "text-slate-700"}`}>{step.label}</span>
-      <span className={`text-xs ${isUrgent(step.daysLeft) ? "font-medium text-rose-700" : "text-slate-500"}`}>
-        {deadlineLabel(step.daysLeft)}
+      {date !== null && <span className="text-xs tabular-nums text-slate-600">{date}</span>}
+      <span className={`text-xs ${isDeadlineNear(step.daysLeft) ? "font-medium text-rose-700" : "text-slate-500"}`}>
+        {remainingText(step.daysLeft)}
       </span>
       {current && <span className="w-full text-xs leading-relaxed text-slate-600">{step.note}</span>}
       {current && <StepLink label={step.label} tenderId={tenderId} />}

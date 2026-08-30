@@ -10,6 +10,8 @@
 // 期限が取れていない項目は、日付を出さずに「未確認」とする（CLAUDE.md 最重要の前提5）。
 // 推測した日付を段取りに載せると、それに合わせて動いてしまう。
 
+import { daysUntilDeadline } from "./deadline";
+
 export const TENDER_STANCES = ["未定", "検討", "保留", "参加", "見送り"] as const;
 export type TenderStance = (typeof TENDER_STANCES)[number];
 
@@ -70,17 +72,6 @@ export type RoadmapStep = {
   /** 期限までの日数。期限が無ければ null。過ぎていれば負の数 */
   daysLeft: number | null;
 };
-
-/** 日付だけの差（時刻は見ない）。同じ日なら0。 */
-export function daysUntilDate(deadline: string | null, now: Date): number | null {
-  if (deadline === null) return null;
-  const at = Date.parse(deadline);
-  if (Number.isNaN(at)) return null;
-  const day = 24 * 60 * 60 * 1000;
-  // 日本時間の日付で比べる。時刻の違いで1日ずれると、締切前日が当日に見える
-  const toJstDay = (ms: number) => Math.floor((ms + 9 * 60 * 60 * 1000) / day);
-  return toJstDay(at) - toJstDay(now.getTime());
-}
 
 /**
  * 参加を決めた案件の段取りを組み立てる。
@@ -149,7 +140,7 @@ export function buildRoadmap(input: RoadmapInput, now: Date = new Date()): Roadm
   return steps.map((step, i) => ({
     ...step,
     state: done[i] ? "済" : i === firstUndone ? "いま" : "これから",
-    daysLeft: daysUntilDate(step.deadline, now),
+    daysLeft: daysUntilDeadline(step.deadline, now),
   }));
 }
 
@@ -159,23 +150,6 @@ export function buildRoadmap(input: RoadmapInput, now: Date = new Date()): Roadm
  */
 export function currentStep(steps: RoadmapStep[]): RoadmapStep | null {
   return steps.find((s) => s.state === "いま") ?? null;
-}
-
-/**
- * 期限までの残りを日本語にする。
- * **期限が取れていないものは「未確認」**（推測した日付を出さない）。
- */
-export function deadlineLabel(daysLeft: number | null): string {
-  if (daysLeft === null) return "期限は未確認";
-  if (daysLeft < 0) return `${Math.abs(daysLeft)}日過ぎています`;
-  if (daysLeft === 0) return "今日まで";
-  if (daysLeft === 1) return "明日まで";
-  return `あと${daysLeft}日`;
-}
-
-/** 急ぎか（画面で色を変える）。期限が取れていなければ急ぎ扱いしない。 */
-export function isUrgent(daysLeft: number | null): boolean {
-  return daysLeft !== null && daysLeft <= 3;
 }
 
 // ── 入札の結果 ──────────────────────────────────────────────
@@ -224,7 +198,7 @@ export function canEnterResult(
 ): boolean {
   const at = input.bidOpenAt ?? input.submitDeadline;
   if (at === null) return true;
-  const days = daysUntilDate(at, now);
+  const days = daysUntilDeadline(at, now);
   return days === null || days <= 0;
 }
 

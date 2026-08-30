@@ -18,6 +18,7 @@ import {
   BROWSABLE_COLLECT_STATUSES,
   DEADLINE_WITHIN_OPTIONS,
   deadlineCutoff,
+  daysUntilDeadline,
   expandAreaFilter,
   hasActiveFilter,
   parseDeadlineWithin,
@@ -87,11 +88,9 @@ function agencyName(agencies: Agencies) {
   return Array.isArray(agencies) ? (agencies[0]?.name ?? "") : agencies.name;
 }
 
+/** 残り日数は全画面で共通の数え方（packages/domain/src/deadline.ts）。 */
 function daysLeft(iso: string | null): number | null {
-  if (!iso) return null;
-  const target = new Date(iso);
-  if (Number.isNaN(target.getTime())) return null;
-  return Math.ceil((target.getTime() - Date.now()) / 86_400_000);
+  return daysUntilDeadline(iso);
 }
 
 /** 金額は円単位のintegerで持っている（CLAUDE.md）。3桁区切りでそのまま出す。 */

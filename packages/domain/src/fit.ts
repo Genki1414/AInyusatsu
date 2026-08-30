@@ -8,6 +8,8 @@
 // 未充足（確定的な不一致）と未確認（値が取れていない）は区別する。未確認は0点かつ
 // reasonsNgに記録するだけで、対象外にはしない（「推測しない・隠さない」方針のため）。
 
+import { daysUntilDeadline } from "./deadline";
+
 export type FitTender = {
   agencyId: string;
   qualCategory: string | null; // 役務の提供等 / 物品の販売 等
@@ -64,7 +66,6 @@ export type FitResult = {
 };
 
 const GRADE_ORDER = ["A", "B", "C", "D"] as const;
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 function gradeRank(grade: string): number {
   const idx = GRADE_ORDER.indexOf(grade as (typeof GRADE_ORDER)[number]);
@@ -200,7 +201,9 @@ export function evaluateFit(
     if (Number.isNaN(deadline.getTime())) {
       reasonsNg.push("提出期限が未確認のため残日数を判定できません");
     } else {
-      const daysLeft = Math.ceil((deadline.getTime() - context.now.getTime()) / DAY_MS);
+      // 数え方は画面の表示と揃える（deadline.ts）。時刻で数字が変わると、
+      // 同じ案件が朝と夜で違う点数になる
+      const daysLeft = daysUntilDeadline(tender.submitDeadline, context.now) ?? 0;
       if (daysLeft < 0) {
         reasonsNg.push("提出期限を過ぎています");
       } else if (daysLeft < criteria.minDays) {
