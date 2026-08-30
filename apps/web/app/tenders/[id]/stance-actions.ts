@@ -117,12 +117,16 @@ export type RoadmapState = { error: string | null; message: string | null };
  * 見積依頼を送った等、記録で終わったと分かる段取りは buildRoadmap 側で済になる。
  * ここでチェックを外しても済のままなので、画面ではその欄を押せなくしてある。
  *
+ * 【画面はこの結果を待たない】
+ * 押した瞬間にチェックが付くよう、画面側では useOptimistic で先に印を付ける。
+ * ここが失敗したら、そのときに印を戻して理由を出す。
+ *
  * 【読んでから書く】
  * 配列の一部だけを更新できないため、いまの値を読んで足し引きして書き戻す。
  * 同じ案件を2つの画面で同時に触ると後勝ちになるが、段取りのチェックは
  * 本人が1人で押すものなので、ここでは競合を作り込まない。
  */
-export async function toggleRoadmapStep(_prev: RoadmapState, formData: FormData): Promise<RoadmapState> {
+export async function toggleRoadmapStep(formData: FormData): Promise<RoadmapState> {
   const { supabase, orgId } = await requireOrgContext();
 
   const tenderId = text(formData, "tender_id").trim();

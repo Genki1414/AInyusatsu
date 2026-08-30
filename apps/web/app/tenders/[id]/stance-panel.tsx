@@ -11,7 +11,7 @@
 // 参加と決めた案件にだけ、次に何をするかを出す。
 
 import { Check } from "lucide-react";
-import { useActionState, useState } from "react";
+import { useActionState, useOptimistic, useState } from "react";
 import Link from "next/link";
 import {
   amountLabel,
@@ -31,7 +31,6 @@ import {
   setTenderStance,
   toggleRoadmapStep,
   type BidResultState,
-  type RoadmapState,
   type StanceState,
 } from "./stance-actions";
 
@@ -39,7 +38,6 @@ import {
 // （apps/web/AGENTS.md「実際に踏んだ落とし穴」）
 const EMPTY: StanceState = { error: null, message: null };
 const EMPTY_RESULT: BidResultState = { error: null, message: null };
-const EMPTY_ROADMAP: RoadmapState = { error: null, message: null };
 
 const input =
   "rounded border border-slate-300 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300";
@@ -55,24 +53,29 @@ const TONE: Record<TenderStance, "green" | "amber" | "slate" | "rose"> = {
 /**
  * やったかどうかのチェック（ユーザー要望 2026-08-31）。
  *
- * 【本サービスが知っている段取りは押せなくする】
- * 見積依頼を送った等、記録で終わったと分かるものは、外させない。
- * 画面が記録に反することを書くと、どちらが本当か分からなくなる。
- * なぜ押せないかは、その場に文で出す（黙って効かないボタンにしない）。
+ * 【押した瞬間に印を付ける】
+ * サーバーの返事を待つと3秒ほど何も起きず、押せていないと思って押し直される
+ * （ユーザー報告 2026-08-31）。useOptimistic で先に印を付け、保存は裏で待つ。
+ * 失敗したらそのとき印を戻して理由を出す。
  *
- * 【JSが無くても動く】
- * チェックボックスの見た目のボタンをformで送る。onChangeで送る作りだと、
- * 読み込み中に押した分が消える。
+ * 【「いま」も一緒に動かす】
+ * チェックだけ付いて「いま」が前の行に残ると、どちらが本当か分からない。
+ * 印と「いま」は同じ材料から出す。
+ *
+ * 【期限の計算はやり直さない】
+ * 日付と残り日数はサーバーが出したものをそのまま使う。
+ * 画面側で数え直すと、日付が変わる時刻をまたいだときに server と client で
+ * 違う数字になる。
  */
 function StepCheck({
   step,
-  tenderId,
+  done,
+  onToggle,
 }: {
   step: RoadmapStep;
-  tenderId: string;
+  done: boolean;
+  onToggle: (formData: FormData) => void;
 }) {
-  const [state, formAction, pending] = useActionState(toggleRoadmapStep, EMPTY_ROADMAP);
-  const done = step.state === "済";
   const locked = step.lockedReason !== null;
 
   const box = (
@@ -83,12 +86,14 @@ function StepCheck({
             ? "border-emerald-600 bg-emerald-600/60"
             : "border-emerald-600 bg-emerald-600"
           : "border-slate-400 bg-white"
-      } ${pending ? "opacity-50" : ""}`}
+      }`}
     >
       {done && <Check className="h-3 w-3 text-white" strokeWidth={3} />}
     </span>
   );
 
+  // 本サービスの記録で終わったと分かるものは外させない。
+  // 画面が記録に反することを書くと、どちらが本当か分からなくなる
   if (locked) {
     return (
       <span className="flex h-4 w-4 items-center justify-center" title={step.lockedReason ?? undefined}>
@@ -98,8 +103,7 @@ function StepCheck({
   }
 
   return (
-    <form action={formAction} className="flex items-center">
-      <input type="hidden" name="tender_id" value={tenderId} />
+    <form action={onToggle} className="flex items-center">
       <input type="hidden" name="step" value={step.key} />
       <input type="hidden" name="checked" value={done ? "0" : "1"} />
       <button
@@ -107,12 +111,10 @@ function StepCheck({
         role="checkbox"
         aria-checked={done}
         aria-label={done ? `${step.label}（やった）を取り消す` : `${step.label}をやったことにする`}
-        disabled={pending}
         className="flex items-center rounded focus:outline-none focus:ring-2 focus:ring-blue-300"
       >
         {box}
       </button>
-      {state.error && <span className="sr-only">{state.error}</span>}
     </form>
   );
 }
@@ -125,17 +127,28 @@ function StepCheck({
  * 日付だけでは急ぎかどうかが一目で分からない。両方を出す。
  * **期限が取れていない段取りは日付を作らない**（推測しない）。
  */
-function Step({ step, tenderId }: { step: RoadmapStep; tenderId: string }) {
-  const current = step.state === "いま";
+function Step({
+  step,
+  tenderId,
+  done,
+  current,
+  onToggle,
+}: {
+  step: RoadmapStep;
+  tenderId: string;
+  done: boolean;
+  current: boolean;
+  onToggle: (formData: FormData) => void;
+}) {
   const date = deadlineDate(step.deadline);
   return (
     <li
       className={`flex flex-wrap items-baseline gap-2 border-b border-slate-100 py-1.5 last:border-0 ${
-        step.state === "これから" ? "text-slate-400" : ""
+        !done && !current ? "text-slate-400" : ""
       }`}
     >
       <span className="shrink-0 self-center">
-        <StepCheck step={step} tenderId={tenderId} />
+        <StepCheck step={step} done={done} onToggle={onToggle} />
       </span>
       <span className={`text-xs ${current ? "font-semibold text-slate-900" : "text-slate-700"}`}>{step.label}</span>
       {/* やらずに進める段取りだと分かるようにする。ここで止まらせない */}
@@ -146,9 +159,7 @@ function Step({ step, tenderId }: { step: RoadmapStep; tenderId: string }) {
         {remainingText(step.daysLeft)}
       </span>
       {/* なぜ押せないかを、その場に出す（黙って効かないチェックにしない） */}
-      {step.lockedReason !== null && (
-        <span className="text-xs text-slate-400">{step.lockedReason}</span>
-      )}
+      {step.lockedReason !== null && <span className="text-xs text-slate-400">{step.lockedReason}</span>}
       {current && <span className="w-full text-xs leading-relaxed text-slate-600">{step.note}</span>}
       {current && <StepLink label={step.label} tenderId={tenderId} />}
     </li>
@@ -172,6 +183,79 @@ function StepLink({ label, tenderId }: { label: string; tenderId: string }) {
     <Link href={`/tenders/${tenderId}?tab=${tab}`} className="text-xs text-blue-800 underline">
       この作業へ
     </Link>
+  );
+}
+
+/**
+ * 提出までの段取り。
+ *
+ * 【印と「いま」を1か所で決める】
+ * チェックを押した瞬間に印を付けたいが、印だけ動いて「いま」が前の行に残ると、
+ * どちらが本当か分からない。両方を同じ材料（optimistic なチェック集合）から出す。
+ *
+ * 【サーバーが出したものを数え直さない】
+ * 日付・残り日数・押せるかどうか（lockedReason）・任意かどうかは、
+ * サーバーが出した steps をそのまま使う。画面側で計算し直すと、
+ * 日付が変わる時刻をまたいだときに server と client で違う数字になる。
+ */
+function Roadmap({
+  tenderId,
+  steps,
+  checkedSteps,
+}: {
+  tenderId: string;
+  steps: RoadmapStep[];
+  /** 利用者が自分でチェックした段取りのキー（サーバーの保存値） */
+  checkedSteps: string[];
+}) {
+  const [error, setError] = useState<string | null>(null);
+  // 押した瞬間に印を付ける。保存が終わるとサーバーの値に置き換わる
+  const [checked, addOptimistic] = useOptimistic(
+    checkedSteps,
+    (current: string[], change: { key: string; checked: boolean }) =>
+      change.checked ? [...new Set([...current, change.key])] : current.filter((k) => k !== change.key),
+  );
+
+  async function toggle(formData: FormData) {
+    const key = String(formData.get("step") ?? "");
+    const next = formData.get("checked") === "1";
+    addOptimistic({ key, checked: next });
+    setError(null);
+    const result = await toggleRoadmapStep(formData);
+    // 失敗したら、印は自動でサーバーの値に戻る。なぜ戻ったかを出す
+    if (result.error !== null) setError(result.error);
+  }
+
+  // 本サービスの記録で終わったと分かるものは、チェックが無くても済
+  const isDone = (step: RoadmapStep) => step.lockedReason !== null || checked.includes(step.key);
+  // 「いま」は1つだけ。やらずに進める段取り（任意）では止めない
+  const currentKey = steps.find((step) => !step.optional && !isDone(step))?.key ?? null;
+
+  return (
+    <div className="mt-3 border-t border-slate-200 pt-2">
+      <p className="text-xs font-medium text-slate-700">提出までの段取り</p>
+      <ul className="mt-1">
+        {steps.map((step) => (
+          <Step
+            key={step.key}
+            step={step}
+            tenderId={tenderId}
+            done={isDone(step)}
+            current={step.key === currentKey}
+            onToggle={toggle}
+          />
+        ))}
+      </ul>
+      {error !== null && (
+        <p role="alert" className="mt-1 text-xs leading-relaxed text-rose-700">
+          {error}
+        </p>
+      )}
+      <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
+        期限は本サービスの解析結果です。
+        <span className="font-medium text-slate-700">必ず公告の原本でご確認ください。</span>
+      </p>
+    </div>
   );
 }
 
@@ -281,6 +365,7 @@ export function StancePanel({
   tenderId,
   stance,
   steps,
+  checkedSteps,
   result,
   resultAmount,
   resultMemo,
@@ -290,6 +375,8 @@ export function StancePanel({
   stance: TenderStance;
   /** 参加のときだけ中身が入る */
   steps: RoadmapStep[];
+  /** 利用者が自分でチェックした段取りのキー（サーバーの保存値） */
+  checkedSteps: string[];
   result: BidResult;
   resultAmount: number | null;
   resultMemo: string | null;
@@ -328,24 +415,15 @@ export function StancePanel({
       {state.message && <p className="mt-1 text-xs leading-relaxed text-emerald-800">{state.message}</p>}
 
       {stance === "参加" && steps.length > 0 && (
-        <div className="mt-3 border-t border-slate-200 pt-2">
-          <p className="text-xs font-medium text-slate-700">提出までの段取り</p>
-          <ul className="mt-1">
-            {steps.map((step) => (
-              <Step key={step.label} step={step} tenderId={tenderId} />
-            ))}
-          </ul>
-          <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
-            期限は本サービスの解析結果です。
-            <span className="font-medium text-slate-700">必ず公告の原本でご確認ください。</span>
-          </p>
+        <>
+          <Roadmap tenderId={tenderId} steps={steps} checkedSteps={checkedSteps} />
 
           {/* 開札の前に出すと、まだ分からないものを入れさせることになる。
               すでに入っている場合は、直せるように出したままにする */}
           {(canEnterResult || result !== "未入力") && (
             <BidResultForm tenderId={tenderId} result={result} amount={resultAmount} memo={resultMemo} />
           )}
-        </div>
+        </>
       )}
     </Panel>
   );

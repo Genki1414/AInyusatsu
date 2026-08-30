@@ -599,6 +599,7 @@ export default async function TenderDetailPage({
       <StancePanel
         tenderId={id}
         stance={stance}
+        checkedSteps={companyTender?.roadmap_done ?? []}
         steps={roadmap}
         result={isBidResult(companyTender?.bid_result) ? companyTender.bid_result : "未入力"}
         resultAmount={companyTender?.result_amount ?? null}
