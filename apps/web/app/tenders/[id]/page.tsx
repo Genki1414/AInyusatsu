@@ -23,6 +23,7 @@ import {
   MIN_PARTIAL_MATCH_LENGTH,
   REQUIRED_DOC_KINDS,
   stripFiscalYear,
+  suggestQuoteDueAt,
   summarizeDocuments,
   type ChecklistForm,
   type DocumentCheck,
@@ -549,25 +550,10 @@ export default async function TenderDetailPage({
 
   const pastAwards = tab === "fit" ? await loadPastAwards(supabase, tender.name) : [];
 
-  // 見積依頼の回答期限の目安：提出期限の3日前（datetime-local用にAsia/Tokyoのローカル表記へ）。
-  let suggestedDueAt: string | null = null;
-  if (tender.submit_deadline) {
-    const target = new Date(tender.submit_deadline);
-    if (!Number.isNaN(target.getTime())) {
-      target.setDate(target.getDate() - 3);
-      const parts = new Intl.DateTimeFormat("sv-SE", {
-        timeZone: "Asia/Tokyo",
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      }).formatToParts(target);
-      const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
-      suggestedDueAt = `${get("year")}-${get("month")}-${get("day")}T${get("hour")}:${get("minute")}`;
-    }
-  }
+  // 見積依頼の回答期限の目安。**過去の日付を入れない**（packages/domain/src/quote_due.ts）。
+  // 以前はここで「提出期限の3日前」を機械的に計算していて、提出期限が近い案件では
+  // 切れた期限のまま依頼が送られていた（2026-08-31 実機で確認）。
+  const dueSuggestion = suggestQuoteDueAt(tender.submit_deadline);
 
   // 【この案件をどうするか】と、参加を決めたあとの段取り。
   // 参加のときだけ段取りを組む（検討・保留の段階で急かしても、やることが決まっていない）
@@ -698,7 +684,8 @@ export default async function TenderDetailPage({
           sourceUrl={tender.source_url}
           lots={lots ?? []}
           partners={partners ?? []}
-          suggestedDueAt={suggestedDueAt}
+          suggestedDueAt={dueSuggestion.dueAt}
+          dueAtWarning={dueSuggestion.warning}
           officialStatus={officialStatus}
           recommendations={recommendations}
           outreachConnected={outreach.connected}
