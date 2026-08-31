@@ -595,8 +595,32 @@ export function RequestTab({
    */
   outreachSends: Record<string, string | null>;
 }) {
-  const boundAction = sendQuoteRequests.bind(null, tenderId);
-  const [state, formAction, pending] = useActionState(boundAction, initialState);
+  // 【useActionState を使わない】
+  // 送信が済んだら選択を消したいが、その判定を useEffect でやると
+  // 「効果の中で setState するな」に触れる。送信の関数の中で決める。
+  // 送信ボタンに「何社へ送るか」を出す。同じ会社を複数の業種で選んだ場合は、
+  // 業種ごとに1通ずつ送られるので、通数として数える。
+  const [selectedByTrade, setSelectedByTrade] = useState<Record<string, number>>({});
+  const [state, setState] = useState<SendQuoteRequestsState>(initialState);
+  const [pending, setPending] = useState(false);
+  // 送信が済むたびに増える。PartnerPicker の key にしてあるので、
+  // 増えるとその中のチェック（非制御）ごと作り直される
+  const [sendCount, setSendCount] = useState(0);
+
+  async function submit(formData: FormData) {
+    setPending(true);
+    try {
+      const result = await sendQuoteRequests(tenderId, state, formData);
+      setState(result);
+      // 1通でも送れたときだけ選択を消す。全部失敗したときは押し直せるように残す
+      if (result.summary !== null) {
+        setSendCount((n) => n + 1);
+        setSelectedByTrade({});
+      }
+    } finally {
+      setPending(false);
+    }
+  }
   const lotGroups = groupLotsByTrade(lots);
   // 数量表から切り出せなかった業種を、利用者が自分で足せるようにする
   const [manualTrades, setManualTrades] = useState<string[]>([]);
@@ -611,9 +635,7 @@ export function RequestTab({
     setManualTrades((prev) => (prev.includes(trade) ? prev.filter((t) => t !== trade) : [...prev, trade]));
   };
 
-  // 送信ボタンに「何社へ送るか」を出す。同じ会社を複数の業種で選んだ場合は、
-  // 業種ごとに1通ずつ送られるので、通数として数える。
-  const [selectedByTrade, setSelectedByTrade] = useState<Record<string, number>>({});
+
   const handleSelectedCountChange = useCallback((trade: string, count: number) => {
     setSelectedByTrade((prev) => (prev[trade] === count ? prev : { ...prev, [trade]: count }));
   }, []);
@@ -636,7 +658,7 @@ export function RequestTab({
   }
 
   return (
-    <form action={formAction} className="space-y-3">
+    <form action={submit} className="space-y-3">
         <Panel title="依頼する業種">
           {lotGroups.length === 0 ? (
             <p className="text-xs leading-relaxed text-slate-600">
@@ -739,6 +761,7 @@ export function RequestTab({
                   trade={group.trade}
                   candidates={candidates}
                   recommended={recommendedMap}
+                  key={`${group.trade}-${sendCount}`}
                   onSelectedCountChange={handleSelectedCountChange}
                 />
               )}

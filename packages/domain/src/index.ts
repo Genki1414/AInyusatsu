@@ -67,3 +67,4 @@ export * from "./sales_ai";
 export * from "./mailing_identity";
 export * from "./deadline";
 export * from "./quote_due";
+export * from "./quote_send_result";

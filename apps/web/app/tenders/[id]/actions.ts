@@ -2,7 +2,7 @@
 
 import { buildQuoteRequestEmail, groupLotsByTrade, replyToList } from "@ai-nyusatsu-bu/domain";
 import { inboundEmailDomain, sendEmail } from "@ai-nyusatsu-bu/notifications";
-import { validateQuoteDueAt } from "@ai-nyusatsu-bu/domain";
+import { quoteSendMessage, validateQuoteDueAt } from "@ai-nyusatsu-bu/domain";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { requireOrgContext } from "@/lib/auth";
@@ -117,15 +117,29 @@ export async function sendQuoteRequests(
 
   const tradeGroups = submittedTrades.map((trade) => ({ trade, lots: lotsByTrade.get(trade) ?? [] }));
 
-  let requestCount = 0;
   let sentCount = 0;
   const failed: string[] = [];
+  // すでに依頼済みで送らなかったもの。失敗とは分けて出す（送っていない理由が違う）
+  const skipped: string[] = [];
 
   for (const group of tradeGroups) {
     const partnerIds = formData
       .getAll(`${TRADE_FIELD_PREFIX}${group.trade}`)
       .filter((v): v is string => typeof v === "string");
     if (partnerIds.length === 0) continue;
+
+    // 【同じ会社へ2通目を送らない】
+    // 送信後も画面のチェックが残るため、もう一度押せてしまう（2026-08-31 実機で確認）。
+    // 協力会社から見ると、同じ案件の同じ業種で依頼が2通届き、どちらに答えるか分からない。
+    // 画面側でもチェックを消すが、ここでも止める。
+    const alreadyRequested = await loadRequestedPartnerIds(supabase, orgId, tenderId, group.trade);
+    const targets = partnerIds.filter((id) => {
+      if (!alreadyRequested.has(id)) return true;
+      const name = partnerById.get(id)?.name ?? "（不明な会社）";
+      skipped.push(`${name}`);
+      return false;
+    });
+    if (targets.length === 0) continue;
 
     // フォームのtextareaは常に値を持つ（プレビュー生成時のDUE_AT_PLACEHOLDERを含む）ため、
     // 「空かどうか」では編集の有無を判定できない。ユーザーが編集していてもいなくても、
@@ -170,9 +184,8 @@ export async function sendQuoteRequests(
       failed.push(`${group.trade}：依頼の保存に失敗しました（${requestError?.message ?? "不明なエラー"}）`);
       continue;
     }
-    requestCount++;
 
-    for (const partnerId of partnerIds) {
+    for (const partnerId of targets) {
       const partner = partnerById.get(partnerId);
       if (!partner) continue;
 
@@ -211,13 +224,36 @@ export async function sendQuoteRequests(
     }
   }
 
-  if (requestCount === 0) {
-    return { error: "送信先の協力会社を1社以上選択してください", summary: null };
-  }
+  // 文言の組み立ては packages/domain/src/quote_send_result.ts に置いてある
+  return quoteSendMessage({ sentCount, skipped, failed });
+}
 
-  const summary =
-    failed.length === 0
-      ? `${sentCount}社へ送信しました。返信は自動で取り込みます。`
-      : `${sentCount}社へ送信しました。一部失敗があります：${failed.join("／")}`;
-  return { error: null, summary };
+/**
+ * この案件・この業種で、すでに見積依頼を送った協力会社のID。
+ *
+ * quotes は org_id を持たず、quote_requests 経由で組織が決まる。
+ * 先に自組織の依頼を引いてから、その依頼にぶら下がる見積を数える。
+ */
+async function loadRequestedPartnerIds(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  tenderId: string,
+  trade: string,
+): Promise<Set<string>> {
+  const { data: requests } = await supabase
+    .from("quote_requests")
+    .select("id")
+    .eq("org_id", orgId)
+    .eq("tender_id", tenderId)
+    .eq("trade", trade)
+    .returns<{ id: string }[]>();
+  const requestIds = (requests ?? []).map((r) => r.id);
+  if (requestIds.length === 0) return new Set();
+
+  const { data: quotes } = await supabase
+    .from("quotes")
+    .select("partner_id")
+    .in("request_id", requestIds)
+    .returns<{ partner_id: string }[]>();
+  return new Set((quotes ?? []).map((q) => q.partner_id));
 }
