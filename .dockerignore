@@ -1,0 +1,13 @@
+# イメージに入れないもの（ビルドを速く、イメージを小さくする）
+node_modules
+**/node_modules
+.git
+.next
+**/.next
+.env
+.env.*
+**/.env
+**/.env.*
+supabase/.temp
+docs
+*.log
