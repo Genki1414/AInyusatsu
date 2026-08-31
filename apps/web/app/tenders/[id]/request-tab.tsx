@@ -560,6 +560,7 @@ export function RequestTab({
   lots,
   partners,
   suggestedDueAt,
+  dueAtWarning,
   officialStatus,
   recommendations,
   outreachConnected,
@@ -579,6 +580,8 @@ export function RequestTab({
   lots: QuoteRequestLot[];
   partners: RequestTabPartner[];
   suggestedDueAt: string | null;
+  /** 期限が短い・入れられない理由。無ければ null */
+  dueAtWarning: string | null;
   officialStatus: "未取得" | "申請中" | "取得済";
   recommendations: Record<string, PartnerRecommendationResult | null>;
   /** 営業AIの接続そのものがあるか。無ければ業種以前に使えない */
@@ -776,6 +779,12 @@ export function RequestTab({
             <input type="datetime-local" name="due_at" defaultValue={suggestedDueAt ?? ""} required className={input} />
             <span className="text-slate-500">期限の24時間前に未回答の会社へ自動で催促します（1社につき1回だけ）。</span>
           </label>
+          {/* 【短くしたこと・入れられないことを隠さない】
+              以前は提出期限の3日前を黙って入れていて、それが過去でもそのまま送れた
+              （2026-08-31 実機で確認）。詰めた理由は必ず書く */}
+          {dueAtWarning !== null && (
+            <p className="mt-1 text-xs leading-relaxed text-amber-800">{dueAtWarning}</p>
+          )}
         </Panel>
 
         {state.error && (

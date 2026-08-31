@@ -2,6 +2,7 @@
 
 import { buildQuoteRequestEmail, groupLotsByTrade, replyToList } from "@ai-nyusatsu-bu/domain";
 import { inboundEmailDomain, sendEmail } from "@ai-nyusatsu-bu/notifications";
+import { validateQuoteDueAt } from "@ai-nyusatsu-bu/domain";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { requireOrgContext } from "@/lib/auth";
@@ -56,6 +57,12 @@ export async function sendQuoteRequests(
   const dueAtIso = toJstIso(dueAtParsed.data);
   if (!dueAtIso) {
     return { error: "回答期限の形式が正しくありません", summary: null };
+  }
+  // 画面の初期値を直して送れてしまう。切れた期限の依頼は協力会社にまともに扱われないので、
+  // ここでも止める（2026-08-31 実機で、8/29が期限の依頼が8/31に送られた）
+  const dueAtError = validateQuoteDueAt(dueAtParsed.data);
+  if (dueAtError) {
+    return { error: dueAtError, summary: null };
   }
   const dueAtLabel = new Date(dueAtIso).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
 
