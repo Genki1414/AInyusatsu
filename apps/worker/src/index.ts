@@ -106,8 +106,21 @@ async function main(): Promise<void> {
     });
 
     // 同じ名前で登録し直すと上書きされるので、起動のたびに呼んで構わない。
-    await boss.schedule(job.name, job.cron, null, { tz: TIMEZONE });
-    console.log(`[worker] 登録: ${job.name}  ${job.cron}（${TIMEZONE}）  ${job.description}`);
+    //
+    // 【expireInSeconds を必ず渡す】
+    // 既定は900秒（15分）で、それを過ぎるとpg-bossは**まだ動いているジョブ**を
+    // 落ちたとみなしてやり直す。巡回は40〜50分かかるため、既定のままだと
+    // 15分おきに二重・三重に走り、Chromiumが積み上がってコンテナごと落ちた
+    // （2026-09-03 実機で確認）。
+    await boss.schedule(job.name, job.cron, null, {
+      tz: TIMEZONE,
+      expireInSeconds: job.expireInSeconds,
+      retryLimit: job.retryLimit,
+    });
+    console.log(
+      `[worker] 登録: ${job.name}  ${job.cron}（${TIMEZONE}）  ` +
+        `最長${Math.round(job.expireInSeconds / 60)}分／やり直し${job.retryLimit}回  ${job.description}`,
+    );
   }
 
   // 止めたジョブのスケジュールが残っていると、DISABLED_JOBS を設定しても走り続ける。
