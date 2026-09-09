@@ -1,0 +1,8 @@
+<!-- 運営（本部）画面のタブアイコン。
+     顧客画面（favicon.ico）と色を変えて、タブが並んだときに見分けられるようにする。
+     16pxだと字は読めないので、**色で分ける**のが本体。 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="6" fill="#881337"/>
+  <text x="16" y="23" font-size="20" font-family="sans-serif" font-weight="700"
+        text-anchor="middle" fill="#ffffff">本</text>
+</svg>
