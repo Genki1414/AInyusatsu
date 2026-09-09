@@ -87,6 +87,17 @@ export const FAILURE_ACTIONS: Record<string, FailureAction> = {
     priority: 3,
     needsHuman: true,
   },
+  // 【LAYOUT_CHANGED と分ける理由】
+  // 2026-09-01〜09-03 に34件が LAYOUT_CHANGED として積まれたが、中身はすべて
+  // Playwright の30秒タイムアウトだった。原因は巡回が三重に走ってメモリを
+  // 食い合っていたこと（#152で修正）で、セレクタは壊れていなかった。
+  // 「セレクタを直せ」と出し続けると、本当に直すべきものが埋もれる。
+  TIMEOUT: {
+    label: "時間内に応答が無かった（相手先が遅い・こちらが重い）",
+    action: "自動で次回に回る。同じ案件で3回以上続くなら、そのときにセレクタを疑う",
+    priority: 4,
+    needsHuman: false,
+  },
   RATE_LIMITED: {
     label: "相手先の制限に当たった",
     action: "自動で次回に回る。続くようなら間隔を広げる",
