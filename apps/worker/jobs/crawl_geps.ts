@@ -10,6 +10,7 @@
 // tenders_code_key制約違反を起こすことが実機で判明した。1日1回の巡回に修正済み。
 
 import { createHash } from "node:crypto";
+import { classifyCrawlFailure } from "@ai-nyusatsu-bu/domain";
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
 import { recordAgencySuccess } from "./coverage_check";
 
@@ -290,13 +291,19 @@ export async function runDailyGepsCrawl(dateIso: string): Promise<CrawlDateSumma
         });
       } else if (docResult?.status === "failed") {
         // 取得に失敗した。機関が出しているかどうかは判断できないので確認済みにはしない。
+        //
+        // 【原因ごとにコードを分ける】
+        // 以前はすべて LAYOUT_CHANGED にしていたが、2026-09-01〜09-03 に積まれた
+        // 34件は中身がすべて30秒のタイムアウトで、セレクタは壊れていなかった。
+        // 「セレクタを直せ」と出し続けると、本当に直すべきものが埋もれる。
+        const code = classifyCrawlFailure(docResult.message);
         await recordDocumentCheck(client, tenderId, {
-          documents_failure_code: "LAYOUT_CHANGED",
+          documents_failure_code: code,
           documents_failure_reason: docResult.message.slice(0, 500),
         });
         await client.from("crawl_errors").insert({
           run_id: run.id,
-          code: "LAYOUT_CHANGED",
+          code,
           message: `資料のダウンロードに失敗しました: ${docResult.message}`,
           payload: { dateIso, procurementNo: tender.procurementNo },
         });
@@ -312,10 +319,11 @@ export async function runDailyGepsCrawl(dateIso: string): Promise<CrawlDateSumma
     status = truncated ? "truncated" : "completed";
   } catch (err) {
     status = "failed";
+    const message = err instanceof Error ? err.message : String(err);
     await client.from("crawl_errors").insert({
       run_id: run.id,
-      code: "LAYOUT_CHANGED",
-      message: err instanceof Error ? err.message : String(err),
+      code: classifyCrawlFailure(message),
+      message,
       payload: { dateIso },
     });
     throw err;
