@@ -38,30 +38,60 @@ export type ScheduledJob = {
   cron: string;
   /** 何をするジョブか（起動時のログに出す） */
   description: string;
+  /**
+   * このジョブが終わるまでに見込む最大時間（秒）。
+   *
+   * 【必ず実測より長くする】
+   * pg-boss はこの時間を過ぎたジョブを「落ちた」とみなし、**まだ動いているのに**
+   * やり直しを始める。既定は900秒（15分）。
+   * 巡回は40〜50分かかるため、既定のままだと15分おきに二重・三重に走り、
+   * Chromiumが積み上がってコンテナごと落ちた（2026-09-03 実機で確認）。
+   *
+   * 次の実行までの間隔より短くすること。長すぎると、詰まったときに次の回が始まらない。
+   */
+  expireInSeconds: number;
+  /**
+   * 失敗したときにやり直す回数。
+   *
+   * 【長いジョブは0にする】
+   * やり直しは「前の実行が終わっている」ことを前提にしている。
+   * 長いジョブでやり直すと、上に書いた二重実行そのものになる。
+   * 定期実行のジョブは、次の回が自然なやり直しになるので0で困らない。
+   */
+  retryLimit: number;
 };
 
+// よく使う長さ（秒）。数字を直に書くと、何を根拠にした値か分からなくなる
+const MINUTES = 60;
+const HOURS = 60 * MINUTES;
+
 export const SCHEDULE: readonly ScheduledJob[] = [
-  { name: "kkj-sync", cron: "0 4,12 * * *", description: "官公需情報ポータルAPIで新規案件を検知する" },
-  { name: "crawl-geps", cron: "30 4,12 * * *", description: "調達ポータルを巡回し、資料を取得する" },
-  { name: "extract-text", cron: "0 8,16 * * *", description: "取得した資料からテキストを抽出する（必要ならOCR）" },
-  { name: "analyze-pending", cron: "0 9,17 * * *", description: "解析待ちの案件をAI解析する" },
+  // API呼び出しだけ。実測4秒
+  { name: "kkj-sync", cron: "0 4,12 * * *", description: "官公需情報ポータルAPIで新規案件を検知する", expireInSeconds: 15 * MINUTES, retryLimit: 2 },
+  // 実測40〜50分。200件なら2〜3時間。次の回まで8時間あるので6時間まで見る
+  { name: "crawl-geps", cron: "30 4,12 * * *", description: "調達ポータルを巡回し、資料を取得する", expireInSeconds: 6 * HOURS, retryLimit: 0 },
+  // OCRが要る資料があると長い
+  { name: "extract-text", cron: "0 8,16 * * *", description: "取得した資料からテキストを抽出する（必要ならOCR）", expireInSeconds: 4 * HOURS, retryLimit: 0 },
+  // 1回50件のAI解析。やり直すと費用が二重にかかるので retryLimit は必ず0
+  { name: "analyze-pending", cron: "0 9,17 * * *", description: "解析待ちの案件をAI解析する", expireInSeconds: 4 * HOURS, retryLimit: 0 },
   // 仕様書 §5 の close は「毎日 00:30」。ここでは公開も兼ねるため、提案（11:00 / 19:00）の
   // 直前にも走らせる。解析が終わった案件をその日のうちに提案へ乗せるため。
-  { name: "tender-lifecycle", cron: "30 0,10,18 * * *", description: "解析完了を公開中にし、提出期限を過ぎた案件を終了にする" },
-  { name: "match-tenders", cron: "0 11,19 * * *", description: "条件セットごとに採点し、提案を作る" },
+  { name: "tender-lifecycle", cron: "30 0,10,18 * * *", description: "解析完了を公開中にし、提出期限を過ぎた案件を終了にする", expireInSeconds: 15 * MINUTES, retryLimit: 2 },
+  { name: "match-tenders", cron: "0 11,19 * * *", description: "条件セットごとに採点し、提案を作る", expireInSeconds: 1 * HOURS, retryLimit: 1 },
   // 毎朝1通のダイジェスト（実装仕様書 §8）。前日の提案（11:00 / 19:00）をまとめて知らせる。
   // その日の11:00ぶんは翌朝に回る。急ぎの期限は即時通知で拾う想定（未実装）。
-  { name: "notify-digest", cron: "0 7 * * *", description: "新着の提案・近い期限・未回答の見積を1通にまとめて送る" },
+  { name: "notify-digest", cron: "0 7 * * *", description: "新着の提案・近い期限・未回答の見積を1通にまとめて送る", expireInSeconds: 15 * MINUTES, retryLimit: 2 },
   // 即時通知（実装仕様書 §8）。期限48時間前と、届いた見積の返信を知らせる。
   // 毎時走るが、1件につき1回しか送らない（notification_log の dedupe_key で記録する）。
-  { name: "notify-instant", cron: "20 * * * *", description: "期限48時間前と、届いた見積の返信を知らせる" },
-  { name: "coverage-check", cron: "0 6 * * *", description: "機関ごとに、想定頻度に対して取得できているかを確かめる" },
+  { name: "notify-instant", cron: "20 * * * *", description: "期限48時間前と、届いた見積の返信を知らせる", expireInSeconds: 15 * MINUTES, retryLimit: 2 },
+  { name: "coverage-check", cron: "0 6 * * *", description: "機関ごとに、想定頻度に対して取得できているかを確かめる", expireInSeconds: 15 * MINUTES, retryLimit: 2 },
   // 本部へ毎朝1通。異常が無くても送る（届かない日があること自体を異常の合図にする）。
   // coverage-check のあとに置いて、その日の判定結果を載せる
-  { name: "notify-ops", cron: "20 6 * * *", description: "本部へ、収集の失敗・欠測・ジョブの失敗を知らせる" },
-  { name: "remind-quotes", cron: "0 * * * *", description: "回答期限24時間前の未回答へ催促する" },
-  { name: "import-awards", cron: "0 3 1 * *", description: "落札実績オープンデータの差分を取り込む（月次）" },
-  { name: "refresh-market-rates", cron: "30 3 1 * *", description: "落札率の集計を作り直す（月次）" },
+  { name: "notify-ops", cron: "20 6 * * *", description: "本部へ、収集の失敗・欠測・ジョブの失敗を知らせる", expireInSeconds: 15 * MINUTES, retryLimit: 2 },
+  { name: "remind-quotes", cron: "0 * * * *", description: "回答期限24時間前の未回答へ催促する", expireInSeconds: 15 * MINUTES, retryLimit: 2 },
+  // 月次。CSVの取得と取り込みで時間がかかる
+  { name: "import-awards", cron: "0 3 1 * *", description: "落札実績オープンデータの差分を取り込む（月次）", expireInSeconds: 2 * HOURS, retryLimit: 1 },
+  { name: "refresh-market-rates", cron: "30 3 1 * *", description: "落札率の集計を作り直す（月次）", expireInSeconds: 2 * HOURS, retryLimit: 1 },
 ] as const;
 
 /**

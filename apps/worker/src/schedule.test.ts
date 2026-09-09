@@ -16,6 +16,48 @@ describe("SCHEDULE", () => {
     expect(SCHEDULE.every((j) => j.description.length > 0)).toBe(true);
   });
 
+  // 【この節が守っているもの】
+  // pg-boss の expireInSeconds の既定は900秒（15分）。それを過ぎると、
+  // **まだ動いているジョブ**を落ちたとみなしてやり直す。
+  // 巡回は40〜50分かかるため、既定のままだと15分おきに二重・三重に走り、
+  // Chromiumが積み上がってコンテナごと落ちた（2026-09-03 実機で確認）。
+  describe("実行時間の見込み", () => {
+    it("すべてのジョブが pg-boss の既定（15分）以上を明示している", () => {
+      for (const job of SCHEDULE) {
+        expect(job.expireInSeconds, `${job.name}`).toBeGreaterThanOrEqual(15 * 60);
+      }
+    });
+
+    it("pg-boss の上限（24時間）を超えない", () => {
+      for (const job of SCHEDULE) {
+        expect(job.expireInSeconds, `${job.name}`).toBeLessThan(24 * 60 * 60);
+      }
+    });
+
+    it("巡回・抽出・解析は、実測より十分長く見ておく（15分では足りない）", () => {
+      for (const name of ["crawl-geps", "extract-text", "analyze-pending"] as const) {
+        const job = SCHEDULE.find((j) => j.name === name)!;
+        expect(job.expireInSeconds, name).toBeGreaterThanOrEqual(4 * 60 * 60);
+      }
+    });
+
+    it("長いジョブはやり直さない（やり直しが二重実行そのものになる）", () => {
+      for (const name of ["crawl-geps", "extract-text", "analyze-pending"] as const) {
+        expect(SCHEDULE.find((j) => j.name === name)!.retryLimit, name).toBe(0);
+      }
+    });
+
+    it("AI解析はやり直さない（費用が二重にかかる）", () => {
+      expect(SCHEDULE.find((j) => j.name === "analyze-pending")!.retryLimit).toBe(0);
+    });
+
+    it("やり直し回数に負の値を置かない", () => {
+      for (const job of SCHEDULE) {
+        expect(job.retryLimit, `${job.name}`).toBeGreaterThanOrEqual(0);
+      }
+    });
+  });
+
   it("時刻は日本時間で解釈する", () => {
     expect(TIMEZONE).toBe("Asia/Tokyo");
   });
