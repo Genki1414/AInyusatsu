@@ -65,6 +65,12 @@ const HANDLERS: Record<JobName, () => Promise<unknown>> = {
   "refresh-market-rates": () => refreshMarketRates(),
 };
 
+/**
+ * 稼働中であることをログに出す間隔（分）。
+ * Railwayのログは15分単位で見ることが多いので、それより短くする。
+ */
+const HEARTBEAT_MINUTES = 10;
+
 function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`${name} が設定されていません。ワーカーを起動できません`);
@@ -138,6 +144,19 @@ async function main(): Promise<void> {
   process.on("SIGINT", () => void shutdown("SIGINT"));
 
   console.log(`[worker] ${jobs.length}件のジョブを登録しました。待機します`);
+
+  // 【プロセスを自分で生かし続ける】
+  // main() はここまで走ると戻る。あとは pg-boss の内部タイマーが
+  // イベントループを掴んでいる前提だったが、それに頼るのは危ない。
+  // 掴むものが無くなるとNodeは**正常終了（exit 0）**し、Railwayはそれを
+  // `Completed` として扱う。restartPolicy は ON_FAILURE なので再起動もしない。
+  // 異常終了と違って誰にも気づかれないまま止まる（2026-09-03 の停止と同じ形）。
+  //
+  // 一定間隔で稼働中とログに出す。生かし続ける役目と、
+  // 「まだ動いているか」をログで確かめる役目を兼ねる。
+  setInterval(() => {
+    console.log(`[worker] 稼働中（次のジョブを待っています）`);
+  }, HEARTBEAT_MINUTES * 60 * 1000);
 }
 
 main().catch((err) => {
