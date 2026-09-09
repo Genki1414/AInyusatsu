@@ -8,8 +8,14 @@
 // 運営画面は**全社のデータが見える**。顧客画面と同じ見た目だと、
 // どちらを開いているか分からないまま操作することになる。
 // タブ（題名・アイコン）と画面上部の帯を、顧客画面とは別の色にする。
+//
+// 【3画面で同じ枠を使う】（ユーザー要望 2026-09-09）
+// 帯・タブ・ログイン中のアドレスは、これまで各ページが自前で描いていた。
+// 同じものを3か所に書くと、直すときに1か所だけ直し忘れる。ここにまとめる。
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { requireAdmin } from "@/lib/admin";
+import { AdminNav } from "./admin-nav";
 
 export const metadata: Metadata = {
   // タブに出る題名。顧客画面は「AI入札部」なので、頭に「本部」を付けて区別する。
@@ -17,13 +23,17 @@ export const metadata: Metadata = {
   title: "本部｜AI入札部",
 };
 
-export default function AdminLayout({ children }: { children: ReactNode }) {
+export default async function AdminLayout({ children }: { children: ReactNode }) {
+  // 権限の確認は各ページでも行う。ここで確かめるのは、
+  // 帯にログイン中のアドレスを出すため（誰として見ているかを常に見せる）
+  const { email } = await requireAdmin();
+
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800">
       {/* 顧客画面のヘッダーは bg-slate-800（濃い灰）。ここは臙脂にして、
           スクリーンショットや画面共有でも取り違えないようにする */}
       <header className="bg-rose-900 text-rose-50">
-        <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-2 px-4 py-2">
+        <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-2 px-4 py-2.5">
           <span className="grid h-6 w-6 place-items-center rounded bg-white text-xs font-bold text-rose-900">
             本
           </span>
@@ -33,9 +43,14 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
           <span className="rounded border border-rose-700 px-1.5 py-0.5 text-xs text-rose-200">
             全社のデータが見えます
           </span>
+          {/* 誰として見ているか。運営が複数になったとき、操作の記録と照らせる */}
+          <span className="ml-auto truncate text-xs text-rose-200">{email}</span>
         </div>
       </header>
-      {children}
+
+      <AdminNav />
+
+      <main className="mx-auto max-w-5xl space-y-4 px-4 py-5">{children}</main>
     </div>
   );
 }

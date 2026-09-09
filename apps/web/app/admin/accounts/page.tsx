@@ -17,7 +17,6 @@
 // 見え、実際にそれで同じ会社の組織を二重に作る事故が起きた。
 // ログインは行を開いたときに出す。停止・再開は会社単位（org_access）。
 
-import Link from "next/link";
 import { additionalLoginMonthlyYen } from "@ai-nyusatsu-bu/domain";
 import { Panel } from "@/components/ui";
 import { requireAdmin } from "@/lib/admin";
@@ -50,7 +49,7 @@ function jst(at: string | null): string {
 }
 
 export default async function AdminAccountsPage() {
-  const { email, admin } = await requireAdmin();
+  const { admin } = await requireAdmin();
 
   const [orgs, users, access, pendingRows] = await Promise.all([
     admin.from("organizations").select("id, name, created_at").order("created_at", { ascending: false }).returns<OrgRow[]>(),
@@ -100,14 +99,7 @@ export default async function AdminAccountsPage() {
   const activeCount = rows.filter((row) => row.status === "利用中").length;
 
   return (
-    <div className="mx-auto max-w-4xl space-y-3 p-4">
-      <header className="flex flex-wrap items-center gap-2">
-        <h1 className="text-sm font-semibold text-slate-800">アカウント</h1>
-        <Link href="/admin" className="text-xs text-slate-500 underline hover:text-slate-700">
-          運営トップ
-        </Link>
-        <span className="ml-auto text-xs text-slate-400">{email}</span>
-      </header>
+    <>
 
       {loadError && (
         <div className="rounded border border-rose-200 bg-rose-50 px-3 py-2">
@@ -152,6 +144,6 @@ export default async function AdminAccountsPage() {
           </div>
         )}
       </Panel>
-    </div>
+    </>
   );
 }

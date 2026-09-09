@@ -72,7 +72,7 @@ function jst(at: string | null): string {
 }
 
 export default async function AdminPage() {
-  const { email, admin } = await requireAdmin();
+  const { admin } = await requireAdmin();
   const now = new Date();
 
   const [issues, access, coverage, heartbeat] = await Promise.all([
@@ -95,17 +95,7 @@ export default async function AdminPage() {
   const coverageResult = evaluateCoverage(coverage, now);
 
   return (
-    <div className="mx-auto max-w-5xl space-y-3 p-4">
-      <header className="flex flex-wrap items-center gap-2">
-        <h1 className="text-sm font-semibold text-slate-800">運営</h1>
-        <Link href="/admin/accounts" className="text-xs text-slate-500 underline hover:text-slate-700">
-          アカウント
-        </Link>
-        <Link href="/admin/sales-ai" className="text-xs text-slate-500 underline hover:text-slate-700">
-          営業AI連携
-        </Link>
-        <span className="ml-auto text-xs text-slate-400">{email}</span>
-      </header>
+    <>
 
       <Panel
         title="ワーカーの稼働"
@@ -240,7 +230,7 @@ export default async function AdminPage() {
           発行・停止・再開は <Link href="/admin/accounts" className="underline">アカウント</Link> から行う。
         </p>
       </Panel>
-    </div>
+    </>
   );
 }
 
