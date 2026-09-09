@@ -33,7 +33,7 @@ type ConnRow = {
 };
 
 export default async function AdminSalesAiPage() {
-  const { email, admin } = await requireAdmin();
+  const { admin } = await requireAdmin();
 
   const [orgs, conns] = await Promise.all([
     admin.from("organizations").select("id, name").order("created_at", { ascending: false }).returns<OrgRow[]>(),
@@ -68,14 +68,7 @@ export default async function AdminSalesAiPage() {
   const connectedCount = rows.filter((row) => row.tenantId !== null).length;
 
   return (
-    <div className="mx-auto max-w-4xl space-y-3 p-4">
-      <header className="flex flex-wrap items-center gap-2">
-        <h1 className="text-sm font-semibold text-slate-800">営業AI連携</h1>
-        <Link href="/admin" className="text-xs text-slate-500 underline hover:text-slate-700">
-          運営トップ
-        </Link>
-        <span className="ml-auto text-xs text-slate-400">{email}</span>
-      </header>
+    <>
 
       <p className="text-xs leading-relaxed text-slate-500">
         AI入札部の契約者を営業AI（ヒラケル）のテナントとして登録する（本部の作業）。
@@ -105,6 +98,6 @@ export default async function AdminSalesAiPage() {
           </div>
         )}
       </Panel>
-    </div>
+    </>
   );
 }
