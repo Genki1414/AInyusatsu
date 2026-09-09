@@ -14,11 +14,13 @@
 import Link from "next/link";
 import {
   accessSummary,
+  elapsedLabel,
   evaluateCoverage,
   groupCollectionIssues,
   LAYOUT_CHANGED_ALERT_HOURS,
   stalledIssues,
   suspendedOrgs,
+  workerHealth,
   type CollectionIssue,
   type CoverageAgency,
   type OrgAccessRow,
@@ -73,11 +75,18 @@ export default async function AdminPage() {
   const { email, admin } = await requireAdmin();
   const now = new Date();
 
-  const [issues, access, coverage] = await Promise.all([
+  const [issues, access, coverage, heartbeat] = await Promise.all([
     loadIssues(admin),
     loadAccess(admin),
     loadCoverage(admin),
+    loadHeartbeat(admin),
   ]);
+
+  // 【いちばん上に出す】
+  // 2026-09-03 にワーカーが落ち、6日間だれも気づかなかった。
+  // 収集キューが空でも、それは「問題が無い」ではなく「何も動いていない」かもしれない。
+  // 下の数字を読む前に、そもそも動いているかが分かる場所に置く。
+  const worker = workerHealth(heartbeat?.beat_at ?? null, now);
 
   const groups = groupCollectionIssues(issues);
   const stalled = stalledIssues(groups, now);
@@ -97,6 +106,30 @@ export default async function AdminPage() {
         </Link>
         <span className="ml-auto text-xs text-slate-400">{email}</span>
       </header>
+
+      <Panel
+        title="ワーカーの稼働"
+        right={
+          <Pill tone={worker.state === "正常" ? "green" : worker.state === "遅れています" ? "amber" : "rose"}>
+            {worker.state}
+          </Pill>
+        }
+      >
+        <div className="flex flex-wrap items-baseline gap-2">
+          <span className="text-xs text-slate-700">
+            最終稼働：<span className="font-medium">{elapsedLabel(worker.minutesAgo)}</span>
+          </span>
+          {heartbeat?.jobs != null && <span className="text-xs text-slate-500">登録ジョブ {heartbeat.jobs}件</span>}
+        </div>
+        <p className="mt-1 text-xs leading-relaxed text-slate-600">{worker.detail}</p>
+        {/* 【収集キューが空でも安心しない】
+            ワーカーが止まっていれば、失敗も記録されない。空に見えるだけ */}
+        {worker.state !== "正常" && (
+          <p className="mt-1 text-xs leading-relaxed text-rose-800">
+            この状態では、下の「収集キュー」が空でも安心できません。失敗そのものが記録されないためです。
+          </p>
+        )}
+      </Panel>
 
       {stalled.length > 0 && (
         <div className="rounded border border-rose-200 bg-rose-50 px-3 py-2">
@@ -299,4 +332,26 @@ async function loadCoverage(admin: Admin): Promise<CoverageAgency[]> {
       .map((src) => src.connector)
       .filter((connector): connector is string => typeof connector === "string"),
   }));
+}
+
+/**
+ * ワーカーが生きている合図。1行しかない。
+ *
+ * 読めなくても運営画面は開けるようにする（握りつぶさずログには残す）。
+ * ここで例外を投げると、ワーカーが止まっているときに限って
+ * 運営画面まで開けなくなる。いちばん見たいときに見られなくなる。
+ */
+async function loadHeartbeat(
+  admin: Awaited<ReturnType<typeof requireAdmin>>["admin"],
+): Promise<{ beat_at: string; jobs: number } | null> {
+  const { data, error } = await admin
+    .from("worker_heartbeats")
+    .select("beat_at, jobs")
+    .eq("id", "worker")
+    .maybeSingle<{ beat_at: string; jobs: number }>();
+  if (error) {
+    console.error("[admin] ワーカーの稼働を読めませんでした", error);
+    return null;
+  }
+  return data ?? null;
 }

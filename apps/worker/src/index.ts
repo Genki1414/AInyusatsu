@@ -22,6 +22,7 @@
 //   DISABLED_JOBS             止めたいジョブ名をカンマ区切りで（例: analyze-pending）
 
 import { PgBoss } from "pg-boss";
+import { createServiceClient } from "@ai-nyusatsu-bu/db";
 import { runKkjSync } from "../jobs/kkj_sync";
 import { runDailyGepsCrawl } from "../jobs/crawl_geps";
 import { runExtractPendingDocuments } from "../jobs/extract_document_text";
@@ -66,10 +67,29 @@ const HANDLERS: Record<JobName, () => Promise<unknown>> = {
 };
 
 /**
- * 稼働中であることをログに出す間隔（分）。
- * Railwayのログは15分単位で見ることが多いので、それより短くする。
+ * 稼働中であることを知らせる間隔（分）。
+ * packages/domain/src/worker_health.ts の HEARTBEAT_MINUTES と必ず揃える。
+ * ずれると、運営画面が正常なワーカーを「止まっている」と出す。
  */
 const HEARTBEAT_MINUTES = 10;
+
+/**
+ * 生きている合図をDBに書く。運営画面はこれを見て最終稼働を出す。
+ *
+ * 【失敗しても止めない】
+ * 合図が書けないことと、ジョブが動かないことは別。
+ * ここで例外を投げるとワーカーごと落ちるので、ログに残して続ける。
+ */
+async function writeHeartbeat(startedAt: string, jobs: number): Promise<void> {
+  try {
+    const { error } = await createServiceClient()
+      .from("worker_heartbeats")
+      .upsert({ id: "worker", beat_at: new Date().toISOString(), started_at: startedAt, jobs });
+    if (error) console.warn(`[worker] 稼働の記録に失敗しました（動作は続けます）: ${error.message}`);
+  } catch (err) {
+    console.warn("[worker] 稼働の記録に失敗しました（動作は続けます）", err);
+  }
+}
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -152,10 +172,16 @@ async function main(): Promise<void> {
   // `Completed` として扱う。restartPolicy は ON_FAILURE なので再起動もしない。
   // 異常終了と違って誰にも気づかれないまま止まる（2026-09-03 の停止と同じ形）。
   //
-  // 一定間隔で稼働中とログに出す。生かし続ける役目と、
-  // 「まだ動いているか」をログで確かめる役目を兼ねる。
+  // 一定間隔で稼働中を知らせる。プロセスを生かし続ける役目と、
+  // 「まだ動いているか」を外から確かめられるようにする役目を兼ねる。
+  //
+  // ログだけだと、毎回Railwayを開きに行くことになって続かない。
+  // DBにも書いて、いつも見る運営画面に出す。
+  const startedAt = new Date().toISOString();
+  await writeHeartbeat(startedAt, jobs.length);
   setInterval(() => {
     console.log(`[worker] 稼働中（次のジョブを待っています）`);
+    void writeHeartbeat(startedAt, jobs.length);
   }, HEARTBEAT_MINUTES * 60 * 1000);
 }
 
