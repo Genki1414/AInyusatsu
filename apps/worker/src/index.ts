@@ -18,6 +18,11 @@
 //   APP_URL                   協力会社の回答ページのURL（旧 NEXT_PUBLIC_APP_URL も可）
 //   GEPS_CONTACT_*            調達ポータルの資料取得
 //   ANALYZE_DAILY_LIMIT       1回の解析で処理する件数の上限（既定50）
+//   AI_DAILY_BUDGET_YEN       日本時間1日あたりのAI原価上限（既定7,500円、0で無制限）
+//   AI_MONTHLY_BUDGET_YEN     日本時間1か月あたりのAI原価上限（既定200,000円、0で無制限）
+//   ANALYZE_MAX_NOTICE_AGE_DAYS 公告日が何日前までを解析するか（既定90日、0で無効）
+//   ANALYZE_BATCH_TENDER_LIMIT  1バッチへ入れる案件数（既定100）
+//   ANALYZE_URGENT_HOURS        この時間以内の期限は同期解析（既定72時間）
 //   ADMIN_EMAILS              本部への異常通知の宛先（カンマ区切り。Webの運営画面と同じ値）
 //   DISABLED_JOBS             止めたいジョブ名をカンマ区切りで（例: analyze-pending）
 
@@ -26,7 +31,7 @@ import { createServiceClient } from "@ai-nyusatsu-bu/db";
 import { runKkjSync } from "../jobs/kkj_sync";
 import { runDailyGepsCrawl } from "../jobs/crawl_geps";
 import { runExtractPendingDocuments } from "../jobs/extract_document_text";
-import { runAnalyzePending } from "../jobs/analyze_pending";
+import { runAnalysisBatchCycle } from "../jobs/analyze_batch_cycle";
 import { runTenderLifecycle } from "../jobs/tender_lifecycle";
 import { runMatchTenders } from "../jobs/match_tenders";
 import { runNotifyDigest } from "../jobs/notify_digest";
@@ -53,7 +58,9 @@ const HANDLERS: Record<JobName, () => Promise<unknown>> = {
   "kkj-sync": () => runKkjSync(todayJst()),
   "crawl-geps": () => runDailyGepsCrawl(todayJst()),
   "extract-text": () => runExtractPendingDocuments(),
-  "analyze-pending": () => runAnalyzePending(),
+  // キュー名は既存のDISABLED_JOBS設定との互換性のため維持する。処理本体は
+  // 同期全件解析から「緊急だけ同期・通常は2段階バッチ」へ切り替えた。
+  "analyze-pending": () => runAnalysisBatchCycle(),
   "tender-lifecycle": () => runTenderLifecycle(),
   "match-tenders": () => runMatchTenders(),
   "notify-digest": () => runNotifyDigest(),

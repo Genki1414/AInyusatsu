@@ -13,7 +13,7 @@ crawl / fetch_documents / fetch_documents_ic / parse / match / notify / remind /
 | 04:00 / 12:00 | kkj-sync | 官公需情報ポータルAPIで新規案件を検知 |
 | 04:30 / 12:30 | crawl-geps | 調達ポータルを巡回し資料を取得（数時間かかる） |
 | 08:00 / 16:00 | extract-text | 資料からテキストを抽出（必要ならOCR） |
-| 09:00 / 17:00 | analyze-pending | 解析待ちの案件をAI解析（`ANALYZE_DAILY_LIMIT` 件まで） |
+| 毎時 :10 | analyze-pending | 緊急案件は同期、通常案件は2段階バッチでAI解析 |
 | 11:00 / 19:00 | match-tenders | 条件セットごとに採点して提案を作る |
 | 毎時 | remind-quotes | 回答期限24時間前の未回答へ催促 |
 | 月次 1日 03:00 | import-awards | 落札実績オープンデータの差分を取り込む |
@@ -37,16 +37,18 @@ crawl / fetch_documents / fetch_documents_ic / parse / match / notify / remind /
   エンドポイントを上書き可能（既定 `http://www.kkj.go.jp/api/`）
 - `analysis_shared.ts`：AI解析の共通部分。資料の読み込み（`loadTenderForAnalysis`）と
   DBへの書き戻し（`persistAnalysis`）。同期実行とバッチ実行の両方が使う
-- `analyze_pending.ts`：解析待ちの案件をまとめて解析する（常駐ワーカー用）。
-  `runAnalyzePending(limit)`。1回あたりの件数に上限を設け、推定費用をログに出す
-- `analyze_tenders_batch.ts`：Batch API での案件解析（コスト対策③の骨格）。
+- `analyze_pending.ts`：手動・緊急時に解析待ちの案件を同期解析する。
+  `runAnalyzePending(limit)`。1回あたりの件数と日次・月次原価に上限を設ける
+- `analyze_batch_cycle.ts`：常駐ワーカーの自動解析。第1段を回収後、期限72時間以内は
+  同期解析、それ以外は第2段バッチへ引き継ぐ。毎時1回だけ状態を進め、待機はしない
+- `analyze_tenders_batch.ts`：Batch API での案件解析。
   `submitAnalysisBatch(tenderIds, stage)` / `checkAnalysisBatch(batchId)` /
   `applyAnalysisBatch(batchId)` / `cancelAnalysisBatch(batchId)`。
   全トークンが50%引きになる代わりに、結果が出るまでたいてい1時間・最大24時間かかる。
   プロンプトキャッシュを効かせるため2段階に分ける（第1段=基本情報のみ、第2段=残り4本）。
   **バッチでキャッシュがどれだけ効くかは未検証**。`applyAnalysisBatch` が記録する
   `analysis_batches.usage` で必ず実測すること。
-  常駐ワーカーには繋いでいない（`pnpm --filter worker analyze:batch` から手で回す）
+  常駐ワーカーへ接続済み。CLIは障害調査・手動回収用に残す
 - `remind_quotes.ts`：見積依頼の自動催促（タスク4-4）。`runQuoteReminders(now?)`。
   回答期限の24時間前を切った未回答の見積へ1回だけ催促メールを送る（`quotes.reminded_at`
   で記録）。`RESEND_API_KEY` / `RESEND_FROM_ADDRESS` / `NEXT_PUBLIC_APP_URL` が必要

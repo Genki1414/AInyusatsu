@@ -43,6 +43,7 @@ import {
   settle,
   valueOr,
 } from "./analysis_shared";
+import { recordAiUsageEvent } from "./ai_usage";
 
 export type AnalyzeTenderResult = {
   tenderId: string;
@@ -115,27 +116,56 @@ export async function analyzeTender(tenderId: string): Promise<AnalyzeTenderResu
     ["提出書類", formsR],
     ["注意事項", notesR],
   ]);
+  const usage = summarizeUsage(usages);
   if (failures.length === settled.length) {
     // 1本も成功していないなら保存できるものが無い。理由をDBに残してから失敗として扱う
     // （自動実行では例外がログに流れて終わるため、案件側にも残さないと気づけない）。
     await recordAnalysisFailure(client, tenderId, failures);
+    await recordAiUsageEvent(client, {
+      tenderId,
+      operation: "tender_analysis",
+      model: "claude-sonnet-5",
+      status: "failed",
+      usage,
+      detail: { failedPrompts: failures.map((f) => f.promptName) },
+    });
     throw new Error(`AI解析がすべて失敗しました: ${failures.map((f) => f.message).join(" / ")}`);
   }
 
-  const saved = await persistAnalysis(
-    client,
-    input,
-    {
-      basicInfo: valueOr(basicInfoR),
-      qualifications: valueOr(qualificationsR),
-      lots: valueOr(lotsR),
-      forms: valueOr(formsR),
-      notes: valueOr(notesR),
-    },
-    failures,
-  );
+  let saved: Awaited<ReturnType<typeof persistAnalysis>>;
+  try {
+    saved = await persistAnalysis(
+      client,
+      input,
+      {
+        basicInfo: valueOr(basicInfoR),
+        qualifications: valueOr(qualificationsR),
+        lots: valueOr(lotsR),
+        forms: valueOr(formsR),
+        notes: valueOr(notesR),
+      },
+      failures,
+    );
+    await recordAiUsageEvent(client, {
+      tenderId,
+      operation: "tender_analysis",
+      model: "claude-sonnet-5",
+      status: "succeeded",
+      usage,
+      detail: { failedPrompts: failures.map((f) => f.promptName) },
+    });
+  } catch (err) {
+    await recordAiUsageEvent(client, {
+      tenderId,
+      operation: "tender_analysis",
+      model: "claude-sonnet-5",
+      status: "failed",
+      usage,
+      detail: { reason: err instanceof Error ? err.message : String(err) },
+    });
+    throw err;
+  }
 
-  const usage = summarizeUsage(usages);
   console.log(`[analyze_tender] トークン消費（tender=${tenderId}）: ${formatUsageSummary(usage)}`);
   if (usage.cacheReadTokens === 0 && usage.calls > 1) {
     // 2本目以降が1つもキャッシュに当たっていない＝前半の文字列がぶれているか、

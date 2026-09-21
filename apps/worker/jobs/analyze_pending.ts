@@ -10,12 +10,12 @@
 // 上限に達した分は次回に回すだけで、失われはしない。
 // 全件を解析したい場合は ANALYZE_DAILY_LIMIT を引き上げる（0 にすると解析を止められる）。
 //
-// 【公告日が古い案件を解析しない（任意）】
+// 【公告日が古い案件を解析しない】
 // 提出期限はコネクタからは取れず、AI解析で初めて埋まる。つまり解析前の案件はすべて
 // submit_deadline が null で、期限切れとして終了に落とせない。解析を後回しにするほど
 // 解析待ちは積み上がり、いざ流すときに、とっくに締め切られた案件にも費用がかかる。
-// ANALYZE_MAX_NOTICE_AGE_DAYS を指定すると、公告日がそれより古い案件を解析しない。
-// 公告日は提出期限そのものではないため、既定では絞らない（推測で対象を減らさない）。
+// ANALYZE_MAX_NOTICE_AGE_DAYS の既定90日より古い案件は解析しない。0を明示すれば解除できる。
+// 公告日は提出期限そのものではないため、対象から外した古い案件を削除はせずDBに残す。
 //
 // 【全省庁統一資格の範囲だけを解析する】
 // KKJは国の機関も自治体も、物品も工事も区別せずに返す。実測（2026-08-21の公告日ぶん）
@@ -31,9 +31,17 @@
 
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
 import { estimateCostYen, summarizeUsage, type UsageSummary } from "@ai-nyusatsu-bu/ai";
-import { judgeQualificationScope, noticeDateCutoff, parseMaxNoticeAgeDays, shouldAnalyze, toDateIso } from "@ai-nyusatsu-bu/domain";
+import {
+  DEFAULT_MAX_NOTICE_AGE_DAYS,
+  judgeQualificationScope,
+  noticeDateCutoff,
+  parseMaxNoticeAgeDays,
+  shouldAnalyze,
+  toDateIso,
+} from "@ai-nyusatsu-bu/domain";
 import { includeIncorporatedFromEnv } from "./classify_agencies";
 import { analyzeTender } from "./analyze_tender";
+import { aiBudgetFromEnv, budgetExceeded, loadAiSpend, type AiSpend } from "./ai_usage";
 import { runTenderLifecycle } from "./tender_lifecycle";
 
 /** 1回の実行で解析する件数の既定値。実測 約69円/件 なので、50件で約3,500円。 */
@@ -52,6 +60,10 @@ export type AnalyzePendingSummary = {
   noticeDateFrom: string | null;
   /** 統一資格の範囲外として解析しなかった件数 */
   outOfScope: number;
+  /** 予算上限で途中停止したか。nullなら停止していない */
+  budgetStopped: "daily" | "monthly" | null;
+  /** 実行開始時点の日本時間の日次・月次AI原価 */
+  spentBefore: AiSpend;
 };
 
 type PendingRow = { id: string; name: string; procurement: string; agencies: { gov_scope: string | null } | { gov_scope: string | null }[] | null };
@@ -66,6 +78,8 @@ function one<T>(value: T | T[] | null | undefined): T | null {
 export function maxNoticeAgeFromEnv(
   raw: string | undefined = process.env.ANALYZE_MAX_NOTICE_AGE_DAYS,
 ): number | null {
+  // 未設定のまま古い滞留案件へ課金しない。0を明示すれば絞り込みを解除できる。
+  if (raw === undefined || raw.trim() === "") return DEFAULT_MAX_NOTICE_AGE_DAYS;
   return parseMaxNoticeAgeDays(raw);
 }
 
@@ -90,10 +104,28 @@ export async function runAnalyzePending(
 ): Promise<AnalyzePendingSummary> {
   const client = createServiceClient();
   const noticeDateFrom = maxNoticeAgeDays === null ? null : toDateIso(noticeDateCutoff(maxNoticeAgeDays, now));
+  const budget = aiBudgetFromEnv();
+  let spentBefore: AiSpend = { dailyYen: 0, monthlyYen: 0 };
+  let initialSpend: AiSpend = { dailyYen: 0, monthlyYen: 0 };
 
   if (limit === 0) {
     console.warn("[analyze_pending] ANALYZE_DAILY_LIMIT=0 のため解析を行いません");
-    return { analyzed: 0, failed: 0, deferred: 0, estimatedYen: 0, noticeDateFrom, outOfScope: 0 };
+    return { analyzed: 0, failed: 0, deferred: 0, estimatedYen: 0, noticeDateFrom, outOfScope: 0, budgetStopped: null, spentBefore };
+  }
+
+  // 上限を使うときは、AIを1回も呼ぶ前にDBの原価台帳を確認する。台帳を読めない場合は
+  // 安全側に倒して例外にし、原価が見えないまま解析を続けない。
+  if (budget.dailyYen > 0 || budget.monthlyYen > 0) {
+    spentBefore = await loadAiSpend(client, now);
+    initialSpend = { ...spentBefore };
+    const exceeded = budgetExceeded(budget, spentBefore);
+    if (exceeded) {
+      console.warn(
+        `[analyze_pending] AIの${exceeded === "daily" ? "日次" : "月次"}予算上限に達したため解析を停止します` +
+          `（本日${spentBefore.dailyYen.toLocaleString("ja-JP")}円／今月${spentBefore.monthlyYen.toLocaleString("ja-JP")}円）`,
+      );
+      return { analyzed: 0, failed: 0, deferred: 0, estimatedYen: 0, noticeDateFrom, outOfScope: 0, budgetStopped: exceeded, spentBefore: initialSpend };
+    }
   }
 
   // 分類がまだなら、解析対象は0件になる。黙って0件で終わらせない
@@ -106,7 +138,7 @@ export async function runAnalyzePending(
       "[analyze_pending] 発注機関がまだ分類されていません（agencies.gov_scope が空）。" +
         "統一資格の範囲を判定できないため解析しません。先に `pnpm --filter worker agencies:classify apply` を実行してください",
     );
-    return { analyzed: 0, failed: 0, deferred: 0, estimatedYen: 0, noticeDateFrom, outOfScope: 0 };
+    return { analyzed: 0, failed: 0, deferred: 0, estimatedYen: 0, noticeDateFrom, outOfScope: 0, budgetStopped: null, spentBefore: initialSpend };
   }
 
   // 独立行政法人等を含めるかは設定で切り替える（既定は含めない）
@@ -156,7 +188,6 @@ export async function runAnalyzePending(
   });
 
   const targets = unique.slice(0, limit);
-  const deferred = Math.max(0, unique.length - targets.length);
 
   const scope = noticeDateFrom === null ? "" : `／公告日 ${noticeDateFrom} 以降に限定`;
   console.log(`[analyze_pending] 解析待ち ${unique.length}件のうち ${targets.length}件を処理します（上限${limit}件${scope}）`);
@@ -164,11 +195,27 @@ export async function runAnalyzePending(
   const usages: UsageSummary[] = [];
   let analyzed = 0;
   let failed = 0;
+  let attempted = 0;
+  let budgetStopped: AnalyzePendingSummary["budgetStopped"] = null;
+  let estimatedYen = 0;
+  // spentBefore を最後にDBから読んだあとに、この実行で追加した分。再読込時に0へ戻す。
+  let budgetAddedYen = 0;
 
   for (const tender of targets) {
+    const currentSpend = {
+      dailyYen: spentBefore.dailyYen + budgetAddedYen,
+      monthlyYen: spentBefore.monthlyYen + budgetAddedYen,
+    };
+    budgetStopped = budgetExceeded(budget, currentSpend);
+    if (budgetStopped) break;
+
+    attempted++;
     try {
       const result = await analyzeTender(tender.id);
       usages.push(result.usage);
+      const costYen = estimateCostYen(result.usage);
+      estimatedYen += costYen;
+      budgetAddedYen += costYen;
       analyzed++;
     } catch (err) {
       // 1件の失敗で残りを止めない。理由は analyzeTender が案件へ記録済み。
@@ -176,13 +223,22 @@ export async function runAnalyzePending(
       console.error(
         `[analyze_pending] 解析に失敗しました（tender=${tender.id} ${tender.name}）: ${err instanceof Error ? err.message : String(err)}`,
       );
+      // 失敗した呼び出しにも課金される。analyzeTender が台帳へ残した値を読み直し、
+      // 次の案件を予算超過のまま開始しない。
+      if (budget.dailyYen > 0 || budget.monthlyYen > 0) {
+        spentBefore = await loadAiSpend(client, now);
+        budgetAddedYen = 0;
+      }
     }
   }
 
-  const estimatedYen = usages.reduce((total, usage) => total + estimateCostYen(usage), 0);
+  const deferred = Math.max(0, unique.length - attempted);
   console.log(
     `[analyze_pending] 完了：解析${analyzed}件 / 失敗${failed}件 / 次回へ${deferred}件 / 推定費用 ${estimatedYen.toLocaleString("ja-JP")}円`,
   );
+  if (budgetStopped) {
+    console.warn(`[analyze_pending] AIの${budgetStopped === "daily" ? "日次" : "月次"}予算上限に達したため途中で停止しました`);
+  }
   if (deferred > 0) {
     // 黙って積み残さない。上限が実態に合っていないなら気づけるようにする。
     console.warn(
@@ -204,7 +260,7 @@ export async function runAnalyzePending(
     }
   }
 
-  return { analyzed, failed, deferred, estimatedYen, noticeDateFrom, outOfScope };
+  return { analyzed, failed, deferred, estimatedYen, noticeDateFrom, outOfScope, budgetStopped, spentBefore: initialSpend };
 }
 
 /** 複数案件ぶんのトークン消費をまとめた集計（ログ用）。 */

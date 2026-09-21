@@ -1,17 +1,16 @@
 // 資料のテキスト抽出ジョブ（タスク2-2）。
 // 参照：docs/実装仕様書_v1.md §4.1, §5（parseジョブの前段）
 //
-// fetched=trueかつ未抽出（extracted_text/extract_errorともnull）のPDF資料を対象に、
+// fetched=trueかつ未抽出（extracted_text/extract_errorともnull）の対応資料を対象に、
 // テキスト抽出（必要ならOCR）を行い、結果をtender_documentsへ書き戻す。
 // AI解析（タスク2-3）はこのジョブが埋めるextracted_textを入力として使う。
 //
-// 【現状の制約】
-// - 対象は.pdfのみ（storage_keyの拡張子で判定）。Word/Excel等は未対応（別タスク）
+// 対象はPDF、Office Open XML（Word/Excel）、ZIP。旧Office形式（.doc/.xls）は対象外。
 // - 失敗した資料（extract_errorが埋まった行）は自動では再試行しない。原因を直してから
 //   extract_errorをnullに戻せば次回の実行で拾われる
 
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
-import { extractPdfText } from "../documents/extract_text";
+import { extractDocumentText, isSupportedDocumentName } from "../documents/extract_text";
 
 const BUCKET = process.env.TENDER_DOCUMENTS_BUCKET || "tender-documents";
 
@@ -24,7 +23,7 @@ export type ExtractDocumentTextSummary = {
 
 type PendingDocument = { id: string; storage_key: string };
 
-/** 未抽出のPDF資料を最大limit件処理する。 */
+/** 未抽出の対応資料を最大limit件処理する。 */
 export async function runExtractPendingDocuments(limit = 50): Promise<ExtractDocumentTextSummary> {
   const client = createServiceClient();
 
@@ -35,7 +34,15 @@ export async function runExtractPendingDocuments(limit = 50): Promise<ExtractDoc
     .is("extracted_text", null)
     .is("extract_error", null)
     .not("storage_key", "is", null)
-    .ilike("storage_key", "%.pdf")
+    .or([
+      "storage_key.ilike.%.pdf",
+      "storage_key.ilike.%.docx",
+      "storage_key.ilike.%.docm",
+      "storage_key.ilike.%.xlsx",
+      "storage_key.ilike.%.xlsm",
+      "storage_key.ilike.%.xltx",
+      "storage_key.ilike.%.zip",
+    ].join(","))
     .limit(limit)
     .returns<PendingDocument[]>();
   if (error) throw new Error(`未抽出の資料一覧の取得に失敗しました: ${error.message}`);
@@ -44,13 +51,15 @@ export async function runExtractPendingDocuments(limit = 50): Promise<ExtractDoc
   let ocrUsed = 0;
   let failed = 0;
 
-  for (const doc of docs ?? []) {
+  const pending = (docs ?? []).filter((doc) => isSupportedDocumentName(doc.storage_key)).slice(0, limit);
+
+  for (const doc of pending) {
     try {
       const { data: file, error: downloadError } = await client.storage.from(BUCKET).download(doc.storage_key);
       if (downloadError) throw new Error(downloadError.message);
 
       const buffer = Buffer.from(await file.arrayBuffer());
-      const result = await extractPdfText(buffer);
+      const result = await extractDocumentText(buffer, doc.storage_key);
 
       const { error: updateError } = await client
         .from("tender_documents")
@@ -76,5 +85,5 @@ export async function runExtractPendingDocuments(limit = 50): Promise<ExtractDoc
     }
   }
 
-  return { processed: (docs ?? []).length, succeeded, ocrUsed, failed };
+  return { processed: pending.length, succeeded, ocrUsed, failed };
 }

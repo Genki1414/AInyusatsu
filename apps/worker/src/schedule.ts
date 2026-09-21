@@ -72,8 +72,9 @@ export const SCHEDULE: readonly ScheduledJob[] = [
   { name: "crawl-geps", cron: "30 4,12 * * *", description: "調達ポータルを巡回し、資料を取得する", expireInSeconds: 6 * HOURS, retryLimit: 0 },
   // OCRが要る資料があると長い
   { name: "extract-text", cron: "0 8,16 * * *", description: "取得した資料からテキストを抽出する（必要ならOCR）", expireInSeconds: 4 * HOURS, retryLimit: 0 },
-  // 1回50件のAI解析。やり直すと費用が二重にかかるので retryLimit は必ず0
-  { name: "analyze-pending", cron: "0 9,17 * * *", description: "解析待ちの案件をAI解析する", expireInSeconds: 4 * HOURS, retryLimit: 0 },
+  // 毎時、完了したバッチを回収して次段へ進める。API呼び出し後の自動やり直しは
+  // 二重課金・二重投入になるため retryLimit は必ず0。次の毎時実行が続きを拾う。
+  { name: "analyze-pending", cron: "10 * * * *", description: "緊急案件は即時、通常案件は2段階バッチでAI解析する", expireInSeconds: 4 * HOURS, retryLimit: 0 },
   // 仕様書 §5 の close は「毎日 00:30」。ここでは公開も兼ねるため、提案（11:00 / 19:00）の
   // 直前にも走らせる。解析が終わった案件をその日のうちに提案へ乗せるため。
   { name: "tender-lifecycle", cron: "30 0,10,18 * * *", description: "解析完了を公開中にし、提出期限を過ぎた案件を終了にする", expireInSeconds: 15 * MINUTES, retryLimit: 2 },

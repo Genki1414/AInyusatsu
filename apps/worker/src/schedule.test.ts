@@ -68,10 +68,8 @@ describe("SCHEDULE", () => {
     expect(minuteOf(kkj.cron)).toBeLessThan(minuteOf(crawl.cron));
   });
 
-  it("テキスト抽出→AI解析→提案の順に並んでいる", () => {
-    const at = (name: string) => hourOf(SCHEDULE.find((j) => j.name === name)!.cron);
-    expect(at("extract-text")).toBeLessThan(at("analyze-pending"));
-    expect(at("analyze-pending")).toBeLessThan(at("match-tenders"));
+  it("AIバッチは毎時確認する（最大24時間待ちの結果を放置しない）", () => {
+    expect(job("analyze-pending").cron).toBe("10 * * * *");
   });
 
   it("提案の直前に公開・終了が反映される（期限切れを提案しない／解析結果をその日のうちに載せる）", () => {
@@ -111,11 +109,6 @@ function hoursOf(cron: string): number[] {
 /** cronの先頭（分）を数値で返す。 */
 function minuteOf(cron: string): number {
   return Number(cron.split(/\s+/)[0]);
-}
-
-/** cronの2番目（時）の最初の値を返す。「8,16」なら8。 */
-function hourOf(cron: string): number {
-  return Number(cron.split(/\s+/)[1].split(",")[0]);
 }
 
 describe("parseDisabledJobs", () => {

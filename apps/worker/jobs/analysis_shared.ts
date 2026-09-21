@@ -155,6 +155,13 @@ export type PersistAnalysisResult = {
   reviewReasons: string[];
 };
 
+export type PersistAnalysisOptions = {
+  /** falseなら基本情報だけを保存し、顧客へ公開可能な「解析完了」には進めない。 */
+  markComplete?: boolean;
+  /** 第2段の結果へ、第1段で保存したraw（基本情報と根拠）を引き継ぐ。 */
+  mergePreviousRaw?: boolean;
+};
+
 /**
  * 抽出結果を tenders / tender_analyses / tender_forms / tender_lots へ書き戻す。
  *
@@ -167,9 +174,11 @@ export async function persistAnalysis(
   input: Pick<TenderAnalysisInput, "tenderId" | "tender">,
   outputs: AnalysisOutputs,
   failures: PromptFailure[],
+  options: PersistAnalysisOptions = {},
 ): Promise<PersistAnalysisResult> {
   const { tenderId, tender } = input;
   const { basicInfo, qualifications, lots, forms, notes } = outputs;
+  const markComplete = options.markComplete ?? true;
 
   // tenders：空欄の項目だけをAI解析の値で埋める（コネクタの確定値は上書きしない）。
   const currentFields: TenderBasicFields = {
@@ -225,7 +234,7 @@ export async function persistAnalysis(
       ...patch,
       needs_review: needsReview,
       review_reasons: reviewReasons,
-      collect_status: "解析完了",
+      ...(markComplete ? { collect_status: "解析完了" } : {}),
       // 失敗を握りつぶさない（CLAUDE.md）。全部成功したときは前回の失敗記録を消す。
       failure_code: failures.length > 0 ? "PARSE_INVALID" : null,
       failure_reason: failures.length > 0 ? failures.map((f) => f.message).join(" / ") : null,
@@ -236,12 +245,27 @@ export async function persistAnalysis(
   // tender_analyses：バージョンを1つ進めて追加保存する（過去の解析結果を残す）。
   const { data: latest } = await client
     .from("tender_analyses")
-    .select("version")
+    .select("version, raw")
     .eq("tender_id", tenderId)
     .order("version", { ascending: false })
     .limit(1)
-    .maybeSingle<{ version: number }>();
+    .maybeSingle<{ version: number; raw: Record<string, unknown> | null }>();
   const version = (latest?.version ?? 0) + 1;
+
+  const previousRaw = options.mergePreviousRaw && latest?.raw ? latest.raw : {};
+  const previousFailures = Array.isArray(previousRaw.failures) ? previousRaw.failures : [];
+  const mergedFailures = [...previousFailures, ...failures].filter(
+    (failure, index, all) =>
+      index === all.findIndex((candidate) => JSON.stringify(candidate) === JSON.stringify(failure)),
+  );
+  const raw = {
+    basicInfo: basicInfo ?? previousRaw.basicInfo ?? null,
+    qualifications: qualifications ?? previousRaw.qualifications ?? null,
+    lots: lots ?? previousRaw.lots ?? null,
+    forms: forms ?? previousRaw.forms ?? null,
+    notes: notes ?? previousRaw.notes ?? null,
+    failures: mergedFailures,
+  };
 
   const { error: analysisError } = await client.from("tender_analyses").insert({
     tender_id: tenderId,
@@ -252,9 +276,21 @@ export async function persistAnalysis(
     // 業種名の付かないまとめ行は見積依頼に使えないため除く（元の出力は raw に残る）。
     trades: (lots?.trades_summary ?? []).filter((t) => t.trade !== null),
     notes: notes?.notes ?? [],
-    raw: { basicInfo, qualifications, lots, forms, notes, failures },
+    raw,
   });
   if (analysisError) throw new Error(`tender_analysesの保存に失敗しました: ${analysisError.message}`);
+
+  // 第1段は基本情報だけなので、提出書類・数量表には触らない。
+  if (!markComplete) {
+    return {
+      analysisVersion: version,
+      tenderFieldsFilled: Object.keys(patch),
+      formsCount: 0,
+      lotsCount: 0,
+      needsReview,
+      reviewReasons,
+    };
+  }
 
   // tender_forms：最新の解析結果だけを残す（前回分は消してから入れ直す）。
   const { error: deleteFormsError } = await client.from("tender_forms").delete().eq("tender_id", tenderId);

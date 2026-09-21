@@ -4,17 +4,15 @@
 // @anthropic-ai/sdk に依存するため、Client Componentからは絶対にimportしないこと
 // （このファイルを "use client" のファイルからimportしない）。
 //
-// 「見積依頼」タブを開くたびにAIへ問い合わせるとコスト・待ち時間が積み重なるため、
-// org×tender×trade単位で quote_recommendations に結果をキャッシュし、既にあれば
-// 再利用する（ユーザーからの要望：タブを開いたら自動でAIが推薦する）。
-// AI呼び出しに失敗しても見積依頼の送信自体は妨げないよう、その業種のおすすめだけを
-// 「取得できませんでした」として返す（失敗を握りつぶさず、UIに理由を残す）。
-import { analyzePartnerRecommendation, callClaude, type PartnerRecommendCandidate } from "@ai-nyusatsu-bu/ai";
+// org×tender×trade単位で結果をキャッシュする。未作成のときは業種（呼び出し側で絞込済み）・
+// 対応エリア・人が付けた評価で決定的に並べる。案件資料の理解が不要な処理へClaudeを使わず、
+// 画面を開くたびのAPI原価と待ち時間を発生させない。
+import { recommendPartnersByRules } from "@ai-nyusatsu-bu/domain";
 import type { createClient } from "@/lib/supabase/server";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
 
-const MODEL_NAME = "claude-sonnet-5";
+const MODEL_NAME = "rules-v1";
 
 export type PartnerRecommendationResult = {
   recommendations: { partner_id: string; reason: string }[];
@@ -27,10 +25,8 @@ type TradeGroup = { trade: string; lots: { item: string; spec: string | null; qt
 type CandidatePartner = { id: string; name: string; email: string | null; trades: string[]; areas: string[]; rating: number | null; memo: string | null };
 
 /** 対応業種が一致する（または未登録の）メール登録済み協力会社だけを候補にする。 */
-function candidatesForTrade(partners: CandidatePartner[], trade: string): PartnerRecommendCandidate[] {
-  return partners
-    .filter((p) => p.email && (p.trades.length === 0 || p.trades.includes(trade)))
-    .map((p) => ({ id: p.id, name: p.name, trades: p.trades, areas: p.areas, rating: p.rating, memo: p.memo }));
+function candidatesForTrade(partners: CandidatePartner[], trade: string): CandidatePartner[] {
+  return partners.filter((p) => p.email && (p.trades.length === 0 || p.trades.includes(trade)));
 }
 
 /** 業種ごとにAIおすすめを取得する（キャッシュ済みならそれを返す）。 */
@@ -66,19 +62,17 @@ export async function getPartnerRecommendations(
       }
 
       try {
-        const recommended = await analyzePartnerRecommendation(
-          { trade: group.trade, tenderItem, place, lots: group.lots, candidates },
-          callClaude,
-        );
+        const recommendations = recommendPartnersByRules(candidates, place);
+        const note = recommendations.length === 0 ? "対応業種・エリアが一致する協力会社がありません" : null;
         await supabase.from("quote_recommendations").insert({
           org_id: orgId,
           tender_id: tenderId,
           trade: group.trade,
           model: MODEL_NAME,
-          recommendations: recommended.recommendations,
-          note: recommended.note,
+          recommendations,
+          note,
         });
-        result[group.trade] = { recommendations: recommended.recommendations, note: recommended.note, unavailableReason: null };
+        result[group.trade] = { recommendations, note, unavailableReason: null };
       } catch (err) {
         result[group.trade] = {
           recommendations: [],
