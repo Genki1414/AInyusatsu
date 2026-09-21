@@ -40,14 +40,18 @@ import {
 } from "@ai-nyusatsu-bu/ai";
 import {
   loadTenderForAnalysis,
+  MODEL_NAME,
   persistAnalysis,
   type AnalysisOutputs,
   type PromptFailure,
   type Supabase,
   type TenderAnalysisInput,
 } from "./analysis_shared";
+import { recordAiUsageEvent } from "./ai_usage";
 
 export type SubmitBatchResult = {
+  /** analysis_batches の内部ID。第2段との親子関係に使う */
+  dbId: string | null;
   batchId: string | null;
   stage: BatchStage;
   requestCount: number;
@@ -55,11 +59,17 @@ export type SubmitBatchResult = {
   skipped: { tenderId: string; reason: string }[];
 };
 
+export type SubmitBatchOptions = { parentBatchDbId?: string | null };
+
 /**
  * 指定した案件を、その段のバッチとして投入する。
  * 1件でも読み込みに失敗したら止める、ということはしない（その案件だけ飛ばして続ける）。
  */
-export async function submitAnalysisBatch(tenderIds: string[], stage: BatchStage): Promise<SubmitBatchResult> {
+export async function submitAnalysisBatch(
+  tenderIds: string[],
+  stage: BatchStage,
+  options: SubmitBatchOptions = {},
+): Promise<SubmitBatchResult> {
   const client = createServiceClient();
   const inputs: BatchTenderInput[] = [];
   const skipped: SubmitBatchResult["skipped"] = [];
@@ -78,25 +88,30 @@ export async function submitAnalysisBatch(tenderIds: string[], stage: BatchStage
   const requests = buildBatchRequests(inputs, stage);
   const submitted = await submitBatch(requests);
   if (!submitted) {
-    return { batchId: null, stage, requestCount: 0, skipped };
+    return { dbId: null, batchId: null, stage, requestCount: 0, skipped };
   }
 
-  const { error } = await client.from("analysis_batches").insert({
-    batch_id: submitted.batchId,
-    stage,
-    status: "in_progress",
-    tender_ids: inputs.map((i) => i.tenderId),
-    request_count: submitted.requestCount,
-  });
-  if (error) {
+  const { data: savedBatch, error } = await client
+    .from("analysis_batches")
+    .insert({
+      batch_id: submitted.batchId,
+      stage,
+      status: "in_progress",
+      tender_ids: inputs.map((i) => i.tenderId),
+      request_count: submitted.requestCount,
+      parent_batch_id: options.parentBatchDbId ?? null,
+    })
+    .select("id")
+    .single<{ id: string }>();
+  if (error || !savedBatch) {
     // 記録できないと結果を回収できなくなる（29日で消える）。バッチIDを添えて必ず気づける形で失敗させる。
     throw new Error(
-      `バッチは投入できましたが記録に失敗しました。手動で回収してください（batch_id=${submitted.batchId}）: ${error.message}`,
+      `バッチは投入できましたが記録に失敗しました。手動で回収してください（batch_id=${submitted.batchId}）: ${error?.message ?? "保存行を取得できませんでした"}`,
     );
   }
 
   console.log(`[analyze_batch] 第${stage}段を投入しました（batch=${submitted.batchId}, ${submitted.requestCount}件）`);
-  return { batchId: submitted.batchId, stage, requestCount: submitted.requestCount, skipped };
+  return { dbId: savedBatch.id, batchId: submitted.batchId, stage, requestCount: submitted.requestCount, skipped };
 }
 
 /** バッチの状態を確認する。終了していれば analysis_batches にも反映する。 */
@@ -105,7 +120,7 @@ export async function checkAnalysisBatch(batchId: string) {
   const status = await retrieveBatchStatus(batchId);
 
   if (status.ended) {
-    await client
+    const { error } = await client
       .from("analysis_batches")
       .update({
         status: "ended",
@@ -114,6 +129,7 @@ export async function checkAnalysisBatch(batchId: string) {
         errored: status.counts.errored,
       })
       .eq("batch_id", batchId);
+    if (error) throw new Error(`終了したバッチの状態をDBへ記録できません（batch=${batchId}）: ${error.message}`);
   }
   return status;
 }
@@ -137,6 +153,14 @@ export type ApplyBatchResult = {
  */
 export async function applyAnalysisBatch(batchId: string): Promise<ApplyBatchResult> {
   const client = createServiceClient();
+  const { data: batchRow, error: batchError } = await client
+    .from("analysis_batches")
+    .select("stage")
+    .eq("batch_id", batchId)
+    .single<{ stage: BatchStage }>();
+  if (batchError || !batchRow) {
+    throw new Error(`バッチの段階をDBから取得できません（batch=${batchId}）: ${batchError?.message}`);
+  }
   const { entries, usages } = await collectBatchResults(batchId);
   const { byTender, unmatched } = groupResultsByTender(entries);
 
@@ -149,7 +173,7 @@ export async function applyAnalysisBatch(batchId: string): Promise<ApplyBatchRes
   const failed: ApplyBatchResult["failed"] = [];
   for (const result of byTender) {
     try {
-      await applyTenderResults(client, result);
+      await applyTenderResults(client, result, batchRow.stage);
       applied++;
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
@@ -162,16 +186,29 @@ export async function applyAnalysisBatch(batchId: string): Promise<ApplyBatchRes
   const usage = summarizeUsage(usages, CACHE_WRITE_MULTIPLIER_1H);
   console.log(`[analyze_batch] トークン消費（batch=${batchId}）: ${formatUsageSummary(usage)}`);
 
-  await client
+  const { error: updateBatchError } = await client
     .from("analysis_batches")
     .update({ status: "applied", applied, applied_at: new Date().toISOString(), usage })
     .eq("batch_id", batchId);
+  if (updateBatchError) {
+    throw new Error(`反映済みバッチの状態をDBへ記録できません（batch=${batchId}）: ${updateBatchError.message}`);
+  }
+
+  await recordAiUsageEvent(client, {
+    operation: "tender_analysis_batch",
+    executionMode: "batch",
+    model: MODEL_NAME,
+    status: failed.length > 0 || unmatched.length > 0 ? "failed" : "succeeded",
+    usage,
+    priceMultiplier: 0.5,
+    detail: { batchId, applied, failed: failed.length, unmatched: unmatched.length },
+  });
 
   return { batchId, applied, failed, unmatched: unmatched.length, inputSavingRate: usage.inputSavingRate };
 }
 
 /** 1案件ぶんの結果を、スキーマ検証したうえでDBへ書き戻す。 */
-async function applyTenderResults(client: Supabase, result: TenderBatchResults): Promise<void> {
+async function applyTenderResults(client: Supabase, result: TenderBatchResults, stage: BatchStage): Promise<void> {
   const input: TenderAnalysisInput = await loadTenderForAnalysis(client, result.tenderId);
   const outputs: AnalysisOutputs = { basicInfo: null, qualifications: null, lots: null, forms: null, notes: null };
   const failures: PromptFailure[] = [];
@@ -199,7 +236,10 @@ async function applyTenderResults(client: Supabase, result: TenderBatchResults):
     assignOutput(outputs, promptName, parsed.data);
   }
 
-  await persistAnalysis(client, input, outputs, failures);
+  await persistAnalysis(client, input, outputs, failures, {
+    markComplete: stage === 2,
+    mergePreviousRaw: stage === 2,
+  });
 }
 
 function safeParseOrNull(text: string): unknown {

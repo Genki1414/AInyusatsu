@@ -14,9 +14,11 @@
 import Link from "next/link";
 import {
   accessSummary,
+  aiBudgetFromValues,
   elapsedLabel,
   evaluateCoverage,
   groupCollectionIssues,
+  jstBudgetWindows,
   LAYOUT_CHANGED_ALERT_HOURS,
   stalledIssues,
   suspendedOrgs,
@@ -59,6 +61,39 @@ type AccessRow = {
   organizations: { name: string } | { name: string }[] | null;
 };
 
+type AiUsageSummaryRow = {
+  execution_mode: string;
+  status: string;
+  event_count: number | string;
+  calls: number | string;
+  estimated_cost_yen: number | string;
+  input_tokens: number | string;
+  cache_read_tokens: number | string;
+  output_tokens: number | string;
+};
+
+type RecentAiUsageRow = {
+  id: string;
+  tender_id: string | null;
+  operation: string;
+  execution_mode: string;
+  status: string;
+  calls: number;
+  estimated_cost_yen: number;
+  occurred_at: string;
+  tenders: { name: string } | { name: string }[] | null;
+};
+
+type AiUsageDashboard = {
+  available: boolean;
+  dailyYen: number;
+  monthlyYen: number;
+  dailyBudgetYen: number;
+  monthlyBudgetYen: number;
+  summary: AiUsageSummaryRow[];
+  recent: RecentAiUsageRow[];
+};
+
 function one<T>(value: T | T[] | null | undefined): T | null {
   if (!value) return null;
   return Array.isArray(value) ? (value[0] ?? null) : value;
@@ -71,15 +106,32 @@ function jst(at: string | null): string {
   return parsed.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
 }
 
+function yen(value: number): string {
+  return `${Math.round(value).toLocaleString("ja-JP")}円`;
+}
+
+function budgetPercent(spend: number, budget: number): number | null {
+  if (budget <= 0) return null;
+  return Math.round((spend / budget) * 100);
+}
+
+function budgetTone(percent: number | null): "green" | "amber" | "rose" | "slate" {
+  if (percent === null) return "slate";
+  if (percent >= 100) return "rose";
+  if (percent >= 80) return "amber";
+  return "green";
+}
+
 export default async function AdminPage() {
   const { admin } = await requireAdmin();
   const now = new Date();
 
-  const [issues, access, coverage, heartbeat] = await Promise.all([
+  const [issues, access, coverage, heartbeat, aiUsage] = await Promise.all([
     loadIssues(admin),
     loadAccess(admin),
     loadCoverage(admin),
     loadHeartbeat(admin),
+    loadAiUsage(admin, now),
   ]);
 
   // 【いちばん上に出す】
@@ -118,6 +170,90 @@ export default async function AdminPage() {
           <p className="mt-1 text-xs leading-relaxed text-rose-800">
             この状態では、下の「収集キュー」が空でも安心できません。失敗そのものが記録されないためです。
           </p>
+        )}
+      </Panel>
+
+      <Panel
+        title="AI解析原価"
+        right={
+          aiUsage.available ? (
+            <Pill tone={budgetTone(budgetPercent(aiUsage.monthlyYen, aiUsage.monthlyBudgetYen))}>
+              {budgetPercent(aiUsage.monthlyYen, aiUsage.monthlyBudgetYen) === null
+                ? "今月 上限なし"
+                : `今月 ${budgetPercent(aiUsage.monthlyYen, aiUsage.monthlyBudgetYen)}%`}
+            </Pill>
+          ) : <Pill tone="slate">未計測</Pill>
+        }
+      >
+        {!aiUsage.available ? (
+          <p className="text-xs text-slate-500">
+            AI原価台帳をまだ読めません。DBマイグレーション適用後に、日次・月次の費用が表示されます。
+          </p>
+        ) : (
+          <div className="space-y-3">
+            <div className="grid gap-2 sm:grid-cols-2">
+              <BudgetCard label="本日（日本時間）" spend={aiUsage.dailyYen} budget={aiUsage.dailyBudgetYen} />
+              <BudgetCard label="今月（日本時間）" spend={aiUsage.monthlyYen} budget={aiUsage.monthlyBudgetYen} />
+            </div>
+
+            <div>
+              <p className="text-xs font-medium text-slate-700">今月の内訳</p>
+              {aiUsage.summary.length === 0 ? (
+                <p className="mt-1 text-xs text-slate-500">今月のAI解析実績はありません。</p>
+              ) : (
+                <div className="mt-1 overflow-x-auto">
+                  <table className="min-w-full text-left text-xs">
+                    <thead className="text-slate-500">
+                      <tr>
+                        <th className="py-1 pr-3 font-medium">方式</th>
+                        <th className="py-1 pr-3 font-medium">結果</th>
+                        <th className="py-1 pr-3 text-right font-medium">処理</th>
+                        <th className="py-1 pr-3 text-right font-medium">API呼出</th>
+                        <th className="py-1 pr-3 text-right font-medium">キャッシュ読取</th>
+                        <th className="py-1 text-right font-medium">概算原価</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-slate-700">
+                      {aiUsage.summary.map((row) => (
+                        <tr key={`${row.execution_mode}:${row.status}`}>
+                          <td className="py-1.5 pr-3">{row.execution_mode === "batch" ? "バッチ" : "即時"}</td>
+                          <td className="py-1.5 pr-3">{row.status === "succeeded" ? "成功" : "失敗"}</td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums">{Number(row.event_count).toLocaleString("ja-JP")}</td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums">{Number(row.calls).toLocaleString("ja-JP")}</td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums">{Number(row.cache_read_tokens).toLocaleString("ja-JP")}</td>
+                          <td className="py-1.5 text-right font-medium tabular-nums">{yen(Number(row.estimated_cost_yen))}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {aiUsage.recent.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-slate-700">今月の高原価処理</p>
+                <ul className="mt-1 space-y-1">
+                  {aiUsage.recent.map((row) => (
+                    <li key={row.id} className="text-xs text-slate-600">
+                      ・{row.tender_id ? (
+                        <Link href={`/tenders/${row.tender_id}`} className="underline">
+                          {one(row.tenders)?.name ?? "案件を開く"}
+                        </Link>
+                      ) : "案件外処理"}
+                      <span className="ml-1 text-slate-400">{row.operation}／{row.execution_mode === "batch" ? "バッチ" : "即時"}</span>
+                      <span className="ml-1 font-medium tabular-nums text-slate-700">{yen(row.estimated_cost_yen)}</span>
+                      <span className="ml-1 text-slate-400">{jst(row.occurred_at)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <p className="text-xs text-slate-400">
+              円換算はAPI応答時点の概算。上限値はWebとワーカーの環境変数を同じ値に設定してください。
+            </p>
+          </div>
         )}
       </Panel>
 
@@ -234,6 +370,26 @@ export default async function AdminPage() {
   );
 }
 
+function BudgetCard({ label, spend, budget }: { label: string; spend: number; budget: number }) {
+  const percent = budgetPercent(spend, budget);
+  const width = percent === null ? 0 : Math.min(percent, 100);
+  const color = percent !== null && percent >= 100 ? "bg-rose-500" : percent !== null && percent >= 80 ? "bg-amber-500" : "bg-emerald-500";
+  return (
+    <div className="rounded border border-slate-200 px-3 py-2">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-xs text-slate-500">{label}</span>
+        <span className="text-sm font-semibold tabular-nums text-slate-800">{yen(spend)}</span>
+      </div>
+      <div className="mt-1 h-1.5 overflow-hidden rounded bg-slate-100">
+        <div className={`h-full rounded ${color}`} style={{ width: `${width}%` }} />
+      </div>
+      <p className="mt-1 text-right text-xs text-slate-400">
+        {budget === 0 ? "上限なし" : `上限 ${yen(budget)}（${percent}%）`}
+      </p>
+    </div>
+  );
+}
+
 /**
  * 資料の取得とAI解析の失敗を集める。
  * どちらも別の軸（documents_failure_code / failure_code）なので両方を見る。
@@ -344,4 +500,45 @@ async function loadHeartbeat(
     return null;
   }
   return data ?? null;
+}
+
+async function loadAiUsage(admin: Admin, now: Date): Promise<AiUsageDashboard> {
+  const window = jstBudgetWindows(now);
+  const budget = aiBudgetFromValues(process.env);
+  const [daily, monthly, summary, recent] = await Promise.all([
+    admin.rpc("ai_spend_between", { p_from: window.dayFrom, p_to: window.dayTo }),
+    admin.rpc("ai_spend_between", { p_from: window.monthFrom, p_to: window.monthTo }),
+    admin.rpc("ai_usage_summary_between", { p_from: window.monthFrom, p_to: window.monthTo }),
+    admin
+      .from("ai_usage_events")
+      .select("id, tender_id, operation, execution_mode, status, calls, estimated_cost_yen, occurred_at, tenders(name)")
+      .gte("occurred_at", window.monthFrom)
+      .lt("occurred_at", window.monthTo)
+      .order("estimated_cost_yen", { ascending: false })
+      .limit(5)
+      .returns<RecentAiUsageRow[]>(),
+  ]);
+  const error = daily.error ?? monthly.error ?? summary.error;
+  if (error) {
+    console.error(`[admin] AI原価台帳を読めませんでした: ${error.message}`);
+    return {
+      available: false,
+      dailyYen: 0,
+      monthlyYen: 0,
+      dailyBudgetYen: budget.dailyYen,
+      monthlyBudgetYen: budget.monthlyYen,
+      summary: [],
+      recent: [],
+    };
+  }
+  if (recent.error) console.error(`[admin] AI原価の高額処理を読めませんでした: ${recent.error.message}`);
+  return {
+    available: true,
+    dailyYen: Number(daily.data ?? 0),
+    monthlyYen: Number(monthly.data ?? 0),
+    dailyBudgetYen: budget.dailyYen,
+    monthlyBudgetYen: budget.monthlyYen,
+    summary: (summary.data ?? []) as AiUsageSummaryRow[],
+    recent: recent.error ? [] : (recent.data ?? []),
+  };
 }
