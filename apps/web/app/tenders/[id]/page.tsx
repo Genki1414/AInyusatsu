@@ -5,13 +5,17 @@
 // 質問案生成など未着手の機能に依存するため、引き続き含めない。見積依頼（タスク4-1）は
 // tender_lots・partnersだけで実装できるためこのPRで追加する。
 import { AlertTriangle, Calculator, ClipboardCheck, FileText, ListChecks, Send, Sparkles, Target } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
+  activeWorkTab,
   amountBand,
   buildChecklist,
   buildRoadmap,
   canEnterResult,
+  defaultTenderTab,
+  isTenderTabKey,
   checklistProgress,
   isBidResult,
   isTenderStance,
@@ -30,6 +34,7 @@ import {
   type FormState,
   type MarketRate,
   type MatchedAward,
+  type TenderTabKey,
 } from "@ai-nyusatsu-bu/domain";
 import type { TenderStance } from "@ai-nyusatsu-bu/domain";
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
@@ -333,7 +338,11 @@ type SentQuoteRequestRow = {
   }[];
 };
 
-const TABS = [
+/**
+ * タブの並び・ラベル・アイコン。**識別子は domain が持つ**（TENDER_TAB_KEYS）。
+ * ここで型を付けておくと、綴りを間違えたときに tsc が止める。
+ */
+const TABS: readonly { key: TenderTabKey; label: string; icon: LucideIcon }[] = [
   { key: "fit", label: "参加判断", icon: Target },
   { key: "docs", label: "資料", icon: FileText },
   { key: "analysis", label: "公告の中身", icon: Sparkles },
@@ -341,8 +350,7 @@ const TABS = [
   { key: "quote-status", label: "見積状況", icon: ListChecks },
   { key: "cost", label: "見積・原価", icon: Calculator },
   { key: "forms", label: "提出書類", icon: ClipboardCheck },
-] as const;
-type TabKey = (typeof TABS)[number]["key"];
+];
 
 function agencyName(agencies: TenderRow["agencies"]) {
   if (!agencies) return "";
@@ -373,7 +381,8 @@ export default async function TenderDetailPage({
 }) {
   const { id } = await params;
   const { tab: tabParam } = await searchParams;
-  const tab: TabKey = TABS.some((t) => t.key === tabParam) ? (tabParam as TabKey) : "fit";
+  // URLの指定は最優先。無いときだけ、段取りを見てから決める（下の requestedTab 参照）
+  const requestedTab = isTenderTabKey(tabParam) ? tabParam : null;
 
   const { supabase, orgId, orgName, userName, userEmail } = await requireOrgContext();
 
@@ -463,6 +472,33 @@ export default async function TenderDetailPage({
     Object.fromEntries((formStates ?? []).map((s) => [s.form_id, s.state])),
   );
   const checklistDone = checklistProgress(checklist);
+
+  // 【この案件をどうするか】と、参加を決めたあとの段取り。
+  // 参加のときだけ段取りを組む（検討・保留の段階で急かしても、やることが決まっていない）
+  const stance: TenderStance = isTenderStance(companyTender?.stance) ? companyTender.stance : "未定";
+  const roadmap =
+    stance === "参加"
+      ? buildRoadmap({
+          checkedSteps: companyTender?.roadmap_done ?? [],
+          officialStatus,
+          quoteRequested: (sentRequestCount ?? 0) > 0,
+          quoteReceived: false,
+          bidPriceDecided: companyTender?.bid_price !== null && companyTender?.bid_price !== undefined,
+          formsReady: checklistDone.canSubmit,
+          submitted: companyTender?.work_status === "提出済",
+          qaDeadline: tender.qa_deadline,
+          submitDeadline: tender.submit_deadline,
+          bidOpenAt: tender.bid_open_at,
+        })
+      : [];
+
+  // 開くタブ。URLに指定があればそれ、無ければ「いまやる作業」の画面。
+  // **段取りが分かってからでないと決められない**ので、ここまで下げてある。
+  // タブごとに引くデータ（おすすめ協力会社・返信・過去の落札）がこの下にあるのは、
+  // 開かないタブのために問い合わせを増やさないため。
+  const tab: TenderTabKey = requestedTab ?? defaultTenderTab(stance, roadmap);
+  // いま作業するタブに印を付ける。7つ並んでいるとどこを開けばよいか分からない
+  const workTab = activeWorkTab(stance, roadmap);
 
   // 見積依頼先のAIおすすめ選定（ユーザーからの要望：タブを開いたら自動で推薦する）。
   // 正式取得が済んでいない・数量表が無い場合は送信自体ができないため計算しない。
@@ -555,25 +591,6 @@ export default async function TenderDetailPage({
   // 切れた期限のまま依頼が送られていた（2026-08-31 実機で確認）。
   const dueSuggestion = suggestQuoteDueAt(tender.submit_deadline);
 
-  // 【この案件をどうするか】と、参加を決めたあとの段取り。
-  // 参加のときだけ段取りを組む（検討・保留の段階で急かしても、やることが決まっていない）
-  const stance: TenderStance = isTenderStance(companyTender?.stance) ? companyTender.stance : "未定";
-  const roadmap =
-    stance === "参加"
-      ? buildRoadmap({
-          checkedSteps: companyTender?.roadmap_done ?? [],
-          officialStatus,
-          quoteRequested: (sentRequestCount ?? 0) > 0,
-          quoteReceived: false,
-          bidPriceDecided: companyTender?.bid_price !== null && companyTender?.bid_price !== undefined,
-          formsReady: checklistDone.canSubmit,
-          submitted: companyTender?.work_status === "提出済",
-          qaDeadline: tender.qa_deadline,
-          submitDeadline: tender.submit_deadline,
-          bidOpenAt: tender.bid_open_at,
-        })
-      : [];
-
   return (
     <AppShell active="tenders" orgName={orgName} userName={userName}>
       <Link href="/proposals" className="text-xs text-slate-500 hover:underline">
@@ -634,23 +651,40 @@ export default async function TenderDetailPage({
         </div>
       </Panel>
 
-      <div className="flex gap-1 overflow-x-auto">
-        {TABS.map(({ key, label, icon: Icon }) => (
-          <Link
-            key={key}
-            href={`/tenders/${id}?tab=${key}`}
-            className={`inline-flex shrink-0 items-center gap-1.5 rounded-t border-b-2 px-3 py-2 text-xs ${
-              tab === key ? "border-blue-800 bg-white font-semibold text-slate-900" : "border-transparent text-slate-500 hover:bg-white"
-            }`}
-          >
-            <Icon size={13} />
-            {label === "資料"
-              ? `資料（${docSummary.fetched}/${REQUIRED_DOC_KINDS.length}）`
-              : label === "提出書類" && checklistDone.total > 0
-                ? `提出書類（${checklistDone.done}/${checklistDone.total}）`
-                : label}
-          </Link>
-        ))}
+      {/* タブが7つ並んでいて、どこで作業するのか分からなかった。
+          いまやる作業のタブに印を付ける（印の意味は下に1行で書く） */}
+      <div>
+        <nav className="flex gap-1 overflow-x-auto" aria-label="案件の情報">
+          {TABS.map(({ key, label, icon: Icon }) => (
+            <Link
+              key={key}
+              href={`/tenders/${id}?tab=${key}`}
+              aria-current={tab === key ? "page" : undefined}
+              className={`inline-flex shrink-0 items-center gap-1.5 rounded-t border-b-2 px-3 py-2 text-xs ${
+                tab === key ? "border-blue-800 bg-white font-semibold text-slate-900" : "border-transparent text-slate-500 hover:bg-white"
+              }`}
+            >
+              <Icon size={13} />
+              {label === "資料"
+                ? `資料（${docSummary.fetched}/${REQUIRED_DOC_KINDS.length}）`
+                : label === "提出書類" && checklistDone.total > 0
+                  ? `提出書類（${checklistDone.done}/${checklistDone.total}）`
+                  : label}
+              {workTab === key && (
+                <span
+                  className="h-1.5 w-1.5 shrink-0 rounded-full bg-blue-700"
+                  title="いまやる作業はこのタブです"
+                  aria-label="いまやる作業"
+                />
+              )}
+            </Link>
+          ))}
+        </nav>
+        {workTab !== null && workTab !== tab && (
+          <p className="px-3 pt-1.5 text-xs text-slate-500">
+            ● の付いたタブが、いまやる作業です。
+          </p>
+        )}
       </div>
 
       {tab === "fit" && <FitTab proposal={proposal} pastAwards={pastAwards} />}

@@ -71,3 +71,4 @@ export * from "./quote_send_result";
 export * from "./worker_health";
 export * from "./crawl_failure";
 export * from "./today_tasks";
+export * from "./tender_tab";
