@@ -8,11 +8,11 @@
 // 提案（proposals）があればそれを使い、無ければ「未判定」と出す（推測しない）。
 //
 // 絞り込みはURLのクエリで持つ（GETフォーム）。条件をそのまま共有・ブックマークできる。
-import { ListChecks, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { CollectPill, DeadlinePill, Panel, Pill, ProposePill, btnClass } from "@/components/ui";
-import { StanceButtons } from "./stance-buttons";
+import { TenderCard } from "./tender-card";
 import { requireOrgContext } from "@/lib/auth";
 import { AREA_OPTIONS, ITEM_OPTIONS, PREFECTURE_OPTIONS, QUAL_CATEGORIES, REGION_PREFECTURES } from "@/lib/catalog";
 import {
@@ -440,7 +440,7 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
         const dl = daysLeft(t.submit_deadline);
         const budget = yen(t.budget);
         return (
-          <Panel key={t.id}>
+          <TenderCard key={t.id} tenderId={t.id} tenderName={t.name} stance={stanceByTender.get(t.id)}>
             <div className="flex flex-wrap items-start gap-3">
               <div className="min-w-0 flex-1">
                 <Link prefetch={false} href={`/tenders/${t.id}`} className="text-sm font-semibold leading-snug hover:underline">
@@ -481,17 +481,7 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
                 </div>
               )}
             </div>
-            {/* 【一覧から振り分けられるようにする】
-                1件ずつ開いて判断していると、20件で20往復になる。
-                「参加」は段取りが始まるので案件ページで押す（stance-buttons.tsx 参照） */}
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <Link prefetch={false} href={`/tenders/${t.id}`} className={btnClass("primary")}>
-                <ListChecks size={12} />
-                案件を見る
-              </Link>
-              <StanceButtons tenderId={t.id} stance={stanceByTender.get(t.id)} />
-            </div>
-          </Panel>
+          </TenderCard>
         );
       })}
 
