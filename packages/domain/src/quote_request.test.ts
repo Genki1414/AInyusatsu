@@ -132,6 +132,29 @@ describe("buildQuoteRequestEmail", () => {
   });
 });
 
+describe("buildQuoteRequestEmail（見積書の送り方）", () => {
+  // 以前は資料請求か見送りしか書いておらず、見積書の送り先がどこにも無かった
+  it("お見積りまでの流れと、返信でも受け取れることを書く", () => {
+    const { body } = buildQuoteRequestEmail({
+      senderOrgName: "東葉総合サービス株式会社",
+      senderContactName: "山田 太郎",
+      senderContactEmail: "yamada@example.co.jp",
+      tenderName: "庁舎清掃業務委託",
+      agencyName: "関東地方整備局",
+      place: null,
+      termFrom: null,
+      termTo: null,
+      dueAtLabel: "2026/08/20 17:00",
+      trade: "清掃",
+      lots: [],
+      responseUrl: "https://example.com/q/abc123",
+    });
+    expect(body).toContain("【お見積りまでの流れ】");
+    expect(body).toContain("その資料メールにご返信いただき、見積書をご添付ください");
+    expect(body).toContain("このメールにそのままご返信いただく形でも受け取れます。");
+  });
+});
+
 describe("buildQuoteRequestEmail（数量表が無い場合）", () => {
   it("内訳の代わりに、公告資料を確認してもらう案内を入れる", () => {
     const { body } = buildQuoteRequestEmail({

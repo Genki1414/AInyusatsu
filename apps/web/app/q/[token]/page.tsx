@@ -5,6 +5,7 @@
 // このページに限りservice_roleの使用が前提になる）。
 import { notFound } from "next/navigation";
 import { createServiceClient } from "@ai-nyusatsu-bu/db";
+import { quoteDueText } from "@ai-nyusatsu-bu/domain";
 import { QuoteResponseForm } from "./quote-response-form";
 import { RecordOpened } from "./opened";
 
@@ -47,12 +48,6 @@ function one<T>(value: T | T[] | null | undefined): T | null {
   return Array.isArray(value) ? (value[0] ?? null) : value;
 }
 
-function dueLabel(iso: string | null): string {
-  if (!iso) return "未確認";
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "未確認" : d.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
-}
-
 // 期限を過ぎても回答自体は受け付ける（遅れた連絡でも依頼元には有用なため）。
 // ただし気づかずに送ってしまわないよう、画面には明示する。
 function isAfterDue(iso: string | null): boolean {
@@ -88,7 +83,7 @@ export default async function QuoteResponsePage({ params }: { params: Promise<{ 
   const tender = one(request.tenders);
   const agency = tender ? one(tender.agencies) : null;
   const org = one(request.organizations);
-  const dueAtLabel = dueLabel(request.due_at);
+  const dueAtLabel = quoteDueText(request.due_at);
   const afterDue = isAfterDue(request.due_at);
 
   return (
@@ -141,6 +136,37 @@ export default async function QuoteResponsePage({ params }: { params: Promise<{ 
             </ul>
           </div>
         )}
+      </section>
+
+      {/* 【なぜ流れを書くか】
+          このページには見積金額の入力欄が無い（正式な見積書として弱いため入れていない。
+          actions.ts の冒頭参照）。協力会社から見ると「見積を頼まれたのに金額を入れる場所が無い」
+          状態で、見積書の送り先もどこにも書いていなかった（2026-10-17 に気づいた）。 */}
+      <section className="rounded border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+        <h2 className="text-xs font-semibold text-slate-500">お見積りまでの流れ</h2>
+        <ol className="mt-2 space-y-1.5">
+          <li className="flex gap-2">
+            <span className="shrink-0 font-semibold text-blue-800">1</span>
+            <span>
+              下の欄で<span className="font-medium">「資料をお願いする」</span>をお送りください
+            </span>
+          </li>
+          <li className="flex gap-2">
+            <span className="shrink-0 font-semibold text-blue-800">2</span>
+            <span>資料のダウンロードリンクをメールでお送りします</span>
+          </li>
+          <li className="flex gap-2">
+            <span className="shrink-0 font-semibold text-blue-800">3</span>
+            <span>
+              <span className="font-medium">その資料メールにご返信いただき、見積書をご添付ください</span>
+              （本文にお書きいただく形でも差し支えありません）
+            </span>
+          </li>
+        </ol>
+        <p className="mt-2.5 border-t border-slate-200 pt-2.5 text-xs text-slate-500">
+          このページでは金額をお預かりしません。お見積りはメールでお送りください。
+          ご都合が合わない場合は「今回は見送る」をお送りいただければ、それ以上のご連絡はいたしません。
+        </p>
       </section>
 
       <QuoteResponseForm

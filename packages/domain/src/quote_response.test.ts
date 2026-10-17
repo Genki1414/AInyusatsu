@@ -123,6 +123,13 @@ describe("buildDocumentsEmail", () => {
     expect(buildDocumentsEmail(base).subject).toBe("【資料送付】須崎庁舎浄化槽排水ポンプ修繕");
   });
 
+  // 返信先にはこの見積あての受信アドレスが入っている（replyToList）。
+  // そのまま返信すれば届くのに、そう書いていなかった
+  it("見積書は返信で送ってほしいことを書く", () => {
+    const { body } = buildDocumentsEmail(base);
+    expect(body).toContain("このメールにそのままご返信いただき、見積書をご添付ください。");
+  });
+
   it("宛名・案件名・業種・全リンク・失効日時・回答期限が入る", () => {
     const { body } = buildDocumentsEmail(base);
     expect(body).toContain("東北三上機材株式会社 様");
