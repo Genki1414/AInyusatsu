@@ -11,7 +11,8 @@
 import { ListChecks, Search } from "lucide-react";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
-import { CollectPill, DeadlinePill, Panel, Pill, ProposePill, StancePill, btnClass } from "@/components/ui";
+import { CollectPill, DeadlinePill, Panel, Pill, ProposePill, btnClass } from "@/components/ui";
+import { StanceButtons } from "./stance-buttons";
 import { requireOrgContext } from "@/lib/auth";
 import { AREA_OPTIONS, ITEM_OPTIONS, PREFECTURE_OPTIONS, QUAL_CATEGORIES, REGION_PREFECTURES } from "@/lib/catalog";
 import {
@@ -447,7 +448,6 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
                 </Link>
                 <div className="mt-0.5 text-xs text-slate-500">{agencyName(t.agencies)}</div>
                 <div className="mt-2 flex flex-wrap gap-1">
-                  <StancePill stance={stanceByTender.get(t.id)} />
                   <ResultPill result={resultByTender.get(t.id)} />
                   <CollectPill s={t.collect_status} />
                   {verdict.kind === "提案対象" && <ProposePill s={verdict.status} />}
@@ -481,11 +481,15 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
                 </div>
               )}
             </div>
-            <div className="mt-3">
+            {/* 【一覧から振り分けられるようにする】
+                1件ずつ開いて判断していると、20件で20往復になる。
+                「参加」は段取りが始まるので案件ページで押す（stance-buttons.tsx 参照） */}
+            <div className="mt-3 flex flex-wrap items-center gap-2">
               <Link prefetch={false} href={`/tenders/${t.id}`} className={btnClass("primary")}>
                 <ListChecks size={12} />
                 案件を見る
               </Link>
+              <StanceButtons tenderId={t.id} stance={stanceByTender.get(t.id)} />
             </div>
           </Panel>
         );

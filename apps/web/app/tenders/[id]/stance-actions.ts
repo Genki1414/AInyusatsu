@@ -8,8 +8,9 @@
 // stance は人がどうしたいかなので、片方を変えてももう片方は動かさない。
 
 import { revalidatePath } from "next/cache";
-import { acceptsAmount, isBidResult, isRoadmapStepKey, isTenderStance, isWon } from "@ai-nyusatsu-bu/domain";
+import { acceptsAmount, isBidResult, isRoadmapStepKey, isWon } from "@ai-nyusatsu-bu/domain";
 import { requireOrgContext } from "@/lib/auth";
+import { saveStance } from "@/lib/stance";
 
 export type StanceState = { error: string | null; message: string | null };
 
@@ -18,23 +19,20 @@ function text(formData: FormData, key: string): string {
   return typeof value === "string" ? value : "";
 }
 
-export async function setTenderStance(_prev: StanceState, formData: FormData): Promise<StanceState> {
+/**
+ * 判断を保存する。**値は引数で受け取る**（apps/web/AGENTS.md の落とし穴）。
+ * 案件ページは form 経由なので setTenderStance から呼び、一覧は直接呼ぶ。
+ * 実装を2つ持つと、片方だけ直して食い違う。
+ */
+export async function setStance(tenderId: string, stance: string): Promise<StanceState> {
   const { supabase, orgId } = await requireOrgContext();
 
-  const tenderId = text(formData, "tender_id").trim();
-  const stance = text(formData, "stance").trim();
-  if (tenderId === "") return { error: "案件が指定されていません", message: null };
-  // 画面が壊れて知らない値が入ると、一覧の絞り込みから外れて見えなくなる
-  if (!isTenderStance(stance)) return { error: `「${stance}」は選べません`, message: null };
-
-  const now = new Date().toISOString();
-  const { error } = await supabase
-    .from("company_tenders")
-    .upsert({ org_id: orgId, tender_id: tenderId, stance, stance_at: now }, { onConflict: "org_id,tender_id" });
-  if (error) return { error: `保存できませんでした（${error.message}）`, message: null };
+  const error = await saveStance(supabase, orgId, tenderId, stance);
+  if (error !== null) return { error, message: null };
 
   revalidatePath(`/tenders/${tenderId}`);
   revalidatePath("/tenders");
+  revalidatePath("/proposals");
   revalidatePath("/");
   return {
     error: null,
@@ -43,6 +41,10 @@ export async function setTenderStance(_prev: StanceState, formData: FormData): P
         ? "「参加」にしました。下に、提出までの段取りが出ます。"
         : `「${stance}」にしました。`,
   };
+}
+
+export async function setTenderStance(_prev: StanceState, formData: FormData): Promise<StanceState> {
+  return setStance(text(formData, "tender_id").trim(), text(formData, "stance").trim());
 }
 
 export type BidResultState = { error: string | null; message: string | null };
