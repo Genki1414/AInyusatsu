@@ -11,6 +11,7 @@ import { createServiceClient } from "@ai-nyusatsu-bu/db";
 import { inboundEmailDomain, sendEmail, serviceFromAddress } from "@ai-nyusatsu-bu/notifications";
 import {
   buildQuoteReminderEmail,
+  quoteDueText,
   replyToList,
   resolveSenderIdentity,
   shouldRemind,
@@ -50,10 +51,6 @@ type QuoteRequestRef = {
 function one<T>(value: T | T[] | null | undefined): T | null {
   if (!value) return null;
   return Array.isArray(value) ? (value[0] ?? null) : value;
-}
-
-function jst(iso: string): string {
-  return new Date(iso).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
 }
 
 function appUrl(): string {
@@ -165,7 +162,8 @@ export async function runQuoteReminders(now: Date = new Date()): Promise<RemindQ
       senderContactEmail: sender.replyTo,
       tenderName: one(request.tenders)?.name ?? "案件名未確認",
       trade: request.trade,
-      dueAtLabel: jst(dueAt),
+      // 秒まで出さず、残り日数も併記する（依頼メール・資料送付メールと揃える）
+      dueAtLabel: quoteDueText(dueAt, now),
       responseUrl: `${appUrl()}/q/${row.response_token}`,
     });
 

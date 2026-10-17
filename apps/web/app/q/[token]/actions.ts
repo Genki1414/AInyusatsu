@@ -22,6 +22,7 @@ import {
   buildDocumentsEmail,
   documentFilenames,
   signedUrlTtlSeconds,
+  quoteDueText,
   replyToList,
   sortDocumentsByKind,
   type QuoteResponseChoice,
@@ -30,12 +31,6 @@ import {
 export type QuoteResponseState = { error: string | null; saved: boolean };
 
 const BUCKET = process.env.TENDER_DOCUMENTS_BUCKET || "tender-documents";
-
-function jst(iso: string | null): string | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? null : d.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
-}
 
 function toNullableString(value: FormDataEntryValue | null): string | null {
   if (typeof value !== "string" || value.trim() === "") return null;
@@ -217,7 +212,8 @@ async function sendDocuments(supabase: Supabase, ctx: QuoteContext): Promise<str
     senderContactEmail: sender.replyTo,
     tenderName: ctx.request.tenderName,
     trade: ctx.request.trade,
-    dueAtLabel: jst(ctx.request.dueAt),
+    // 秒まで出さず、残り日数も併記する（依頼メール・催促メールと揃える）
+    dueAtLabel: ctx.request.dueAt ? quoteDueText(ctx.request.dueAt) : null,
     expiresAtLabel,
     links,
   });
