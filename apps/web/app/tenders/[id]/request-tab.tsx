@@ -30,7 +30,15 @@ import {
   type RegisterPartnerState,
 } from "./outreach-actions";
 import { btnClass, Panel, Pill } from "@/components/ui";
-import { buildOutreachMessage, buildQuoteRequestEmail, groupLotsByTrade, type QuoteRequestLot } from "@ai-nyusatsu-bu/domain";
+import {
+  buildOutreachMessage,
+  buildQuoteRequestEmail,
+  groupLotsByTrade,
+  quoteSendConfirmMessage,
+  quoteSendCount,
+  type QuoteRequestLot,
+  type QuoteSendTarget,
+} from "@ai-nyusatsu-bu/domain";
 import { AREA_OPTIONS, PREFECTURE_OPTIONS, TRADE_OPTIONS } from "@/lib/catalog";
 import { sendQuoteRequests, type SendQuoteRequestsState } from "./actions";
 import { DUE_AT_PLACEHOLDER, RESPONSE_URL_PLACEHOLDER } from "./quote-request-shared";
@@ -397,13 +405,17 @@ function PartnerPicker({
   trade,
   candidates,
   recommended,
-  onSelectedCountChange,
+  onSelectionChange,
 }: {
   trade: string;
   candidates: RequestTabPartner[];
   recommended: Record<string, string>;
-  /** 送信ボタンに「何社へ送るか」を出すため、選択数を親へ伝える */
-  onSelectedCountChange: (trade: string, count: number) => void;
+  /**
+   * 送信前に宛先を並べるため、選んだ会社名を親へ伝える。
+   * **数だけでは足りない。** 絞り込みで隠れた行のチェックは外れないので、
+   * 画面に出ていない会社が入っていても気づけない（quote_send_confirm.ts 参照）。
+   */
+  onSelectionChange: (trade: string, partnerNames: string[]) => void;
 }) {
   const [query, setQuery] = useState("");
   const [tradeOnly, setTradeOnly] = useState(true);
@@ -420,13 +432,22 @@ function PartnerPicker({
   const visibleCount = candidates.filter(matches).length;
   const noMatch = visibleCount === 0;
   const listRef = useRef<HTMLDivElement>(null);
+  const nameById = new Map(candidates.map((p) => [p.id, p.name]));
 
-  // チェックボックスは非制御（フォーム送信時の値をそのまま使うため）で、選択数もこのref経由で
+  // チェックボックスは非制御（フォーム送信時の値をそのまま使うため）で、選択もこのref経由で
   // 数え直す（ボタンでのDOM直接操作はchangeイベントを発火しないため、都度手動で更新する）。
+  //
+  // 絞り込みで隠れている行も拾う。隠れているだけでフォームからは送信されるので、
+  // ここで外すと画面の表示と実際に送る先が食い違う。
   function updateSelectedCount() {
-    const count = listRef.current?.querySelectorAll<HTMLInputElement>('input[type="checkbox"]:checked').length ?? 0;
-    setSelectedCount(count);
-    onSelectedCountChange(trade, count);
+    const checked = Array.from(
+      listRef.current?.querySelectorAll<HTMLInputElement>('input[type="checkbox"]:checked') ?? [],
+    );
+    setSelectedCount(checked.length);
+    onSelectionChange(
+      trade,
+      checked.map((el) => nameById.get(el.value) ?? "名前が分かりません"),
+    );
   }
 
   // 「表示中の全社を選択」はDOMを直接操作する。hiddenが付いていない
@@ -598,9 +619,9 @@ export function RequestTab({
   // 【useActionState を使わない】
   // 送信が済んだら選択を消したいが、その判定を useEffect でやると
   // 「効果の中で setState するな」に触れる。送信の関数の中で決める。
-  // 送信ボタンに「何社へ送るか」を出す。同じ会社を複数の業種で選んだ場合は、
+  // 送信前に宛先を並べる。同じ会社を複数の業種で選んだ場合は、
   // 業種ごとに1通ずつ送られるので、通数として数える。
-  const [selectedByTrade, setSelectedByTrade] = useState<Record<string, number>>({});
+  const [selectedByTrade, setSelectedByTrade] = useState<Record<string, string[]>>({});
   const [state, setState] = useState<SendQuoteRequestsState>(initialState);
   const [pending, setPending] = useState(false);
   // 送信が済むたびに増える。PartnerPicker の key にしてあるので、
@@ -636,10 +657,20 @@ export function RequestTab({
   };
 
 
-  const handleSelectedCountChange = useCallback((trade: string, count: number) => {
-    setSelectedByTrade((prev) => (prev[trade] === count ? prev : { ...prev, [trade]: count }));
+  const handleSelectionChange = useCallback((trade: string, partnerNames: string[]) => {
+    setSelectedByTrade((prev) => {
+      const before = prev[trade];
+      if (before && before.length === partnerNames.length && before.every((n, i) => n === partnerNames[i])) return prev;
+      return { ...prev, [trade]: partnerNames };
+    });
   }, []);
-  const totalSelected = tradeGroups.reduce((sum, g) => sum + (selectedByTrade[g.trade] ?? 0), 0);
+  // 業種の枠を外したら、その業種の選択は数えない（枠が無ければ送る先も無い）
+  const sendTargets: QuoteSendTarget[] = tradeGroups.map((g) => ({
+    trade: g.trade,
+    partnerNames: selectedByTrade[g.trade] ?? [],
+  }));
+  const totalSelected = quoteSendCount(sendTargets);
+  const confirmMessage = quoteSendConfirmMessage(sendTargets);
 
   if (officialStatus !== "取得済") {
     return (
@@ -762,7 +793,7 @@ export function RequestTab({
                   candidates={candidates}
                   recommended={recommendedMap}
                   key={`${group.trade}-${sendCount}`}
-                  onSelectedCountChange={handleSelectedCountChange}
+                  onSelectionChange={handleSelectionChange}
                 />
               )}
 
@@ -817,17 +848,36 @@ export function RequestTab({
         )}
         {state.summary && <p className="text-xs text-emerald-700">{state.summary}</p>}
 
+        {/* 【送る先を押す前に並べる】
+            依頼先の一覧は絞り込みで表示を減らすが、隠れた行のチェックは外れない
+            （CSSで display:none にしているだけなので、フォームからは送信される）。
+            選択を勝手に消すと利用者の操作を取り消してしまうので、消すのではなく
+            送る先を全部並べて見えるようにする。 */}
+        {totalSelected > 0 && (
+          <Panel title={`送信する宛先（${totalSelected}通）`}>
+            <ul className="space-y-1.5">
+              {sendTargets
+                .filter((t) => t.partnerNames.length > 0)
+                .map((t) => (
+                  <li key={t.trade} className="flex flex-wrap items-baseline gap-1.5 text-xs">
+                    <Pill>{t.trade}</Pill>
+                    <span className="text-slate-700">{t.partnerNames.join("／")}</span>
+                  </li>
+                ))}
+            </ul>
+            <p className="mt-2 text-xs text-slate-500">
+              同じ会社を複数の業種で選んだ場合は、業種ごとに1通ずつ送られます。
+            </p>
+          </Panel>
+        )}
+
         <div className="flex flex-wrap items-center gap-2">
           <ConfirmSubmitButton
-            confirmMessage={
-              totalSelected > 0
-                ? `${totalSelected}社へ本当にメールを送信します。よろしいですか？`
-                : "選択した協力会社へ本当にメールを送信します。よろしいですか？"
-            }
+            confirmMessage={confirmMessage ?? "依頼先を1社以上選んでください。"}
             disabled={pending || totalSelected === 0}
             className="rounded border border-blue-800 bg-blue-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-900 disabled:opacity-40"
           >
-            {pending ? "送信中..." : totalSelected > 0 ? `${totalSelected}社へ見積依頼を送信する` : "見積依頼を送信する"}
+            {pending ? "送信中..." : totalSelected > 0 ? `${totalSelected}通の見積依頼を送信する` : "見積依頼を送信する"}
           </ConfirmSubmitButton>
           <Pill tone="amber">実際にメールが送信されます</Pill>
           {totalSelected === 0 && <span className="text-xs text-slate-500">依頼先を1社以上選んでください</span>}
