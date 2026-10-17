@@ -348,7 +348,7 @@ export default async function HomePage() {
                     {x.name}
                   </Link>
                   <span className={`ml-auto text-xs tabular-nums ${x.d <= 2 ? "font-semibold text-rose-700" : "text-slate-500"}`}>
-                    残{x.d}日
+                    {remainingText(x.d)}
                   </span>
                 </li>
               ))}
