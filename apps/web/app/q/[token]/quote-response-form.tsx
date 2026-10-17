@@ -47,11 +47,19 @@ export function QuoteResponseForm({
       )}
 
       {state.saved && (
-        <p className="mt-1 rounded bg-emerald-50 px-2 py-1.5 text-sm text-emerald-800">
-          {justSentDocuments
-            ? "送信しました。資料をメールでお送りしましたのでご確認ください。"
-            : "送信しました。ありがとうございます。"}
-        </p>
+        <div className="mt-1 rounded bg-emerald-50 px-2 py-1.5 text-sm text-emerald-800">
+          {justSentDocuments ? (
+            <>
+              <p>送信しました。資料をメールでお送りしましたのでご確認ください。</p>
+              {/* 見積書の送り先を書いていなかったため、ここで必ず伝える */}
+              <p className="mt-0.5 font-medium">
+                お見積りは、その資料メールにそのままご返信いただき、見積書をご添付ください。
+              </p>
+            </>
+          ) : (
+            <p>送信しました。ありがとうございます。この案件についてのご連絡は、これで終わりです。</p>
+          )}
+        </div>
       )}
 
       {!state.saved && alreadyReplied && (
@@ -95,8 +103,13 @@ export function QuoteResponseForm({
           </label>
         </div>
 
-        {choice === "request_documents" && (
-          <p className="text-xs text-slate-500">送信すると、この案件の資料のダウンロードリンクをメールでお送りします。</p>
+        {choice === "request_documents" ? (
+          <p className="text-xs text-slate-500">
+            送信すると、この案件の資料のダウンロードリンクをメールでお送りします。
+            <span className="font-medium">お見積りは、そのメールにご返信ください。</span>
+          </p>
+        ) : (
+          <p className="text-xs text-slate-500">送信すると、この案件についてのご連絡は終わります。資料はお送りしません。</p>
         )}
 
         <label className="block text-sm">

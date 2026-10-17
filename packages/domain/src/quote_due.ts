@@ -14,7 +14,35 @@
 // 日が足りないときは、勝手に「大丈夫な日付」を作らず、短くしたことを画面に書く。
 // 提出期限が取れていない・過ぎている場合は日付を作らない（CLAUDE.md 最重要の前提5）。
 
+import { daysUntilDeadline, remainingText } from "./deadline";
+
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * 回答期限を「2026/10/24 17:00（あと7日）」の形にする。協力会社の回答ページで使う。
+ *
+ * **公告の期限には使わない。** 提出期限・質問期限は deadline.ts の deadlineText を使い、
+ * 時刻を出さない（画面の数字で締切時刻を判断させないため）。
+ * こちらは依頼元が自分で決めて相手に伝えた時刻なので、時刻まで出す。
+ *
+ * これまでは toLocaleString をそのまま使っていて「2026/10/24 17:00:00」と
+ * 秒まで出ており、しかも残り日数が無かった。
+ */
+export function quoteDueText(dueAt: string | null | undefined, now: Date = new Date()): string {
+  if (dueAt === null || dueAt === undefined || dueAt === "") return "未確認";
+  const at = Date.parse(dueAt);
+  if (Number.isNaN(at)) return "未確認";
+  const label = new Intl.DateTimeFormat("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(at));
+  return `${label}（${remainingText(daysUntilDeadline(dueAt, now))}）`;
+}
 
 /** 提出期限の何日前を目安にするか。自社が見積を集めて応札価格を決める時間。 */
 export const QUOTE_DUE_LEAD_DAYS = 3;

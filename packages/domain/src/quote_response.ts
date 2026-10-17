@@ -78,7 +78,19 @@ export function buildDocumentsEmail(input: DocumentsEmailInput): { subject: stri
     "",
   ];
   if (input.dueAtLabel) lines.push(`お見積りの回答期限：${input.dueAtLabel}`, "");
-  lines.push("ご検討のほど、よろしくお願いいたします。", "", "--", input.senderOrgName);
+  // 【なぜ返信をお願いするか】
+  // このメールの返信先には、この見積あての受信アドレスが入っている（replyToList）。
+  // そのまま返信すれば依頼元に届くのに、そう書いていなかったため、
+  // 協力会社から見ると見積書の送り先が分からない状態だった（2026-10-17 に気づいた）。
+  lines.push(
+    "お見積りは、このメールにそのままご返信いただき、見積書をご添付ください。",
+    "本文にお書きいただく形でも差し支えありません。",
+    "",
+    "ご検討のほど、よろしくお願いいたします。",
+    "",
+    "--",
+    input.senderOrgName,
+  );
   if (input.senderContactEmail) lines.push(input.senderContactEmail);
   return { subject: `【資料送付】${input.tenderName}`, body: lines.join("\n") };
 }

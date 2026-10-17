@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { QUOTE_DUE_LEAD_DAYS, suggestQuoteDueAt, validateQuoteDueAt } from "./quote_due";
+import { QUOTE_DUE_LEAD_DAYS, quoteDueText, suggestQuoteDueAt, validateQuoteDueAt } from "./quote_due";
 
 // 2026-08-31 17:00 JST（実機で不具合を見つけた時刻に合わせる）
 const NOW = new Date("2026-08-31T17:00:00+09:00");
@@ -85,5 +85,25 @@ describe("validateQuoteDueAt", () => {
   it("空や壊れた値は止める", () => {
     expect(validateQuoteDueAt("", NOW)).toContain("入力してください");
     expect(validateQuoteDueAt("きのう", NOW)).toContain("入力してください");
+  });
+});
+
+describe("quoteDueText", () => {
+  const NOW = new Date("2026-10-17T10:00:00+09:00");
+
+  it("日付・時刻・残り日数を並べる（秒は出さない）", () => {
+    expect(quoteDueText("2026-10-24T17:00:00+09:00", NOW)).toBe("2026/10/24 17:00（あと7日）");
+  });
+
+  it("今日・明日・超過も残り日数の文言に揃える", () => {
+    expect(quoteDueText("2026-10-17T17:00:00+09:00", NOW)).toBe("2026/10/17 17:00（今日まで）");
+    expect(quoteDueText("2026-10-18T09:00:00+09:00", NOW)).toBe("2026/10/18 09:00（明日まで）");
+    expect(quoteDueText("2026-10-14T17:00:00+09:00", NOW)).toBe("2026/10/14 17:00（3日過ぎています）");
+  });
+
+  it("期限が無い・読めない場合は未確認（推測した日付を作らない）", () => {
+    for (const bad of [null, undefined, "", "きのう"]) {
+      expect(quoteDueText(bad, NOW)).toBe("未確認");
+    }
   });
 });
