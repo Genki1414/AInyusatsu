@@ -11,7 +11,7 @@
 import { ListChecks, Search } from "lucide-react";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
-import { CollectPill, Panel, Pill, ProposePill, btnClass } from "@/components/ui";
+import { CollectPill, Panel, Pill, ProposePill, StancePill, btnClass } from "@/components/ui";
 import { requireOrgContext } from "@/lib/auth";
 import { AREA_OPTIONS, ITEM_OPTIONS, PREFECTURE_OPTIONS, QUAL_CATEGORIES, REGION_PREFECTURES } from "@/lib/catalog";
 import {
@@ -113,20 +113,6 @@ function pickOption(raw: string | undefined, options: readonly string[]): string
 /** ilikeのパターンで特別な意味を持つ文字を落とす。 */
 function likePattern(keyword: string): string {
   return `%${keyword.replace(/[%_,]/g, " ")}%`;
-}
-
-/** 判断（参加 / 検討 / 保留 / 見送り）の色。案件ページの表示と揃える。 */
-const STANCE_TONE: Record<string, "green" | "amber" | "slate" | "rose"> = {
-  参加: "green",
-  検討: "amber",
-  保留: "slate",
-  見送り: "rose",
-};
-
-/** 未定（＝まだ決めていない）は出さない。決めたものだけ見せる */
-function StancePill({ stance }: { stance: string | undefined }) {
-  if (!stance || stance === "未定") return null;
-  return <Pill tone={STANCE_TONE[stance] ?? "slate"}>{stance}</Pill>;
 }
 
 /** 入札の結果。未入力は出さない（決まっていないものを見せない） */
