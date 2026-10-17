@@ -23,6 +23,7 @@ import {
   SELECTABLE_STANCES,
   type BidResult,
   type RoadmapStep,
+  type RoadmapTab,
   type TenderStance,
 } from "@ai-nyusatsu-bu/domain";
 import { btnClass, Panel, Pill } from "@/components/ui";
@@ -158,23 +159,18 @@ function Step({
       {/* なぜ押せないかを、その場に出す（黙って効かないチェックにしない） */}
       {step.lockedReason !== null && <span className="text-xs text-slate-400">{step.lockedReason}</span>}
       {current && <span className="w-full text-xs leading-relaxed text-slate-600">{step.note}</span>}
-      {current && <StepLink label={step.label} tenderId={tenderId} />}
+      {current && <StepLink tab={step.tab} tenderId={tenderId} />}
     </li>
   );
 }
 
-/** いまやる段取りから、その作業のタブへ直接飛ばす。探させない。 */
-function StepLink({ label, tenderId }: { label: string; tenderId: string }) {
-  const tab =
-    label.includes("名義で取得") || label.includes("質問")
-      ? "docs"
-      : label.includes("見積を依頼")
-        ? "request"
-        : label.includes("応札価格")
-          ? "cost"
-          : label.includes("提出書類") || label.includes("入札書")
-            ? "forms"
-            : null;
+/**
+ * いまやる段取りから、その作業のタブへ直接飛ばす。探させない。
+ *
+ * 飛び先は段取りの定義（tender_stance.ts の STEP_TAB）が持つ。
+ * ラベルから推測していたときは、文言を直した拍子にリンクが消えても何も教えてくれなかった。
+ */
+function StepLink({ tab, tenderId }: { tab: RoadmapTab | null; tenderId: string }) {
   if (tab === null) return null;
   return (
     <Link href={`/tenders/${tenderId}?tab=${tab}`} className="text-xs text-blue-800 underline">

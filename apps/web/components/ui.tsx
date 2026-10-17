@@ -106,6 +106,20 @@ export function ProposePill({ s }: { s: string }) {
   );
 }
 
+/** 判断（参加 / 検討 / 保留 / 見送り）の色。案件ページ・一覧・ホームで揃える。 */
+const STANCE_TONE: Record<string, "green" | "amber" | "slate" | "rose"> = {
+  参加: "green",
+  検討: "amber",
+  保留: "slate",
+  見送り: "rose",
+};
+
+/** 未定（＝まだ決めていない）は出さない。決めたものだけ見せる */
+export function StancePill({ stance }: { stance: string | undefined }) {
+  if (!stance || stance === "未定") return null;
+  return <Pill tone={STANCE_TONE[stance] ?? "slate"}>{stance}</Pill>;
+}
+
 export function Verdict({ eligible, score }: { eligible: boolean; score: number }) {
   if (!eligible) {
     return (

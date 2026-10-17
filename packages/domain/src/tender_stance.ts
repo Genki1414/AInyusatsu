@@ -74,6 +74,24 @@ export function isRoadmapStepKey(value: string | null | undefined): value is Roa
   return typeof value === "string" && (ROADMAP_STEP_KEYS as readonly string[]).includes(value);
 }
 
+/** その作業をする画面（案件ページのタブ）。開札のように画面の無いものは null。 */
+export type RoadmapTab = "docs" | "request" | "cost" | "forms";
+
+/**
+ * 段取りごとの作業画面。
+ * **画面側で label から推測しない。** ラベルを直した拍子に飛び先が消える。
+ */
+const STEP_TAB: Record<RoadmapStepKey, RoadmapTab | null> = {
+  docs: "docs",
+  qa: "docs",
+  quote: "request",
+  price: "cost",
+  forms: "forms",
+  submit: "forms",
+  // 開札は待つだけで、こちらから作業する画面が無い
+  open: null,
+};
+
 export type RoadmapStep = {
   key: RoadmapStepKey;
   /** 画面に出す短い動詞。「◯◯する」 */
@@ -92,6 +110,8 @@ export type RoadmapStep = {
   lockedReason: string | null;
   /** やらずに進むことがある段取り。終わっていなくても「いま」にしない */
   optional: boolean;
+  /** その作業をする画面（案件ページのタブ）。無ければ null */
+  tab: RoadmapTab | null;
 };
 
 /**
@@ -119,7 +139,9 @@ export function buildRoadmap(input: RoadmapInput, now: Date = new Date()): Roadm
     open: null,
   };
 
-  const steps: Omit<RoadmapStep, "state" | "daysLeft">[] = [
+  // tab は key から引く（下の map で付ける）ので、ここでは持たせない。
+  // 1行ごとに書くと、段取りを足したときに付け忘れる
+  const steps: Omit<RoadmapStep, "state" | "daysLeft" | "tab">[] = [
     {
       key: "docs",
       label: "資料を御社の名義で取得する",
@@ -195,6 +217,7 @@ export function buildRoadmap(input: RoadmapInput, now: Date = new Date()): Roadm
     ...step,
     state: isDone(step) ? "済" : i === firstUndone ? "いま" : "これから",
     daysLeft: daysUntilDeadline(step.deadline, now),
+    tab: STEP_TAB[step.key],
   }));
 }
 

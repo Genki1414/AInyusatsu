@@ -2,19 +2,54 @@
 //
 // プロトタイプのHomeViewは「承認待ち」「協力会社からの返信」「AIの稼働ログ」も持つが、
 // これらは見積依頼の下書き作成・返信受信・活動ログ（タスク4系）が無いと実データが無いため、
-// このタスク（3-3）では初期設定チェックリストと期限ボードのみを実装する。
-import { Compass } from "lucide-react";
+// 初期設定チェックリストと期限ボードから実装した（タスク3-3）。
+//
+// 【2026-10-17】「今日やること」が件数3つだけで、何をすればよいか書いていなかった
+// （ユーザー要望）。案件ごとの段取り（buildRoadmap）が出している「いま」を並べる形に変えた。
+// 件数は数えられても手は動かないので、作業名・期限・飛び先を1行ずつ出す。
+import { ChevronRight, Compass } from "lucide-react";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
-import { Panel, Pill, ProposePill } from "@/components/ui";
+import { Panel, Pill, ProposePill, StancePill } from "@/components/ui";
 import { requireOrgContext } from "@/lib/auth";
-import { daysUntilDeadline, evaluateCoverage, type CoverageAgency } from "@ai-nyusatsu-bu/domain";
+import {
+  buildChecklist,
+  checklistProgress,
+  daysUntilDeadline,
+  deadlineDate,
+  evaluateCoverage,
+  isTenderStance,
+  remainingText,
+  todayTasks,
+  type ChecklistForm,
+  type CoverageAgency,
+  type FormState,
+  type TodayTask,
+  type TodayTaskSource,
+} from "@ai-nyusatsu-bu/domain";
 
 type ProposalDeadlineRow = {
   id: string;
   status: string;
   tenders: {
     id: string;
+    name: string;
+    qa_deadline: string | null;
+    submit_deadline: string | null;
+    bid_open_at: string | null;
+    collect_status: string;
+  } | null;
+};
+
+/** 自分で「参加」「検討」と決めた案件。やることはここから出す */
+type StanceRow = {
+  tender_id: string;
+  stance: string;
+  official_status: string;
+  work_status: string;
+  bid_price: number | null;
+  roadmap_done: string[] | null;
+  tenders: {
     name: string;
     qa_deadline: string | null;
     submit_deadline: string | null;
@@ -48,6 +83,7 @@ export default async function HomePage() {
     { count: consideringCount },
     { data: proposalRows },
     { data: agencyRows },
+    { data: stanceRows },
   ] =
     await Promise.all([
       supabase.from("company_profiles").select("qual_categories").eq("org_id", orgId).maybeSingle<{ qual_categories: string[] }>(),
@@ -65,6 +101,16 @@ export default async function HomePage() {
         .select("id, name, expected_freq, last_success_at, sources, parent_id")
         .eq("active", true)
         .returns<AgencyRow[]>(),
+      // 「今日やること」の素。利用者が自分で決めた案件だけを見る。
+      // 保留・見送り・未定に「やること」は無いので引かない
+      supabase
+        .from("company_tenders")
+        .select(
+          "tender_id, stance, official_status, work_status, bid_price, roadmap_done, tenders(name, qa_deadline, submit_deadline, bid_open_at, collect_status)",
+        )
+        .eq("org_id", orgId)
+        .in("stance", ["参加", "検討"])
+        .returns<StanceRow[]>(),
     ]);
 
   // 公告を出す単位（子を持たない機関）だけを数える（機関マスタ_v2.md §4「葉ノード基準」）
@@ -110,6 +156,73 @@ export default async function HomePage() {
   const activeCount = livePropos.length;
   const consideringRows = livePropos.filter((p) => p.status === "検討中");
 
+  // ── 今日やること ──────────────────────────────────────────
+  //
+  // 件数だけでは何をすればよいか分からないので、案件ごとの段取り（buildRoadmap）が
+  // 出している「いま」をそのまま並べる。**案件ページと同じ関数を通す。**
+  // ここで別の計算をすると、ホームと案件ページが違うことを言い出す。
+  //
+  // 終了した案件は出さない。もう手の打ちようがない。
+  const liveStances = (stanceRows ?? []).filter((r) => r.tenders && r.tenders.collect_status !== "終了");
+  const stanceTenderIds = liveStances.map((r) => r.tender_id);
+
+  // 段取りの判定に要る記録を、案件をまとめて1回で引く（案件ごとに引くと件数ぶん往復する）
+  const [{ data: sentQuoteRows }, { data: formRows }, { data: formStateRows }] = stanceTenderIds.length
+    ? await Promise.all([
+        supabase.from("quote_requests").select("tender_id").in("tender_id", stanceTenderIds).not("sent_at", "is", null)
+          .returns<{ tender_id: string }[]>(),
+        supabase.from("tender_forms").select("id, tender_id, name, source, required, note").in("tender_id", stanceTenderIds)
+          .returns<(ChecklistForm & { tender_id: string })[]>(),
+        supabase.from("company_tender_forms").select("tender_id, form_id, state").in("tender_id", stanceTenderIds)
+          .returns<{ tender_id: string; form_id: string; state: FormState }[]>(),
+      ])
+    : [{ data: [] }, { data: [] }, { data: [] }];
+
+  const quoteRequestedIds = new Set((sentQuoteRows ?? []).map((r) => r.tender_id));
+  const formStatesByTender = new Map<string, Record<string, FormState>>();
+  for (const row of formStateRows ?? []) {
+    const states = formStatesByTender.get(row.tender_id) ?? {};
+    states[row.form_id] = row.state;
+    formStatesByTender.set(row.tender_id, states);
+  }
+  const formsByTender = new Map<string, ChecklistForm[]>();
+  for (const row of formRows ?? []) {
+    formsByTender.set(row.tender_id, [...(formsByTender.get(row.tender_id) ?? []), row]);
+  }
+  /** 提出書類がすべて用意できたか。案件ページ（FormsTab）と同じ判定を通す */
+  function formsReady(tenderId: string): boolean {
+    const forms = formsByTender.get(tenderId);
+    if (!forms?.length) return false;
+    return checklistProgress(buildChecklist(forms, formStatesByTender.get(tenderId) ?? {})).canSubmit;
+  }
+
+  const tasks = todayTasks(
+    liveStances.flatMap((row): TodayTaskSource[] => {
+      if (!row.tenders || !isTenderStance(row.stance)) return [];
+      return [
+        {
+          tenderId: row.tender_id,
+          tenderName: row.tenders.name,
+          stance: row.stance,
+          roadmap: {
+            checkedSteps: row.roadmap_done ?? [],
+            officialStatus: row.official_status,
+            quoteRequested: quoteRequestedIds.has(row.tender_id),
+            // 返信の有無は段取りの判定に使っていない（案件ページも false で渡している）
+            quoteReceived: false,
+            bidPriceDecided: row.bid_price !== null,
+            formsReady: formsReady(row.tender_id),
+            submitted: row.work_status === "提出済",
+            qaDeadline: row.tenders.qa_deadline,
+            submitDeadline: row.tenders.submit_deadline,
+            bidOpenAt: row.tenders.bid_open_at,
+          },
+        },
+      ];
+    }),
+    now,
+  );
+
   return (
     <AppShell active="home" orgName={orgName} userName={userName}>
       {setupLeft.length > 0 && (
@@ -121,22 +234,37 @@ export default async function HomePage() {
         </div>
       )}
 
-      <Panel title="今日やること">
-        <p className="text-xs leading-relaxed text-slate-700">
-          現在、参加を検討できる案件が<span className="font-semibold">{activeCount}件</span>あります。
-        </p>
-        <div className="mt-3 grid grid-cols-2 divide-x divide-slate-100 rounded border border-slate-200 sm:grid-cols-3">
-          {[
-            { l: "提案されている案件", v: activeCount },
-            { l: "検討中の案件", v: consideringRows.length },
-            { l: "3日以内の期限", v: deadlines.filter((x) => x.d <= 3).length },
-          ].map((s) => (
-            <div key={s.l} className="px-3 py-2 text-left">
-              <div className="text-xs text-slate-500">{s.l}</div>
-              <div className={`text-lg font-semibold tabular-nums ${s.v > 0 ? "text-slate-900" : "text-slate-300"}`}>{s.v}</div>
-            </div>
-          ))}
-        </div>
+      <Panel
+        title={tasks.length > 0 ? `今日やること（${tasks.length}件）` : "今日やること"}
+        dense
+        right={tasks.length > 0 ? <span className="text-xs text-slate-400">急ぐ順</span> : undefined}
+      >
+        {tasks.length === 0 ? (
+          <div className="space-y-2 p-3">
+            <p className="text-xs leading-relaxed text-slate-600">
+              {liveStances.length === 0
+                ? "いま手を動かす案件はありません。提案された案件を見て、参加するか決めてください。"
+                : "進めている案件の段取りは、いまのところすべて済んでいます。"}
+            </p>
+            <Link href="/proposals" className="inline-block text-xs text-blue-800 underline">
+              提案された案件を見る（{activeCount}件）
+            </Link>
+          </div>
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {tasks.slice(0, 8).map((task) => (
+              <TaskRow key={task.tenderId} task={task} />
+            ))}
+          </ul>
+        )}
+        {tasks.length > 8 && (
+          <div className="border-t border-slate-100 px-3 py-2">
+            {/* 一覧の絞り込みは判断を1つしか選べないので、参加と検討が混ざるここからは全体へ送る */}
+            <Link href="/tenders" className="text-xs text-blue-800 underline">
+              ほか{tasks.length - 8}件（案件一覧で見る）
+            </Link>
+          </div>
+        )}
       </Panel>
 
       {coverage.checked > 0 && (
@@ -229,5 +357,48 @@ export default async function HomePage() {
         </Panel>
       </div>
     </AppShell>
+  );
+}
+
+/**
+ * やること1件。**押す場所を1つにする。**
+ *
+ * 案件名とボタンを別々に置くと、どちらを押せばよいか迷う。行ごと1つのリンクにして、
+ * その作業のタブ（task.tab）へ直接飛ばす。飛び先は段取りの定義が持っているので、
+ * 文言を直してもリンクが消えない。
+ */
+function TaskRow({ task }: { task: TodayTask }) {
+  const href = task.tab ? `/tenders/${task.tenderId}?tab=${task.tab}` : `/tenders/${task.tenderId}`;
+  // 期限が取れていないものを「急がない」扱いにしない。色は付けず、文字で未確認と書く
+  const overdue = task.daysLeft !== null && task.daysLeft < 0;
+  const soon = task.daysLeft !== null && task.daysLeft >= 0 && task.daysLeft <= 2;
+  const date = deadlineDate(task.deadline);
+
+  return (
+    <li>
+      <Link prefetch={false} href={href} className="group flex items-start gap-2 px-3 py-2.5 hover:bg-slate-50">
+        <span
+          className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${
+            overdue ? "bg-rose-600" : soon ? "bg-rose-500" : task.daysLeft !== null && task.daysLeft <= 5 ? "bg-amber-500" : "bg-slate-300"
+          }`}
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-baseline gap-2">
+            <StancePill stance={task.stance} />
+            <span className="text-xs font-semibold text-slate-900 group-hover:underline">{task.label}</span>
+            <span
+              className={`ml-auto shrink-0 text-xs tabular-nums ${
+                overdue || soon ? "font-semibold text-rose-700" : "text-slate-500"
+              }`}
+            >
+              {date ? `${date}（${remainingText(task.daysLeft)}）` : remainingText(task.daysLeft)}
+            </span>
+          </div>
+          <p className="mt-1 truncate text-xs text-slate-600">{task.tenderName}</p>
+          {task.note && <p className="mt-0.5 text-xs leading-relaxed text-slate-400">{task.note}</p>}
+        </div>
+        <ChevronRight size={14} className="mt-1 shrink-0 text-slate-300 group-hover:text-slate-500" />
+      </Link>
+    </li>
   );
 }
