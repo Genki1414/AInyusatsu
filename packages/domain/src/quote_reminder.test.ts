@@ -78,6 +78,13 @@ describe("buildQuoteReminderEmail", () => {
     expect(buildQuoteReminderEmail(input).subject).toBe("【再送】お見積りのご依頼（須崎庁舎浄化槽排水ポンプ修繕）");
   });
 
+  // 依頼メール・資料送付メールと同じ。見積書の送り先を書いていなかった
+  it("見積書の送り方を書く", () => {
+    const { body } = buildQuoteReminderEmail(input);
+    expect(body).toContain("お見積りは、その資料メールにご返信いただき、見積書をご添付ください。");
+    expect(body).toContain("このメールにそのままご返信いただく形でも受け取れます。");
+  });
+
   it("宛名・案件名・業種・回答期限・回答ページのURLが入る", () => {
     const { body } = buildQuoteReminderEmail(input);
     expect(body).toContain("東北三上機材株式会社 様");

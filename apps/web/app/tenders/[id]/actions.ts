@@ -1,6 +1,6 @@
 "use server";
 
-import { buildQuoteRequestEmail, groupLotsByTrade, replyToList } from "@ai-nyusatsu-bu/domain";
+import { buildQuoteRequestEmail, groupLotsByTrade, quoteDueText, replyToList } from "@ai-nyusatsu-bu/domain";
 import { inboundEmailDomain, sendEmail } from "@ai-nyusatsu-bu/notifications";
 import { quoteSendMessage, validateQuoteDueAt } from "@ai-nyusatsu-bu/domain";
 import { z } from "zod";
@@ -64,7 +64,9 @@ export async function sendQuoteRequests(
   if (dueAtError) {
     return { error: dueAtError, summary: null };
   }
-  const dueAtLabel = new Date(dueAtIso).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+  // 秒まで出さず、残り日数も併記する（packages/domain/src/quote_due.ts）。
+  // toLocaleString のままだと「2026/10/24 17:00:00」と協力会社に届いていた
+  const dueAtLabel = quoteDueText(dueAtIso);
 
   const { supabase: sb0, orgId, orgName, userName, userEmail } = await requireOrgContext();
 
