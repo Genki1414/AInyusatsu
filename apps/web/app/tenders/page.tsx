@@ -11,7 +11,7 @@
 import { ListChecks, Search } from "lucide-react";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
-import { CollectPill, Panel, Pill, ProposePill, StancePill, btnClass } from "@/components/ui";
+import { CollectPill, DeadlinePill, Panel, Pill, ProposePill, StancePill, btnClass } from "@/components/ui";
 import { requireOrgContext } from "@/lib/auth";
 import { AREA_OPTIONS, ITEM_OPTIONS, PREFECTURE_OPTIONS, QUAL_CATEGORIES, REGION_PREFECTURES } from "@/lib/catalog";
 import {
@@ -418,13 +418,7 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
                   </Link>
                   <span className="text-xs text-slate-500">{agencyName(t.agencies)}</span>
                   {/* 過ぎたことを隠さない。結果を入れる段階だと分かるように */}
-                  {dl != null && dl < 0 && <span className="text-xs text-slate-500">提出期限を過ぎています</span>}
-                  {dl != null && dl >= 0 && (
-                    <span className={`text-xs ${dl <= 3 ? "font-medium text-rose-700" : "text-slate-500"}`}>
-                      提出まで残{dl}日
-                    </span>
-                  )}
-                  {t.submit_deadline === null && <span className="text-xs text-slate-400">提出期限は未確認</span>}
+                  <DeadlinePill label="提出期限" daysLeft={dl} />
                 </li>
               );
             })}
@@ -463,7 +457,7 @@ export default async function TendersPage({ searchParams }: { searchParams: Prom
                   {t.grade && <Pill>{t.grade}</Pill>}
                   {t.areas?.map((a) => <Pill key={a}>{a}</Pill>)}
                   {budget && <Pill>予定価格 {budget}</Pill>}
-                  {dl != null && <Pill tone="blue">提出まで残{dl}日</Pill>}
+                  <DeadlinePill label="提出期限" daysLeft={dl} />
                 </div>
                 {verdict.kind === "対象外" && (
                   <p className="mt-2 text-xs text-slate-600">{verdict.excludedReason ?? "手動で見送り"}</p>

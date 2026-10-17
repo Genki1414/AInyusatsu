@@ -3,6 +3,7 @@
 // proposals.status）にあわせて移植したもの。文言はプロトタイプのまま変えない。
 import { AlertTriangle, CheckCircle2, X } from "lucide-react";
 import type { ReactNode } from "react";
+import { remainingText } from "@ai-nyusatsu-bu/domain";
 
 export function Panel({
   title,
@@ -103,6 +104,26 @@ export function ProposePill({ s }: { s: string }) {
     <span className={`inline-block whitespace-nowrap rounded border px-1.5 py-0.5 text-xs ${PROPOSE_STYLE[s] ?? PILL_TONES.slate}`}>
       {s}
     </span>
+  );
+}
+
+/**
+ * 期限の表示。残り日数の文言と色を1か所で決める。
+ *
+ * 画面ごとに `提出まで残{N}日` と手書きしていたため、期限を過ぎた案件で
+ * **「提出まで残-3日」** と出ていた（2026-10-17 に実機で確認）。
+ * 文言は packages/domain の remainingText に揃える。
+ *
+ * 期限が取れていない場合も黙らず「◯◯は未確認」と出す
+ * （CLAUDE.md 最重要の前提5・7。取れていないことを隠さない）。
+ */
+export function DeadlinePill({ label, daysLeft }: { label: string; daysLeft: number | null }) {
+  if (daysLeft === null) return <Pill>{label}は未確認</Pill>;
+  const tone = daysLeft <= 2 ? "rose" : daysLeft <= 5 ? "amber" : "blue";
+  return (
+    <Pill tone={tone}>
+      {label} {remainingText(daysLeft)}
+    </Pill>
   );
 }
 

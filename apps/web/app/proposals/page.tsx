@@ -5,7 +5,7 @@
 import { Download, ListChecks } from "lucide-react";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
-import { Bar, Panel, Pill, ProposePill, ReasonIcon, Verdict, btnClass, verdictBarTone } from "@/components/ui";
+import { Bar, DeadlinePill, Panel, Pill, ProposePill, ReasonIcon, Verdict, btnClass, verdictBarTone } from "@/components/ui";
 import { requireOrgContext } from "@/lib/auth";
 import { daysUntilDeadline } from "@ai-nyusatsu-bu/domain";
 import { setProposalStatus } from "./actions";
@@ -125,7 +125,7 @@ export default async function ProposalsPage() {
                   <ProposePill s={p.status} />
                   {t.item && <Pill>{t.item}</Pill>}
                   {t.grade && <Pill>{t.grade}</Pill>}
-                  {dl != null && <Pill tone="blue">提出まで残{dl}日</Pill>}
+                  <DeadlinePill label="提出期限" daysLeft={dl} />
                 </div>
               </div>
               <div className="w-full max-w-[220px] sm:w-56">
